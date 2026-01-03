@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use crate::application::services::{AdminService, StringService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -19,6 +20,12 @@ pub struct AppState {
 
     /// Detected Redis capabilities
     pub capabilities: Arc<RedisCapabilities>,
+
+    /// String operations service
+    pub string_service: Arc<StringService>,
+
+    /// Admin operations service
+    pub admin_service: Arc<AdminService>,
 }
 
 impl AppState {
@@ -28,10 +35,15 @@ impl AppState {
         config: Arc<Settings>,
         capabilities: Arc<RedisCapabilities>,
     ) -> Self {
+        let string_service = Arc::new(StringService::new(pool.clone()));
+        let admin_service = Arc::new(AdminService::new(pool.clone()));
+
         Self {
             pool,
             config,
             capabilities,
+            string_service,
+            admin_service,
         }
     }
 }

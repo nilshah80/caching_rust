@@ -2,10 +2,12 @@
 //!
 //! Route definitions for all API endpoints.
 
+mod admin;
 mod health;
 mod openapi;
 mod strings;
 
+pub use admin::admin_routes;
 pub use health::health_routes;
 pub use openapi::openapi_routes;
 pub use strings::string_routes;
@@ -22,6 +24,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(health_routes())
         // Always available - core Redis types
         .merge(string_routes())
+        // Admin endpoints
+        .merge(admin_routes())
         // OpenAPI documentation
         .merge(openapi_routes());
 

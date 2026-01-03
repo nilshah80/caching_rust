@@ -294,10 +294,11 @@ impl Settings {
             .set_default("admin.api_key", "changeme-admin-key")?
             .set_default("log.level", "info")?
             .set_default("log.format", "json")?
-            // Load from environment with prefix and separator
+            // Load from environment with double underscore separator for nested config
+            // e.g., ADMIN__API_KEY maps to admin.api_key
             .add_source(
                 Environment::default()
-                    .separator("_")
+                    .separator("__")
                     .try_parsing(true)
             )
             .build()?;
