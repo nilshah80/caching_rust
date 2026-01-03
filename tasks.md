@@ -1129,41 +1129,57 @@ impl InstrumentedPool {
 
 - [ ] **Task 3.6.5**: Create Stream request/response schemas
 
-### 3.7 Key Operations
-- [ ] **Task 3.7.1**: Implement Key repository trait
-- [ ] **Task 3.7.2**: Implement Key operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | DEL | `del` | High |
-  | EXISTS | `exists` | High |
-  | EXPIRE | `expire` | High |
-  | EXPIREAT | `expire_at` | High |
-  | EXPIRETIME | `expire_time` | Medium |
-  | TTL | `ttl` | High |
-  | PTTL | `pttl` | High |
-  | PERSIST | `persist` | High |
-  | KEYS | `keys` (with warning for production) | Medium |
-  | SCAN | `scan` | High |
-  | RANDOMKEY | `random_key` | Low |
-  | RENAME | `rename` | High |
-  | RENAMENX | `rename_nx` | Medium |
-  | TYPE | `type_of` | High |
-  | OBJECT ENCODING | `object_encoding` | Medium |
-  | OBJECT FREQ | `object_freq` | Low |
-  | OBJECT IDLETIME | `object_idletime` | Low |
-  | OBJECT REFCOUNT | `object_refcount` | Low |
-  | TOUCH | `touch` | Low |
-  | UNLINK | `unlink` | Medium |
-  | WAIT | `wait` | Low |
-  | DUMP | `dump` | Medium |
-  | RESTORE | `restore` | Medium |
-  | MIGRATE | `migrate` | Low |
-  | SORT | `sort` | Medium |
-  | SORT_RO | `sort_ro` | Low |
-  | COPY | `copy` | Medium |
+### 3.7 Key Operations ✅ COMPLETED
+- [x] **Task 3.7.1**: Implement Key repository trait
+  - Created `src/domain/repositories/key_repository.rs` with 25+ async methods
+  - Created `src/domain/entities/key_info.rs` with domain entities
+- [x] **Task 3.7.2**: Implement Key operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | DEL | `delete` | ✅ |
+  | EXISTS | `exists` | ✅ |
+  | EXPIRE | `expire` | ✅ |
+  | EXPIREAT | `expire_at` | ✅ |
+  | EXPIRETIME | `expire_time` | ✅ |
+  | PEXPIRE | `pexpire` | ✅ |
+  | PEXPIREAT | `pexpire_at` | ✅ |
+  | PEXPIRETIME | `pexpire_time` | ✅ |
+  | TTL | `ttl` | ✅ |
+  | PTTL | `pttl` | ✅ |
+  | PERSIST | `persist` | ✅ |
+  | KEYS | `keys` | ✅ |
+  | SCAN | `scan` | ✅ |
+  | RANDOMKEY | `random_key` | ✅ |
+  | RENAME | `rename` | ✅ |
+  | RENAMENX | `rename_nx` | ✅ |
+  | TYPE | `key_type` | ✅ |
+  | OBJECT ENCODING | `object_encoding` | ✅ |
+  | OBJECT FREQ | `object_freq` | ✅ |
+  | OBJECT IDLETIME | `object_idletime` | ✅ |
+  | OBJECT REFCOUNT | `object_refcount` | ✅ |
+  | TOUCH | `touch` | ✅ |
+  | UNLINK | `unlink` | ✅ |
+  | DUMP | `dump` | ✅ |
+  | RESTORE | `restore` | ✅ |
+  | COPY | `copy` | ✅ |
 
-- [ ] **Task 3.7.3**: Create Key API routes
-- [ ] **Task 3.7.4**: Create Key request/response schemas
+  Not implemented (low priority):
+  - WAIT (requires replica awareness)
+  - MIGRATE (requires cluster mode)
+  - SORT/SORT_RO (complex, rarely used via API)
+
+- [x] **Task 3.7.3**: Create Key API routes
+  - Created `src/api/http/routes/keys.rs` with 18 endpoints
+  - Integrated with router in `src/api/http/routes/mod.rs`
+- [x] **Task 3.7.4**: Create Key request/response schemas
+  - Created `src/api/http/schemas/keys.rs` with DTOs
+- [x] **Task 3.7.5**: Create Key application service
+  - Created `src/application/services/key_service.rs` with validation
+  - Added to `src/shared/app_state.rs`
+- [x] **Task 3.7.6**: Add tests and documentation
+  - Unit tests in service layer
+  - Integration tests for routes
+  - Updated README with Key operations
 
 ---
 

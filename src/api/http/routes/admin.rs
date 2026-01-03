@@ -1404,7 +1404,7 @@ mod tests {
         assert_eq!(default_slowlog_count(), 10);
         assert_eq!(default_genpass_bits(), 256);
 
-        let (state, _, _) = test_state();
+        let (state, _, _, _) = test_state();
         let ok = verify_admin_key(&auth_headers(&state.config.admin.api_key), &state);
         assert!(ok.is_ok());
         let bad = verify_admin_key(&HeaderMap::new(), &state);
@@ -1418,7 +1418,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_admin_handlers() {
-        let (state, _, _) = test_state();
+        let (state, _, _, _) = test_state();
         let auth = auth_headers(&state.config.admin.api_key);
         let state = State(state);
 

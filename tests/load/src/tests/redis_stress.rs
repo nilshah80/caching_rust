@@ -314,11 +314,11 @@ pub async fn test_command_pipeline(base_url: &str) -> Result<TestResult> {
 
 async fn run_write_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     key_count: usize,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "WritePhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(move |c| async move {
@@ -333,11 +333,11 @@ async fn run_write_phase(
 
 async fn run_read_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     key_count: usize,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "ReadPhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(move |c| async move {
@@ -351,10 +351,10 @@ async fn run_read_phase(
 
 async fn run_connection_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "ConnectionPhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(|c| async move {
@@ -374,12 +374,12 @@ async fn run_connection_phase(
 
 async fn run_expiring_write_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     key_count: usize,
     ttl: u64,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "ExpiringWritePhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(move |c| async move {
@@ -394,11 +394,11 @@ async fn run_expiring_write_phase(
 
 async fn run_expiring_read_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     key_count: usize,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "ExpiringReadPhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(move |c| async move {
@@ -413,11 +413,11 @@ async fn run_expiring_read_phase(
 
 async fn run_memory_pressure_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     value_size: usize,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "MemoryPressurePhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
     let value = generate_value(value_size);
 
     runner
@@ -441,11 +441,11 @@ async fn run_memory_pressure_phase(
 
 async fn run_pipeline_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     batch_size: usize,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "PipelinePhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(move |c| async move {

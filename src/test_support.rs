@@ -6,16 +6,18 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, StringService};
+use crate::application::services::{AdminService, KeyService, StringService};
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    ClientPauseOptions, CopyKeyOptions, CopyOptions, CopyResult, DeleteResult, DumpResult,
+    ExistsResult, ExpireOptions, ExpireResult, FlushOptions, FlushResult, KeyInfo, LatencyEvent,
+    MemoryStats, MemoryUsage, MoveKeyOptions, PersistResult, RandomKeyResult, RenameResult,
+    ScanResult, ServerInfo, ServerTime, SlowlogEntry, TouchResult,
     AppendResult, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult,
     SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::{AdminRepository, StringRepository};
+use crate::domain::repositories::{AdminRepository, KeyRepository, StringRepository};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -427,22 +429,289 @@ impl AdminRepository for MockAdminRepository {
     }
 }
 
+#[derive(Default)]
+pub struct MockKeyRepository {
+    store: Mutex<HashMap<String, String>>,
+}
+
+impl MockKeyRepository {
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn insert(&self, key: &str, value: &str) {
+        self.store.lock().expect("store lock").insert(key.to_string(), value.to_string());
+    }
+}
+
+#[async_trait]
+impl KeyRepository for MockKeyRepository {
+    async fn delete(&self, keys: &[String]) -> Result<DeleteResult, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let mut deleted = Vec::new();
+        let mut not_found = Vec::new();
+        for key in keys {
+            if store.remove(key).is_some() {
+                deleted.push(key.clone());
+            } else {
+                not_found.push(key.clone());
+            }
+        }
+        let count = deleted.len();
+        Ok(DeleteResult { deleted, not_found, count })
+    }
+
+    async fn exists(&self, keys: &[String]) -> Result<ExistsResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let mut existing = Vec::new();
+        let mut missing = Vec::new();
+        for key in keys {
+            if store.contains_key(key) {
+                existing.push(key.clone());
+            } else {
+                missing.push(key.clone());
+            }
+        }
+        let count = existing.len();
+        Ok(ExistsResult { existing, missing, count })
+    }
+
+    async fn expire(&self, key: &str, _seconds: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+    }
+
+    async fn expire_at(&self, key: &str, _timestamp: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+    }
+
+    async fn pexpire(&self, key: &str, _milliseconds: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+    }
+
+    async fn pexpire_at(&self, key: &str, _timestamp: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+    }
+
+    async fn ttl(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(-1) // No TTL set
+        } else {
+            Ok(-2) // Key doesn't exist
+        }
+    }
+
+    async fn pttl(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(-1) // No TTL set
+        } else {
+            Ok(-2) // Key doesn't exist
+        }
+    }
+
+    async fn persist(&self, key: &str) -> Result<PersistResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(PersistResult { key: key.to_string(), success: store.contains_key(key) })
+    }
+
+    async fn key_type(&self, key: &str) -> Result<String, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok("string".to_string())
+        } else {
+            Ok("none".to_string())
+        }
+    }
+
+    async fn rename(&self, key: &str, new_key: &str) -> Result<RenameResult, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(value) = store.remove(key) {
+            store.insert(new_key.to_string(), value);
+            Ok(RenameResult { old_key: key.to_string(), new_key: new_key.to_string(), success: true })
+        } else {
+            Err(CacheError::KeyNotFound(key.to_string()))
+        }
+    }
+
+    async fn rename_nx(&self, key: &str, new_key: &str) -> Result<RenameResult, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if store.contains_key(new_key) {
+            return Ok(RenameResult { old_key: key.to_string(), new_key: new_key.to_string(), success: false });
+        }
+        if let Some(value) = store.remove(key) {
+            store.insert(new_key.to_string(), value);
+            Ok(RenameResult { old_key: key.to_string(), new_key: new_key.to_string(), success: true })
+        } else {
+            Err(CacheError::KeyNotFound(key.to_string()))
+        }
+    }
+
+    async fn copy(&self, source: &str, destination: &str, options: CopyOptions) -> Result<CopyResult, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if !options.replace && store.contains_key(destination) {
+            return Ok(CopyResult { source: source.to_string(), destination: destination.to_string(), success: false });
+        }
+        if let Some(value) = store.get(source).cloned() {
+            store.insert(destination.to_string(), value);
+            Ok(CopyResult { source: source.to_string(), destination: destination.to_string(), success: true })
+        } else {
+            Ok(CopyResult { source: source.to_string(), destination: destination.to_string(), success: false })
+        }
+    }
+
+    async fn scan(&self, cursor: u64, pattern: Option<&str>, count: Option<u64>, _key_type: Option<&str>) -> Result<ScanResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let keys: Vec<String> = store.keys()
+            .filter(|k| {
+                if let Some(pat) = pattern {
+                    let pat = pat.replace('*', "");
+                    k.contains(&pat)
+                } else {
+                    true
+                }
+            })
+            .take(count.unwrap_or(10) as usize)
+            .cloned()
+            .collect();
+
+        let key_count = keys.len();
+        let next_cursor = if cursor == 0 && !keys.is_empty() { 0 } else { 0 };
+        Ok(ScanResult { cursor: next_cursor, keys, count: key_count })
+    }
+
+    async fn keys(&self, pattern: &str) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let pat = pattern.replace('*', "");
+        Ok(store.keys()
+            .filter(|k| pat.is_empty() || k.contains(&pat))
+            .cloned()
+            .collect())
+    }
+
+    async fn random_key(&self) -> Result<RandomKeyResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(RandomKeyResult { key: store.keys().next().cloned() })
+    }
+
+    async fn touch(&self, keys: &[String]) -> Result<TouchResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let count = keys.iter().filter(|k| store.contains_key(*k)).count();
+        Ok(TouchResult { count })
+    }
+
+    async fn unlink(&self, keys: &[String]) -> Result<DeleteResult, CacheError> {
+        self.delete(keys).await
+    }
+
+    async fn dump(&self, key: &str) -> Result<DumpResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if let Some(value) = store.get(key) {
+            Ok(DumpResult { key: key.to_string(), data: Some(value.clone()) })
+        } else {
+            Ok(DumpResult { key: key.to_string(), data: None })
+        }
+    }
+
+    async fn restore(&self, key: &str, _ttl: i64, data: &[u8], replace: bool) -> Result<bool, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if !replace && store.contains_key(key) {
+            return Ok(false);
+        }
+        let value = String::from_utf8_lossy(data).to_string();
+        store.insert(key.to_string(), value);
+        Ok(true)
+    }
+
+    async fn object_encoding(&self, key: &str) -> Result<Option<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(Some("embstr".to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn object_idletime(&self, key: &str) -> Result<Option<u64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(Some(0))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn object_refcount(&self, key: &str) -> Result<Option<u64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(Some(1))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn object_freq(&self, key: &str) -> Result<Option<u64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(Some(0))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn key_info(&self, key: &str) -> Result<KeyInfo, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(KeyInfo::new(key.to_string(), "string".to_string(), -1))
+        } else {
+            Ok(KeyInfo::not_found(key.to_string()))
+        }
+    }
+
+    async fn expire_time(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(-1)
+        } else {
+            Ok(-2)
+        }
+    }
+
+    async fn pexpire_time(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if store.contains_key(key) {
+            Ok(-1)
+        } else {
+            Ok(-2)
+        }
+    }
+}
+
 pub fn test_state_with_repos(
     string_repo: Arc<MockStringRepository>,
+    key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
 ) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
     let config = Arc::new(Settings::default());
     let capabilities = Arc::new(RedisCapabilities::default_capabilities());
     let string_service = Arc::new(StringService::new_with_repository(string_repo));
+    let key_service = Arc::new(KeyService::new_with_repository(key_repo));
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, admin_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, key_service, admin_service)
 }
 
-pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockAdminRepository>) {
+pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
     let admin_repo = Arc::new(MockAdminRepository::default());
-    let state = test_state_with_repos(string_repo.clone(), admin_repo.clone());
-    (state, string_repo, admin_repo)
+    let state = test_state_with_repos(string_repo.clone(), key_repo.clone(), admin_repo.clone());
+    (state, string_repo, key_repo, admin_repo)
 }

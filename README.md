@@ -5,6 +5,7 @@ A high-performance Redis caching service built in Rust, providing a clean REST A
 ## Features
 
 - **String Operations**: GET, SET, MGET, MSET, INCR, DECR, APPEND, STRLEN, GETRANGE, SETRANGE, GETEX, GETDEL
+- **Key Operations**: DEL, EXISTS, EXPIRE, TTL, PTTL, PERSIST, TYPE, RENAME, COPY, SCAN, KEYS, RANDOMKEY, TOUCH, UNLINK, DUMP, RESTORE, OBJECT
 - **Admin Operations**: Server info, memory stats, client management, slowlog, latency monitoring, ACL
 - **Connection Pooling**: Instrumented connection pool with metrics
 - **OpenAPI Documentation**: Swagger UI at `/swagger-ui`
@@ -90,6 +91,28 @@ cargo run --release
 | GET | `/api/v1/strings/{key}/range` | Get substring |
 | PATCH | `/api/v1/strings/{key}/range` | Set substring |
 | GET | `/api/v1/strings/{key}/getex` | Get with TTL update |
+
+### Key Operations
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/keys/delete` | Delete multiple keys (DEL/UNLINK) |
+| POST | `/api/v1/keys/exists` | Check if keys exist (EXISTS) |
+| POST | `/api/v1/keys/touch` | Update access time (TOUCH) |
+| GET | `/api/v1/keys/scan` | Scan keys with pattern (SCAN) |
+| GET | `/api/v1/keys` | List keys matching pattern (KEYS) |
+| GET | `/api/v1/keys/random` | Get random key (RANDOMKEY) |
+| GET | `/api/v1/keys/{key}` | Get key info (TYPE, TTL, OBJECT) |
+| DELETE | `/api/v1/keys/{key}` | Delete single key (UNLINK) |
+| GET | `/api/v1/keys/{key}/ttl` | Get TTL in seconds/milliseconds |
+| PATCH | `/api/v1/keys/{key}/expire` | Set expiration (EXPIRE/PEXPIRE) |
+| PATCH | `/api/v1/keys/{key}/persist` | Remove expiration (PERSIST) |
+| GET | `/api/v1/keys/{key}/type` | Get key type (TYPE) |
+| PATCH | `/api/v1/keys/{key}/rename` | Rename key (RENAME/RENAMENX) |
+| POST | `/api/v1/keys/{key}/copy` | Copy key (COPY) |
+| GET | `/api/v1/keys/{key}/dump` | Serialize key (DUMP) |
+| POST | `/api/v1/keys/{key}/restore` | Deserialize key (RESTORE) |
+| GET | `/api/v1/keys/{key}/object` | Object encoding/refcount/idletime |
 
 ### Admin Operations (API Key Required)
 
@@ -204,6 +227,58 @@ curl -H "X-Admin-Api-Key: dev-admin-key" \
 curl -X POST http://localhost:8080/api/v1/strings/mget \
   -H "Content-Type: application/json" \
   -d '{"keys": ["key1", "key2", "key3"]}'
+```
+
+### Check Key Existence
+
+```bash
+curl -X POST http://localhost:8080/api/v1/keys/exists \
+  -H "Content-Type: application/json" \
+  -d '{"keys": ["key1", "key2", "nonexistent"]}'
+```
+
+### Scan Keys with Pattern
+
+```bash
+curl "http://localhost:8080/api/v1/keys/scan?pattern=key*&count=10"
+```
+
+### Get Key Info
+
+```bash
+curl http://localhost:8080/api/v1/keys/mykey
+```
+
+### Set Key Expiration
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/keys/mykey/expire \
+  -H "Content-Type: application/json" \
+  -d '{"seconds": 3600}'
+```
+
+### Rename Key
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/keys/oldkey/rename \
+  -H "Content-Type: application/json" \
+  -d '{"new_key": "newkey", "nx": false}'
+```
+
+### Copy Key
+
+```bash
+curl -X POST http://localhost:8080/api/v1/keys/sourcekey/copy \
+  -H "Content-Type: application/json" \
+  -d '{"destination": "destkey", "replace": false}'
+```
+
+### Delete Multiple Keys
+
+```bash
+curl -X POST http://localhost:8080/api/v1/keys/delete \
+  -H "Content-Type: application/json" \
+  -d '{"keys": ["key1", "key2"], "async_delete": false}'
 ```
 
 ## Development

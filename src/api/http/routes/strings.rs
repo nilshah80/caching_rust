@@ -425,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_string_handlers() {
-        let (state, string_repo, _) = test_state();
+        let (state, string_repo, _, _) = test_state();
         let state = State(state);
 
         // Missing key -> KeyNotFound

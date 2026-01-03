@@ -4,11 +4,13 @@
 
 mod admin;
 mod health;
+mod keys;
 mod openapi;
 mod strings;
 
 pub use admin::admin_routes;
 pub use health::health_routes;
+pub use keys::key_routes;
 pub use openapi::openapi_routes;
 pub use strings::string_routes;
 
@@ -24,6 +26,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(health_routes())
         // Always available - core Redis types
         .merge(string_routes())
+        // Key management operations
+        .merge(key_routes())
         // Admin endpoints
         .merge(admin_routes())
         // OpenAPI documentation
@@ -35,7 +39,6 @@ pub fn build_router(state: AppState) -> Router {
     // - list_routes()
     // - set_routes()
     // - sorted_set_routes()
-    // - key_routes()
     // - stream_routes() (Redis 5.0+)
     // - json_routes() (requires RedisJSON module)
     // - search_routes() (requires RediSearch module)
@@ -55,7 +58,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_router_health() {
-        let (state, _, _) = test_state();
+        let (state, _, _, _) = test_state();
         let app = build_router(state);
         let response = app
             .oneshot(Request::builder().uri("/health").body(axum::body::Body::empty()).unwrap())

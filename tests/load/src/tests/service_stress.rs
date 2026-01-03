@@ -329,7 +329,7 @@ async fn run_phase(
     config: LoadTestConfig,
     _phase_name: &str,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, &metrics.name);
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(|c| async move {
@@ -351,11 +351,11 @@ async fn run_phase(
 
 async fn run_memory_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     value: &str,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "MemoryPhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
     let value = value.to_string();
 
     runner
@@ -379,11 +379,11 @@ async fn run_memory_phase(
 
 async fn run_batch_phase(
     client: &LoadTestClient,
-    _metrics: &SharedMetrics,
+    metrics: &SharedMetrics,
     config: LoadTestConfig,
     batch_size: usize,
 ) -> Result<()> {
-    let runner = LoadTestRunner::new(client.clone(), config, "BatchPhase");
+    let runner = LoadTestRunner::with_shared_metrics(client.clone(), config, metrics.clone());
 
     runner
         .run(move |c| async move {

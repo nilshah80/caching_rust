@@ -125,7 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_readiness_endpoint() {
-        let (state, _, _) = test_state();
+        let (state, _, _, _) = test_state();
         let response = readiness(State(state)).await;
         assert!(matches!(response.0.status.as_str(), "ready" | "not_ready"));
     }

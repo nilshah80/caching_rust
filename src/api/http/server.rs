@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_stub() {
-        let (state, _, _) = test_state();
+        let (state, _, _, _) = test_state();
         let config = ServerConfig::default();
         run(state, &config).await.expect("run");
     }

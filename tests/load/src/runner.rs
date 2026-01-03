@@ -115,6 +115,16 @@ impl LoadTestRunner {
         }
     }
 
+    /// Create runner with shared metrics (for multi-phase tests)
+    pub fn with_shared_metrics(client: LoadTestClient, config: LoadTestConfig, metrics: SharedMetrics) -> Self {
+        Self {
+            client,
+            config,
+            metrics,
+            target_pid: None,
+        }
+    }
+
     /// Set target PID for resource monitoring
     pub fn with_target_pid(mut self, pid: u32) -> Self {
         self.target_pid = Some(pid);
