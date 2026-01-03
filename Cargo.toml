@@ -1,0 +1,105 @@
+[package]
+name = "redis-caching-service"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+authors = ["Nilay Shah"]
+description = "A high-performance Redis caching service with comprehensive Redis operations through a clean REST API"
+license = "MIT"
+
+[dependencies]
+# HTTP Framework
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+
+# Async Runtime
+tokio = { version = "1.48", features = ["full"] }
+
+# Redis with TLS support (using rustls)
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager", "json", "cluster-async", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls-webpki-roots"] }
+deadpool-redis = "0.18"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Validation
+validator = { version = "0.20", features = ["derive"] }
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Error Handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# OpenAPI/Swagger
+utoipa = { version = "5.4", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+
+# Tower middleware
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "timeout"] }
+
+# WebSocket support for Pub/Sub
+tokio-tungstenite = "0.26"
+futures = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["redis"] }
+criterion = { version = "0.5", features = ["async_tokio"] }
+reqwest = { version = "0.12", features = ["json"] }
+
+[[bench]]
+name = "redis_operations"
+harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = false
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.bench]
+inherits = "release"
+debug = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# Enable important lints for production code
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+# Security-focused lints
+implicit_hasher = "warn"
+mem_forget = "warn"
+# Style preferences (less strict than pedantic)
+wildcard_imports = "warn"
+unreadable_literal = "warn"

@@ -14,15 +14,16 @@ This document contains the complete task breakdown for implementing a production
 
 **Problem**: Redis WATCH→MULTI→EXEC requires a single connection, but HTTP is stateless.
 
-**Solution**: All transaction operations are bundled in a single HTTP request. No session state required.
+**Solution**: All transaction operations are bundled in a single HTTP request. Optional WATCH is supported within the same request; no session state required.
 
 ```rust
 // Single-request transaction - all commands executed atomically
 struct TransactionRequest {
-    commands: Vec<RedisCommand>,  // Executed within MULTI/EXEC
+    watch_keys: Option<Vec<String>>, // WATCH is executed before MULTI/EXEC
+    commands: Vec<RedisCommand>,     // Executed within MULTI/EXEC
 }
 
-// For optimistic locking patterns, use Lua scripts instead of WATCH
+// For optimistic locking patterns, provide Lua script helpers (preferred over WATCH)
 struct OptimisticUpdateRequest {
     key: String,
     expected_value: serde_json::Value,
@@ -168,39 +169,39 @@ impl InstrumentedPool {
 ## Phase 1: Foundation & Project Setup
 
 ### 1.1 Project Initialization
-- [ ] **Task 1.1.1**: Initialize Cargo project with workspace structure
+- [x] **Task 1.1.1**: Initialize Cargo project with workspace structure
   - Create `Cargo.toml` with all required dependencies
   - Set up proper feature flags for redis-rs
   - Configure Tokio runtime features
   - **Acceptance**: `cargo build` succeeds with no warnings
 
-- [ ] **Task 1.1.2**: Set up project directory structure
+- [x] **Task 1.1.2**: Set up project directory structure
   - Create all directories as per plan.md architecture
   - Create empty `mod.rs` files for each module
   - Set up `lib.rs` and `main.rs`
   - **Acceptance**: All modules are importable
 
-- [ ] **Task 1.1.3**: Configure development environment
+- [x] **Task 1.1.3**: Configure development environment
   - Create `.env.example` with all configuration variables
   - Create `.gitignore` for Rust projects
   - Set up `rustfmt.toml` and `clippy.toml`
   - **Acceptance**: `cargo clippy` and `cargo fmt --check` pass
 
-- [ ] **Task 1.1.4**: Create Docker development environment
+- [x] **Task 1.1.4**: Create Docker development environment
   - Create `Dockerfile` with multi-stage build
   - Create `docker-compose.yml` with Redis Stack (includes all modules)
   - Include Redis Insight for debugging
   - **Acceptance**: `docker-compose up` starts Redis and app
 
 ### 1.2 Configuration System
-- [ ] **Task 1.2.1**: Implement configuration module
+- [x] **Task 1.2.1**: Implement configuration module
   - Create `Settings` struct with all config fields
   - Implement loading from environment variables
   - Implement loading from config files (optional)
   - Add validation for all config values
   - **Acceptance**: Config loads from `.env` and validates
 
-- [ ] **Task 1.2.2**: Implement configuration types
+- [x] **Task 1.2.2**: Implement configuration types
   ```rust
   #[derive(Debug, Clone, Deserialize)]
   pub struct Settings {
@@ -261,20 +262,20 @@ impl InstrumentedPool {
   - **Acceptance**: All config types serialize/deserialize correctly
 
 ### 1.3 Logging & Tracing
-- [ ] **Task 1.3.1**: Set up tracing infrastructure
+- [x] **Task 1.3.1**: Set up tracing infrastructure
   - Configure `tracing-subscriber` with JSON output
   - Implement env-filter for log levels
   - Add request ID propagation
   - **Acceptance**: Structured logs appear in console
 
-- [ ] **Task 1.3.2**: Create custom logging middleware
+- [x] **Task 1.3.2**: Create custom logging middleware
   - Log request method, path, status, duration
   - Include request ID in all log entries
   - Mask sensitive data (passwords, keys)
   - **Acceptance**: Each request generates structured log entry
 
 ### 1.4 Error Handling
-- [ ] **Task 1.4.1**: Define domain error types
+- [x] **Task 1.4.1**: Define domain error types
   ```rust
   #[derive(Debug, thiserror::Error)]
   pub enum CacheError {
@@ -346,7 +347,7 @@ impl InstrumentedPool {
   ```
   - **Acceptance**: All error types map to HTTP status codes
 
-- [ ] **Task 1.4.2**: Create error response middleware
+- [x] **Task 1.4.2**: Create error response middleware
   - Convert domain errors to HTTP responses
   - Include error code, message, request_id
   - Log errors appropriately
@@ -374,13 +375,13 @@ impl InstrumentedPool {
 ## Phase 2: Redis Connection & Core Infrastructure
 
 ### 2.1 Redis Connection Pool (Command Pool)
-- [ ] **Task 2.1.1**: Implement connection pool with deadpool-redis
+- [x] **Task 2.1.1**: Implement connection pool with deadpool-redis
   - Configure pool size from settings
   - Implement health check on connections
   - Handle connection failures gracefully
   - **Acceptance**: Pool creates min_size connections on startup
 
-- [ ] **Task 2.1.2**: Implement connection manager with instrumentation
+- [x] **Task 2.1.2**: Implement connection manager with instrumentation
   ```rust
   pub struct InstrumentedPool {
       inner: Pool<RedisConnectionManager>,
@@ -439,17 +440,19 @@ impl InstrumentedPool {
   ```
   - **Acceptance**: Pool tracks all metrics including wait times
 
-- [ ] **Task 2.1.3**: Implement connection manager with reconnection
+- [x] **Task 2.1.3**: Implement connection manager with reconnection
   - Create wrapper for redis connection
-  - Add reconnection logic with exponential backoff
-  - Implement connection timeouts
+  - Add reconnection logic with exponential backoff (handled by deadpool-redis internally)
+  - Implement connection timeouts (configured via PoolConfig)
   - **Acceptance**: Connections recover after Redis restart
+  - **Note**: deadpool-redis provides automatic reconnection with backoff
 
-- [ ] **Task 2.1.4**: Add TLS support
-  - Configure TLS from environment
+- [x] **Task 2.1.4**: Add TLS support
+  - Configure TLS from environment (RedisConfig has TLS fields)
   - Support custom CA certificates
   - Support skip-verify option
   - **Acceptance**: Connects to TLS-enabled Redis
+  - **Status**: Implemented - uses rediss:// scheme with rustls, supports #insecure flag for skip-verify
 
 ### 2.2 Pub/Sub Connection Manager (Separate from Pool)
 - [ ] **Task 2.2.1**: Implement dedicated Pub/Sub connection manager
@@ -536,7 +539,7 @@ impl InstrumentedPool {
   - **Acceptance**: Pub/Sub uses dedicated connections with hard limits
 
 ### 2.3 Redis Capability Detection
-- [ ] **Task 2.3.1**: Implement capability detection at startup
+- [x] **Task 2.3.1**: Implement capability detection at startup
   ```rust
   #[derive(Debug, Clone, Serialize)]
   pub struct RedisCapabilities {
@@ -600,7 +603,7 @@ impl InstrumentedPool {
   ```
   - **Acceptance**: Capabilities detected at startup and cached
 
-- [ ] **Task 2.3.2**: Implement capability-gated route registration
+- [x] **Task 2.3.2**: Implement capability-gated route registration
   ```rust
   pub fn build_router(state: AppState) -> Router {
       let capabilities = &state.capabilities;
@@ -648,7 +651,7 @@ impl InstrumentedPool {
   ```
   - **Acceptance**: Unavailable module routes return 501 Not Implemented
 
-- [ ] **Task 2.3.3**: Create capabilities endpoint
+- [x] **Task 2.3.3**: Create capabilities endpoint
   ```rust
   // GET /api/v1/capabilities
   async fn get_capabilities(State(state): State<AppState>) -> Json<RedisCapabilities> {
@@ -658,19 +661,25 @@ impl InstrumentedPool {
   - **Acceptance**: Endpoint returns detected capabilities
 
 ### 2.4 HTTP Server Setup
-- [ ] **Task 2.4.1**: Set up Axum HTTP server
+- [x] **Task 2.4.1**: Set up Axum HTTP server
   - Configure server with graceful shutdown
   - Add CORS middleware
   - Add request timeout middleware
   - **Acceptance**: Server starts and responds to requests
 
-- [ ] **Task 2.4.2**: Implement router structure
+- [ ] **Task 2.4.1a**: Define blocking command request policy (pending)
+  - Require explicit timeout parameter for blocking operations (server-enforced max 30s)
+  - Return HTTP 204 when timeout expires with no data
+  - Provide SSE endpoints for streaming use cases (e.g., XREAD)
+  - **Acceptance**: Blocking endpoints enforce timeouts and return 204 on no data
+
+- [x] **Task 2.4.2**: Implement router structure
   - Create router factory for all routes
   - Organize routes by feature (strings, hashes, etc.)
   - Set up nested routers for `/api/v1`
   - **Acceptance**: All route groups are accessible
 
-- [ ] **Task 2.4.3**: Create application state
+- [x] **Task 2.4.3**: Create application state
   ```rust
   #[derive(Clone)]
   pub struct AppState {
@@ -682,30 +691,31 @@ impl InstrumentedPool {
   ```
   - **Acceptance**: Handlers can access pool, pubsub manager, and config
 
-- [ ] **Task 2.4.4**: Implement health check endpoints
+- [x] **Task 2.4.4**: Implement health check endpoints
   - `GET /health` - Basic health check
   - `GET /health/ready` - Readiness (Redis connected + capabilities loaded)
   - `GET /health/live` - Liveness probe
   - **Acceptance**: K8s probes pass when healthy
 
 ### 2.5 OpenAPI/Swagger Documentation
-- [ ] **Task 2.5.1**: Set up utoipa for OpenAPI generation
+- [x] **Task 2.5.1**: Set up utoipa for OpenAPI generation
   - Configure OpenAPI metadata
   - Add server information
   - Set up security schemes
   - **Acceptance**: OpenAPI spec generated at compile time
 
-- [ ] **Task 2.5.2**: Integrate Swagger UI
+- [x] **Task 2.5.2**: Integrate Swagger UI
   - Serve Swagger UI at `/swagger-ui`
   - Serve OpenAPI JSON at `/api-docs/openapi.json`
   - **Acceptance**: Interactive docs available in browser
+  - **Status**: Implemented - Swagger UI available at /swagger-ui, OpenAPI spec at /api-docs/openapi.json
 
 ---
 
 ## Phase 3: Core Data Types (Port from Go/Node)
 
 ### 3.1 String Operations
-- [ ] **Task 3.1.1**: Implement String repository trait
+- [x] **Task 3.1.1**: Implement String repository trait
   ```rust
   #[async_trait]
   pub trait StringRepository: Send + Sync {
@@ -730,7 +740,7 @@ impl InstrumentedPool {
   }
   ```
 
-- [ ] **Task 3.1.2**: Implement String operations
+- [x] **Task 3.1.2**: Implement String operations
   | Command | Method | Priority |
   |---------|--------|----------|
   | GET | `get` | High |
@@ -753,7 +763,7 @@ impl InstrumentedPool {
   | GETDEL | `get_del` | Medium |
   - **Acceptance**: All string operations pass unit tests
 
-- [ ] **Task 3.1.3**: Create String API routes
+- [x] **Task 3.1.3**: Create String API routes
   - `GET /api/v1/strings/:key`
   - `PUT /api/v1/strings/:key`
   - `DELETE /api/v1/strings/:key` (GETDEL)
@@ -765,7 +775,7 @@ impl InstrumentedPool {
   - `PATCH /api/v1/strings/:key/range`
   - **Acceptance**: All routes return correct responses
 
-- [ ] **Task 3.1.4**: Create String request/response schemas
+- [x] **Task 3.1.4**: Create String request/response schemas
   ```rust
   #[derive(Debug, Serialize, Deserialize, ToSchema)]
   pub struct SetStringRequest {
@@ -1582,6 +1592,17 @@ impl InstrumentedPool {
       pub async fn execute(&self, request: TransactionRequest) -> Result<TransactionResponse, CacheError> {
           let mut conn = self.pool.get().await?;
 
+          // Optional WATCH for optimistic locking within this single request
+          if let Some(keys) = &request.watch_keys {
+              if !keys.is_empty() {
+                  redis::cmd("WATCH")
+                      .arg(keys)
+                      .query_async::<()>(&mut *conn)
+                      .await
+                      .map_err(|e| CacheError::TransactionFailed(e.to_string()))?;
+              }
+          }
+
           // Build pipeline with MULTI/EXEC
           let mut pipe = redis::pipe();
           pipe.atomic(); // Wraps in MULTI/EXEC
@@ -1694,6 +1715,7 @@ impl InstrumentedPool {
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct TransactionRequest {
       /// Commands to execute atomically (wrapped in MULTI/EXEC)
+      pub watch_keys: Option<Vec<String>>,
       pub commands: Vec<RedisCommand>,
   }
 

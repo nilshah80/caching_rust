@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # Redis Stack (includes RedisJSON, RediSearch, RedisBloom, RedisTimeSeries)
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis-stack
+    ports:
+      - "6379:6379"
+      - "8001:8001"  # RedisInsight
+    environment:
+      - REDIS_ARGS=--requirepass devpassword
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "devpassword", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Caching Service
+  caching-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caching-service
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - REDIS_URL=redis://:devpassword@redis:6379
+      - POOL_MIN_SIZE=2
+      - POOL_MAX_SIZE=10
+      - ADMIN_API_KEY=dev-admin-key
+      - LOG_LEVEL=debug
+      - LOG_FORMAT=pretty
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  redis-data:
