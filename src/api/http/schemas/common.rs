@@ -79,3 +79,16 @@ pub struct KeyInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_common_defaults() {
+        assert_eq!(default_page(), 1);
+        assert_eq!(default_limit(), 100);
+        assert_eq!(default_cursor(), "0");
+        assert_eq!(default_count(), 10);
+    }
+}

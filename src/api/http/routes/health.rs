@@ -108,3 +108,25 @@ async fn readiness(State(state): State<AppState>) -> Json<ReadinessResponse> {
         capabilities: (*state.capabilities).clone(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_state;
+
+    #[tokio::test]
+    async fn test_health_endpoints() {
+        let health = health().await;
+        assert_eq!(health.0.status, "healthy");
+
+        let live = liveness().await;
+        assert_eq!(live.0.status, "alive");
+    }
+
+    #[tokio::test]
+    async fn test_readiness_endpoint() {
+        let (state, _, _) = test_state();
+        let response = readiness(State(state)).await;
+        assert!(matches!(response.0.status.as_str(), "ready" | "not_ready"));
+    }
+}

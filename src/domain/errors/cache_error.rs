@@ -165,6 +165,8 @@ impl From<deadpool_redis::CreatePoolError> for CacheError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deadpool_redis::{BuildError, CreatePoolError, PoolError};
+    use redis::ErrorKind;
 
     #[test]
     fn test_error_status_codes() {
@@ -196,5 +198,121 @@ mod tests {
             CacheError::ModuleNotAvailable("json".into()).error_code(),
             "MODULE_NOT_AVAILABLE"
         );
+    }
+
+    #[test]
+    fn test_error_response_from_error() {
+        let error = CacheError::InvalidInput("bad".into());
+        let response = ErrorResponse::from_error(&error, Some("req-1".to_string()));
+        assert_eq!(response.error.code, "INVALID_INPUT");
+        assert_eq!(response.request_id.as_deref(), Some("req-1"));
+    }
+
+    #[test]
+    fn test_into_response_no_content() {
+        let response = CacheError::BlockingTimeout.into_response();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[test]
+    fn test_error_status_codes_additional() {
+        assert_eq!(
+            CacheError::ConnectionFailed("x".into()).status_code(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            CacheError::PoolError("x".into()).status_code(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            CacheError::SubscriptionLimitReached.status_code(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            CacheError::ModuleNotAvailable("x".into()).status_code(),
+            StatusCode::NOT_IMPLEMENTED
+        );
+        assert_eq!(
+            CacheError::TypeMismatch {
+                key: "k".into(),
+                expected_type: "string".into(),
+                actual_type: "list".into(),
+            }
+            .status_code(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            CacheError::TransactionFailed("x".into()).status_code(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            CacheError::ScriptError("x".into()).status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(CacheError::Timeout.status_code(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            CacheError::RedisError(redis::RedisError::from((ErrorKind::TypeError, "err")))
+                .status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            CacheError::Internal("x".into()).status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn test_error_codes_additional() {
+        assert_eq!(CacheError::Timeout.error_code(), "TIMEOUT");
+        assert_eq!(CacheError::PoolError("x".into()).error_code(), "POOL_ERROR");
+        assert_eq!(
+            CacheError::TypeMismatch {
+                key: "k".into(),
+                expected_type: "string".into(),
+                actual_type: "list".into(),
+            }
+            .error_code(),
+            "TYPE_MISMATCH"
+        );
+        assert_eq!(CacheError::ScriptError("x".into()).error_code(), "SCRIPT_ERROR");
+        assert_eq!(
+            CacheError::RedisError(redis::RedisError::from((ErrorKind::TypeError, "err"))).error_code(),
+            "REDIS_ERROR"
+        );
+    }
+
+    #[test]
+    fn test_error_codes_more() {
+        assert_eq!(
+            CacheError::ConnectionFailed("x".into()).error_code(),
+            "CONNECTION_FAILED"
+        );
+        assert_eq!(
+            CacheError::SubscriptionLimitReached.error_code(),
+            "SUBSCRIPTION_LIMIT_REACHED"
+        );
+        assert_eq!(CacheError::BlockingTimeout.error_code(), "BLOCKING_TIMEOUT");
+        assert_eq!(
+            CacheError::TransactionFailed("x".into()).error_code(),
+            "TRANSACTION_FAILED"
+        );
+        assert_eq!(CacheError::Unauthorized.error_code(), "UNAUTHORIZED");
+        assert_eq!(CacheError::Internal("x".into()).error_code(), "INTERNAL_ERROR");
+    }
+
+    #[test]
+    fn test_into_response_with_body() {
+        let response = CacheError::InvalidInput("bad".into()).into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_from_deadpool_errors() {
+        let pool_error: CacheError = PoolError::Closed.into();
+        assert!(matches!(pool_error, CacheError::PoolError(_)));
+
+        let build_error = CreatePoolError::Build(BuildError::NoRuntimeSpecified);
+        let pool_error: CacheError = build_error.into();
+        assert!(matches!(pool_error, CacheError::ConnectionFailed(_)));
     }
 }

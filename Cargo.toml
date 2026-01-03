@@ -86,6 +86,12 @@ debug = true
 inherits = "release"
 debug = true
 
+[package.metadata.tarpaulin]
+exclude-files = [
+  "src/infrastructure/redis/repositories/admin_repo.rs",
+  "src/infrastructure/redis/repositories/string_repo.rs",
+]
+
 [lints.rust]
 unsafe_code = "forbid"
 

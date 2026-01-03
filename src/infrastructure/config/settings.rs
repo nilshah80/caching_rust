@@ -266,6 +266,28 @@ impl Default for LogConfig {
     }
 }
 
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            api_key: "changeme-admin-key".to_string(),
+        }
+    }
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            redis: RedisConfig::default(),
+            pool: PoolConfig::default(),
+            pubsub: PubSubConfig::default(),
+            blocking: BlockingConfig::default(),
+            admin: AdminConfig::default(),
+            log: LogConfig::default(),
+        }
+    }
+}
+
 impl Settings {
     /// Load settings from environment variables
     pub fn load() -> anyhow::Result<Self> {
@@ -352,5 +374,21 @@ mod tests {
         assert_eq!(config.max_subscriptions, 100);
         assert_eq!(config.connection_timeout_ms, 30000);
         assert_eq!(config.idle_timeout_ms, 300_000);
+    }
+
+    #[test]
+    fn test_default_settings() {
+        let settings = Settings::default();
+        assert_eq!(settings.server.host, "0.0.0.0");
+        assert_eq!(settings.redis.url, "redis://localhost:6379");
+        assert_eq!(settings.admin.api_key, "changeme-admin-key");
+        assert_eq!(settings.log.level, "info");
+    }
+
+    #[test]
+    fn test_settings_load_defaults() {
+        let settings = Settings::load().expect("settings load");
+        assert!(settings.server.port > 0);
+        assert!(!settings.admin.api_key.is_empty());
     }
 }

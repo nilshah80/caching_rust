@@ -151,4 +151,43 @@ mod tests {
         assert!(!RedisCapabilities::version_gte("6.2.0", "7.0.0"));
         assert!(RedisCapabilities::version_gte("7.0.0", "6.0.0"));
     }
+
+    #[test]
+    fn test_detect_module() {
+        let modules = vec![
+            vec!["name".to_string(), "ReJSON".to_string()],
+            vec!["name".to_string(), "search".to_string()],
+        ];
+        assert!(RedisCapabilities::detect_module(&modules, "rejson"));
+        assert!(RedisCapabilities::detect_module(&modules, "search"));
+        assert!(!RedisCapabilities::detect_module(&modules, "timeseries"));
+    }
+
+    #[test]
+    fn test_default_capabilities() {
+        let caps = RedisCapabilities::default_capabilities();
+        assert_eq!(caps.redis_version, "unknown");
+        assert!(!caps.modules.json);
+        assert!(caps.features.streams);
+    }
+
+    #[test]
+    fn test_feature_capabilities_default() {
+        let caps = FeatureCapabilities::default();
+        assert!(caps.streams);
+        assert!(caps.acl);
+        assert!(!caps.functions);
+        assert!(!caps.cluster);
+    }
+
+    #[test]
+    fn test_parse_version_missing() {
+        let info = "# Server\nredis_git_sha1:00000000";
+        assert_eq!(RedisCapabilities::parse_version(info), "unknown");
+    }
+
+    #[test]
+    fn test_version_comparison_shorter_current() {
+        assert!(!RedisCapabilities::version_gte("7.0", "7.0.1"));
+    }
 }

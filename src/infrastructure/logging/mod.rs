@@ -18,16 +18,45 @@ pub fn init(settings: &Settings) -> anyhow::Result<()> {
 
     // Use JSON format in production, pretty format in development
     if settings.log.format == "json" {
-        tracing_subscriber::registry()
+        let registry = tracing_subscriber::registry()
             .with(env_filter)
-            .with(fmt_layer.json())
-            .init();
+            .with(fmt_layer.json());
+        #[cfg(test)]
+        {
+            let _ = registry.try_init();
+        }
+        #[cfg(not(test))]
+        {
+            registry.init();
+        }
     } else {
-        tracing_subscriber::registry()
+        let registry = tracing_subscriber::registry()
             .with(env_filter)
-            .with(fmt_layer)
-            .init();
+            .with(fmt_layer);
+        #[cfg(test)]
+        {
+            let _ = registry.try_init();
+        }
+        #[cfg(not(test))]
+        {
+            registry.init();
+        }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_logging_init_json_and_pretty() {
+        let mut settings = Settings::default();
+        settings.log.format = "json".to_string();
+        init(&settings).expect("json init");
+
+        settings.log.format = "pretty".to_string();
+        init(&settings).expect("pretty init");
+    }
 }

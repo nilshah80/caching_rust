@@ -17,15 +17,18 @@ use crate::infrastructure::redis::repositories::RedisAdminRepository;
 
 /// Service for admin operations
 pub struct AdminService {
-    repository: RedisAdminRepository,
+    repository: Arc<dyn AdminRepository>,
 }
 
 impl AdminService {
     /// Create a new AdminService
     pub fn new(pool: Arc<InstrumentedPool>) -> Self {
-        Self {
-            repository: RedisAdminRepository::new(pool),
-        }
+        Self::new_with_repository(Arc::new(RedisAdminRepository::new(pool)))
+    }
+
+    /// Create an AdminService with a custom repository (useful for testing)
+    pub fn new_with_repository(repository: Arc<dyn AdminRepository>) -> Self {
+        Self { repository }
     }
 
     // ========================================================================
@@ -314,5 +317,197 @@ impl AdminService {
     /// Get ACL log entries
     pub async fn acl_log(&self, count: Option<i64>, reset: bool) -> Result<Vec<AclLogEntry>, CacheError> {
         self.repository.acl_log(count, reset).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use crate::infrastructure::redis::connection::InstrumentedPool;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct CaptureAdminRepo {
+        samples: Mutex<Option<u32>>,
+        pause: Mutex<Option<ClientPauseOptions>>,
+        slowlog_count: Mutex<Option<i64>>,
+        genpass_bits: Mutex<Option<u32>>,
+    }
+
+    #[async_trait]
+    impl AdminRepository for CaptureAdminRepo {
+        async fn get_server_info(&self) -> Result<ServerInfo, CacheError> {
+            Ok(ServerInfo::default())
+        }
+        async fn get_server_time(&self) -> Result<ServerTime, CacheError> {
+            Ok(ServerTime { timestamp: 1, microseconds: 2 })
+        }
+        async fn get_db_size(&self) -> Result<i64, CacheError> {
+            Ok(0)
+        }
+        async fn get_last_save(&self) -> Result<i64, CacheError> {
+            Ok(0)
+        }
+        async fn get_memory_stats(&self) -> Result<MemoryStats, CacheError> {
+            Ok(MemoryStats::default())
+        }
+        async fn get_memory_usage(&self, key: &str, samples: u32) -> Result<MemoryUsage, CacheError> {
+            *self.samples.lock().expect("lock") = Some(samples);
+            Ok(MemoryUsage { key: key.to_string(), bytes: Some(1) })
+        }
+        async fn memory_doctor(&self) -> Result<String, CacheError> {
+            Ok("OK".to_string())
+        }
+        async fn memory_purge(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn flush_db(&self, options: FlushOptions) -> Result<FlushResult, CacheError> {
+            Ok(FlushResult { success: true, mode: if options.async_mode { "ASYNC" } else { "SYNC" }.to_string() })
+        }
+        async fn flush_all(&self, options: FlushOptions) -> Result<FlushResult, CacheError> {
+            Ok(FlushResult { success: true, mode: if options.async_mode { "ASYNC" } else { "SYNC" }.to_string() })
+        }
+        async fn copy_key(&self, _options: CopyKeyOptions) -> Result<bool, CacheError> {
+            Ok(true)
+        }
+        async fn move_key(&self, _options: MoveKeyOptions) -> Result<bool, CacheError> {
+            Ok(true)
+        }
+        async fn swap_db(&self, _db1: u8, _db2: u8) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn config_get(&self, _pattern: &str) -> Result<HashMap<String, String>, CacheError> {
+            Ok(HashMap::new())
+        }
+        async fn config_set(&self, _parameter: &str, _value: &str) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn config_rewrite(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn config_resetstat(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn save(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
+            Ok(BgSaveResult { started: true, message: "OK".to_string() })
+        }
+        async fn bgrewriteaof(&self) -> Result<BgRewriteAofResult, CacheError> {
+            Ok(BgRewriteAofResult { started: true, message: "OK".to_string() })
+        }
+        async fn client_list(&self) -> Result<Vec<ClientInfo>, CacheError> {
+            Ok(vec![])
+        }
+        async fn client_kill(&self, _options: ClientKillOptions) -> Result<i64, CacheError> {
+            Ok(0)
+        }
+        async fn client_pause(&self, options: ClientPauseOptions) -> Result<(), CacheError> {
+            *self.pause.lock().expect("lock") = Some(options);
+            Ok(())
+        }
+        async fn client_unpause(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn client_setname(&self, _name: &str) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn client_getname(&self) -> Result<Option<String>, CacheError> {
+            Ok(None)
+        }
+        async fn client_id(&self) -> Result<i64, CacheError> {
+            Ok(0)
+        }
+        async fn slowlog_get(&self, count: i64) -> Result<Vec<SlowlogEntry>, CacheError> {
+            *self.slowlog_count.lock().expect("lock") = Some(count);
+            Ok(vec![])
+        }
+        async fn slowlog_len(&self) -> Result<i64, CacheError> {
+            Ok(0)
+        }
+        async fn slowlog_reset(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn latency_latest(&self) -> Result<Vec<LatencyEvent>, CacheError> {
+            Ok(vec![])
+        }
+        async fn latency_history(&self, event: &str) -> Result<Vec<LatencyEvent>, CacheError> {
+            Ok(vec![LatencyEvent { event: event.to_string(), timestamp: 1, latency_ms: 1 }])
+        }
+        async fn latency_doctor(&self) -> Result<String, CacheError> {
+            Ok("OK".to_string())
+        }
+        async fn latency_reset(&self, _events: &[String]) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn acl_list(&self) -> Result<Vec<String>, CacheError> {
+            Ok(vec![])
+        }
+        async fn acl_users(&self) -> Result<Vec<String>, CacheError> {
+            Ok(vec![])
+        }
+        async fn acl_whoami(&self) -> Result<String, CacheError> {
+            Ok("default".to_string())
+        }
+        async fn acl_cat(&self, _category: Option<&str>) -> Result<Vec<String>, CacheError> {
+            Ok(vec![])
+        }
+        async fn acl_genpass(&self, bits: u32) -> Result<String, CacheError> {
+            *self.genpass_bits.lock().expect("lock") = Some(bits);
+            Ok("pass".to_string())
+        }
+        async fn acl_log(&self, _count: Option<i64>, _reset: bool) -> Result<Vec<AclLogEntry>, CacheError> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn test_admin_service_validation() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+
+        let err = service.copy_key("".to_string(), "dest".to_string(), None, false).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.copy_key("src".to_string(), "".to_string(), None, false).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.move_key("".to_string(), 1).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.config_get("").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.config_set("", "v").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.latency_history("").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_admin_service_defaults() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo.clone());
+
+        service.get_memory_usage("k", None).await.expect("memory usage");
+        assert_eq!(*repo.samples.lock().expect("lock"), Some(5));
+
+        service.client_pause(100, None).await.expect("pause");
+        assert_eq!(repo.pause.lock().expect("lock").as_ref().unwrap().mode, "write");
+
+        service.slowlog_get(None).await.expect("slowlog");
+        assert_eq!(*repo.slowlog_count.lock().expect("lock"), Some(10));
+
+        service.acl_genpass(None).await.expect("genpass");
+        assert_eq!(*repo.genpass_bits.lock().expect("lock"), Some(256));
+    }
+
+    #[test]
+    fn test_admin_service_new() {
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let _service = AdminService::new(pool);
     }
 }

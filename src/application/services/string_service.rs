@@ -16,15 +16,18 @@ use crate::infrastructure::redis::repositories::RedisStringRepository;
 
 /// Service for string operations
 pub struct StringService {
-    repository: RedisStringRepository,
+    repository: Arc<dyn StringRepository>,
 }
 
 impl StringService {
     /// Create a new StringService
     pub fn new(pool: Arc<InstrumentedPool>) -> Self {
-        Self {
-            repository: RedisStringRepository::new(pool),
-        }
+        Self::new_with_repository(Arc::new(RedisStringRepository::new(pool)))
+    }
+
+    /// Create a StringService with a custom repository (useful for testing)
+    pub fn new_with_repository(repository: Arc<dyn StringRepository>) -> Self {
+        Self { repository }
     }
 
     /// Get a string value by key
@@ -181,5 +184,207 @@ impl StringService {
     /// Get a value and delete the key
     pub async fn get_del(&self, key: &str) -> Result<Option<String>, CacheError> {
         self.repository.get_del(key).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::MockStringRepository;
+    use crate::infrastructure::redis::connection::InstrumentedPool;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    #[tokio::test]
+    async fn test_string_service_validations() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service.mget(vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.mset(vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.mset_nx(vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.set_range("k", -1, "v").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[derive(Default)]
+    struct CaptureRepo {
+        last_set: Mutex<Option<SetOptions>>,
+        last_getex: Mutex<Option<GetExOptions>>,
+        fail_mset: Mutex<bool>,
+    }
+
+    #[async_trait]
+    impl StringRepository for CaptureRepo {
+        async fn get(&self, _key: &str) -> Result<Option<StringValue>, CacheError> {
+            Ok(None)
+        }
+
+        async fn set(&self, _key: &str, _value: &str, options: SetOptions) -> Result<SetResult, CacheError> {
+            *self.last_set.lock().expect("lock") = Some(options);
+            Ok(SetResult {
+                key: "k".to_string(),
+                success: true,
+                previous_value: None,
+            })
+        }
+
+        async fn set_nx(&self, _key: &str, _value: &str, _ttl: Option<Duration>) -> Result<bool, CacheError> {
+            Ok(true)
+        }
+
+        async fn set_ex(&self, _key: &str, _value: &str, _ttl: Duration) -> Result<(), CacheError> {
+            Ok(())
+        }
+
+        async fn mget(&self, _keys: &[String]) -> Result<MGetResult, CacheError> {
+            Ok(MGetResult {
+                found: std::collections::HashMap::new(),
+                missing: Vec::new(),
+            })
+        }
+
+        async fn mset(&self, _pairs: &[(String, String)]) -> Result<(), CacheError> {
+            if *self.fail_mset.lock().expect("lock") {
+                return Err(CacheError::Internal("mset failed".to_string()));
+            }
+            Ok(())
+        }
+
+        async fn mset_nx(&self, _pairs: &[(String, String)]) -> Result<bool, CacheError> {
+            Ok(true)
+        }
+
+        async fn incr(&self, _key: &str) -> Result<i64, CacheError> {
+            Ok(1)
+        }
+
+        async fn incr_by(&self, _key: &str, _delta: i64) -> Result<i64, CacheError> {
+            Ok(1)
+        }
+
+        async fn incr_by_float(&self, _key: &str, _delta: f64) -> Result<f64, CacheError> {
+            Ok(1.0)
+        }
+
+        async fn decr(&self, _key: &str) -> Result<i64, CacheError> {
+            Ok(1)
+        }
+
+        async fn decr_by(&self, _key: &str, _delta: i64) -> Result<i64, CacheError> {
+            Ok(1)
+        }
+
+        async fn append(&self, _key: &str, _value: &str) -> Result<AppendResult, CacheError> {
+            Ok(AppendResult {
+                key: "k".to_string(),
+                new_length: 1,
+            })
+        }
+
+        async fn str_len(&self, _key: &str) -> Result<i64, CacheError> {
+            Ok(1)
+        }
+
+        async fn get_range(&self, _key: &str, start: i64, end: i64) -> Result<RangeResult, CacheError> {
+            Ok(RangeResult {
+                key: "k".to_string(),
+                value: "v".to_string(),
+                start,
+                end,
+            })
+        }
+
+        async fn set_range(&self, _key: &str, _offset: i64, _value: &str) -> Result<SetRangeResult, CacheError> {
+            Ok(SetRangeResult {
+                key: "k".to_string(),
+                new_length: 1,
+            })
+        }
+
+        async fn get_ex(&self, _key: &str, options: GetExOptions) -> Result<Option<String>, CacheError> {
+            *self.last_getex.lock().expect("lock") = Some(options);
+            Ok(Some("v".to_string()))
+        }
+
+        async fn get_del(&self, _key: &str) -> Result<Option<String>, CacheError> {
+            Ok(Some("v".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_string_service_option_building() {
+        let repo = Arc::new(CaptureRepo::default());
+        let service = StringService::new_with_repository(repo.clone());
+
+        service
+            .set("k", "v", Some(10), Some(5), false, false, false, false)
+            .await
+            .expect("set");
+        let options = repo.last_set.lock().expect("lock").clone().expect("set options");
+        assert!(matches!(options.expiry_mode, Some(ExpiryMode::Px)));
+        assert_eq!(options.expiry_value, Some(5));
+
+        service
+            .get_ex("k", Some(10), None, true)
+            .await
+            .expect("get_ex");
+        let options = repo.last_getex.lock().expect("lock").clone().expect("getex options");
+        assert!(options.persist);
+        assert!(options.expiry_mode.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_string_service_mset_error() {
+        let repo = Arc::new(CaptureRepo::default());
+        *repo.fail_mset.lock().expect("lock") = true;
+        let service = StringService::new_with_repository(repo);
+
+        let err = service
+            .mset(vec![("k".to_string(), "v".to_string())])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::Internal(_)));
+    }
+
+    #[tokio::test]
+    async fn test_string_service_basic_operations() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo.clone());
+
+        let first = service.set_nx("k1", "v1", Some(5)).await.expect("set_nx");
+        assert!(first);
+        let second = service.set_nx("k1", "v2", None).await.expect("set_nx");
+        assert!(!second);
+
+        service.set_ex("k2", "v2", 10).await.expect("set_ex");
+        let value = service.get("k2").await.expect("get").expect("value");
+        assert_eq!(value.value, "v2");
+
+        let count = service
+            .mset(vec![
+                ("a".to_string(), "1".to_string()),
+                ("b".to_string(), "2".to_string()),
+            ])
+            .await
+            .expect("mset");
+        assert_eq!(count, 2);
+
+        let inc = service.incr("counter").await.expect("incr");
+        let dec = service.decr("counter").await.expect("decr");
+        assert_eq!(inc, 1);
+        assert_eq!(dec, 0);
+    }
+
+    #[test]
+    fn test_string_service_new() {
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let _service = StringService::new(pool);
     }
 }

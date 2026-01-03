@@ -291,3 +291,43 @@ pub struct FlushResult {
     pub success: bool,
     pub mode: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_server_info_default() {
+        let info = ServerInfo::default();
+        assert_eq!(info.redis_version, "");
+        assert_eq!(info.total_keys, 0);
+    }
+
+    #[test]
+    fn test_memory_stats_default() {
+        let stats = MemoryStats::default();
+        assert_eq!(stats.peak_allocated, 0);
+        assert_eq!(stats.fragmentation, 0.0);
+    }
+
+    #[test]
+    fn test_client_info_default() {
+        let info = ClientInfo::default();
+        assert_eq!(info.id, 0);
+        assert_eq!(info.multi, -1);
+    }
+
+    #[test]
+    fn test_client_pause_default() {
+        let pause = ClientPauseOptions::default();
+        assert_eq!(pause.mode, "write");
+        assert_eq!(pause.timeout_ms, 0);
+    }
+
+    #[test]
+    fn test_acl_log_entry_default() {
+        let entry = AclLogEntry::default();
+        assert_eq!(entry.count, 1);
+        assert_eq!(entry.age_seconds, 0.0);
+    }
+}

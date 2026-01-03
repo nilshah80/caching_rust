@@ -45,3 +45,22 @@ pub fn build_router(state: AppState) -> Router {
 
     router.with_state(state)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_state;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_build_router_health() {
+        let (state, _, _) = test_state();
+        let app = build_router(state);
+        let response = app
+            .oneshot(Request::builder().uri("/health").body(axum::body::Body::empty()).unwrap())
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+}

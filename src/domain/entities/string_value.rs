@@ -185,3 +185,36 @@ pub struct GetExOptions {
     /// Remove TTL (PERSIST)
     pub persist: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_string_value_new() {
+        let value = StringValue::new("key".to_string(), "value".to_string());
+        assert_eq!(value.key, "key");
+        assert_eq!(value.value, "value");
+        assert_eq!(value.data_type, "string");
+        assert_eq!(value.length, 5);
+        assert!(value.ttl.is_none());
+        assert!(value.encoding.is_none());
+    }
+
+    #[test]
+    fn test_string_value_with_ttl_and_encoding() {
+        let value = StringValue::new("key".to_string(), "value".to_string())
+            .with_ttl(Some(10))
+            .with_encoding(Some("embstr".to_string()));
+        assert_eq!(value.ttl, Some(10));
+        assert_eq!(value.encoding.as_deref(), Some("embstr"));
+    }
+
+    #[test]
+    fn test_expiry_mode_as_str() {
+        assert_eq!(ExpiryMode::Ex.as_str(), "EX");
+        assert_eq!(ExpiryMode::Px.as_str(), "PX");
+        assert_eq!(ExpiryMode::ExAt.as_str(), "EXAT");
+        assert_eq!(ExpiryMode::PxAt.as_str(), "PXAT");
+    }
+}

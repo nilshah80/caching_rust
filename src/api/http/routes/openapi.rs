@@ -269,3 +269,15 @@ pub fn openapi_routes() -> Router<AppState> {
     Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_openapi_security_scheme() {
+        let spec = ApiDoc::openapi();
+        let components = spec.components.expect("components");
+        assert!(components.security_schemes.contains_key("api_key"));
+    }
+}

@@ -160,6 +160,16 @@ pub struct GetRangeParams {
     pub end: i64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_increment() {
+        assert_eq!(default_increment(), 1);
+    }
+}
+
 /// Response for GETRANGE operation
 #[derive(Debug, Serialize, ToSchema)]
 pub struct GetRangeResponse {

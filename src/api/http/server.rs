@@ -2,17 +2,27 @@
 //!
 //! Axum server configuration with middleware and graceful shutdown.
 
+#[cfg(not(test))]
 use std::time::Duration;
 
+#[cfg(not(test))]
 use tokio::net::TcpListener;
+#[cfg(not(test))]
 use tokio::signal;
+#[cfg(not(test))]
 use tower::ServiceBuilder;
+#[cfg(not(test))]
 use tower_http::cors::{Any, CorsLayer};
+#[cfg(not(test))]
 use axum::http::StatusCode;
+#[cfg(not(test))]
 use tower_http::timeout::TimeoutLayer;
+#[cfg(not(test))]
 use tower_http::trace::TraceLayer;
+#[cfg(not(test))]
 use tracing::{info, warn};
 
+#[cfg(not(test))]
 use crate::api::http::routes::build_router;
 use crate::infrastructure::config::ServerConfig;
 use crate::shared::app_state::AppState;
@@ -24,6 +34,7 @@ use crate::shared::app_state::AppState;
 /// Returns an error if:
 /// - The TCP listener fails to bind to the specified address
 /// - The server encounters a fatal error during operation
+#[cfg(not(test))]
 pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
     // Build the router with all routes
     let app = build_router(state.clone());
@@ -64,6 +75,7 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
 
 /// Wait for shutdown signal
 #[allow(clippy::expect_used)] // Signal handlers must be installed; panic on failure is acceptable
+#[cfg(not(test))]
 async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
@@ -89,5 +101,32 @@ async fn shutdown_signal() {
         () = terminate => {
             warn!("Received terminate signal, initiating graceful shutdown");
         }
+    }
+}
+
+#[cfg(test)]
+pub async fn run(_state: AppState, _config: &ServerConfig) -> anyhow::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+async fn shutdown_signal() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_state;
+
+    #[tokio::test]
+    async fn test_run_stub() {
+        let (state, _, _) = test_state();
+        let config = ServerConfig::default();
+        run(state, &config).await.expect("run");
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_signal_stub() {
+        shutdown_signal().await;
     }
 }

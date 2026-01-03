@@ -135,3 +135,53 @@ impl<T: Serialize> IntoResponse for CreatedResponse<T> {
         (StatusCode::CREATED, Json(self)).into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_response_builders() {
+        let resp = ApiResponse::success("ok");
+        assert!(resp.success);
+        assert_eq!(resp.data, Some("ok"));
+
+        let meta = serde_json::json!({"count": 1});
+        let resp = ApiResponse::success_with_meta("ok", meta.clone());
+        assert_eq!(resp.meta, Some(meta));
+
+        let resp = ApiResponse::new("value").with_request_id("req-1".to_string());
+        assert_eq!(resp.request_id.as_deref(), Some("req-1"));
+    }
+
+    #[test]
+    fn test_api_response_into_response() {
+        let response = ApiResponse::success("ok").into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_success_response_builders() {
+        let resp = SuccessResponse::new();
+        assert!(resp.success);
+        assert!(resp.message.is_none());
+
+        let resp = SuccessResponse::with_message("done");
+        assert_eq!(resp.message.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn test_success_response_default_into_response() {
+        let resp = SuccessResponse::default();
+        assert!(resp.success);
+
+        let response = resp.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_created_response_into_response() {
+        let resp = CreatedResponse::new("data").into_response();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+}

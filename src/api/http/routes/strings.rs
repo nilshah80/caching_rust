@@ -14,7 +14,6 @@ use crate::api::http::schemas::strings::{
     MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
     SetStringResponse, StrLenResponse,
 };
-use crate::application::services::StringService;
 use crate::domain::entities::StringValue;
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -62,9 +61,8 @@ async fn get_string(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<StringValue>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    service
+    state
+        .string_service
         .get(&key)
         .await?
         .map_or_else(
@@ -94,9 +92,8 @@ async fn set_string(
     Path(key): Path<String>,
     Json(request): Json<SetStringRequest>,
 ) -> Result<Json<ApiResponse<SetStringResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let result = service
+    let result = state
+        .string_service
         .set(
             &key,
             &request.value,
@@ -135,9 +132,7 @@ async fn get_del_string(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<GetDelResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let value = service.get_del(&key).await?;
+    let value = state.string_service.get_del(&key).await?;
 
     Ok(Json(ApiResponse::new(GetDelResponse {
         key: key.clone(),
@@ -163,10 +158,9 @@ async fn mget_strings(
     State(state): State<AppState>,
     Json(request): Json<MGetRequest>,
 ) -> Result<Json<ApiResponse<MGetResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
     let total_requested = request.keys.len();
 
-    let result = service.mget(request.keys).await?;
+    let result = state.string_service.mget(request.keys).await?;
 
     Ok(Json(ApiResponse::new(MGetResponse {
         found_count: result.found.len(),
@@ -193,20 +187,18 @@ async fn mset_strings(
     State(state): State<AppState>,
     Json(request): Json<MSetRequest>,
 ) -> Result<Json<ApiResponse<MSetResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
     let pairs: Vec<(String, String)> = request.pairs.into_iter().collect();
     let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
 
     if request.nx {
-        let success = service.mset_nx(pairs).await?;
+        let success = state.string_service.mset_nx(pairs).await?;
         Ok(Json(ApiResponse::new(MSetResponse {
             count: if success { keys.len() } else { 0 },
             keys: if success { keys } else { vec![] },
             success,
         })))
     } else {
-        let count = service.mset(pairs).await?;
+        let count = state.string_service.mset(pairs).await?;
         Ok(Json(ApiResponse::new(MSetResponse {
             count,
             keys,
@@ -236,15 +228,13 @@ async fn incr_string(
     Path(key): Path<String>,
     Json(request): Json<IncrementRequest>,
 ) -> Result<Json<ApiResponse<IncrementResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
     let new_value = if request.float {
         #[allow(clippy::cast_precision_loss)] // Integer to float conversion is intentional
         let delta = request.float_delta.unwrap_or(request.delta as f64);
-        let result = service.incr_by_float(&key, delta).await?;
+        let result = state.string_service.incr_by_float(&key, delta).await?;
         result.to_string()
     } else {
-        let result = service.incr_by(&key, request.delta).await?;
+        let result = state.string_service.incr_by(&key, request.delta).await?;
         result.to_string()
     };
 
@@ -275,9 +265,7 @@ async fn decr_string(
     Path(key): Path<String>,
     Json(request): Json<IncrementRequest>,
 ) -> Result<Json<ApiResponse<IncrementResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let new_value = service.decr_by(&key, request.delta).await?;
+    let new_value = state.string_service.decr_by(&key, request.delta).await?;
 
     Ok(Json(ApiResponse::new(IncrementResponse {
         key,
@@ -305,9 +293,7 @@ async fn append_string(
     Path(key): Path<String>,
     Json(request): Json<AppendRequest>,
 ) -> Result<Json<ApiResponse<AppendResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let result = service.append(&key, &request.value).await?;
+    let result = state.string_service.append(&key, &request.value).await?;
 
     Ok(Json(ApiResponse::new(AppendResponse {
         key: result.key,
@@ -333,9 +319,7 @@ async fn strlen_string(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<StrLenResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let length = service.str_len(&key).await?;
+    let length = state.string_service.str_len(&key).await?;
 
     Ok(Json(ApiResponse::new(StrLenResponse { key, length })))
 }
@@ -361,9 +345,7 @@ async fn get_range(
     Path(key): Path<String>,
     Query(params): Query<GetRangeParams>,
 ) -> Result<Json<ApiResponse<GetRangeResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let result = service.get_range(&key, params.start, params.end).await?;
+    let result = state.string_service.get_range(&key, params.start, params.end).await?;
 
     Ok(Json(ApiResponse::new(GetRangeResponse {
         key: result.key,
@@ -394,9 +376,7 @@ async fn set_range(
     Path(key): Path<String>,
     Json(request): Json<SetRangeRequest>,
 ) -> Result<Json<ApiResponse<SetRangeResponse>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let result = service.set_range(&key, request.offset, &request.value).await?;
+    let result = state.string_service.set_range(&key, request.offset, &request.value).await?;
 
     Ok(Json(ApiResponse::new(SetRangeResponse {
         key: result.key,
@@ -427,11 +407,97 @@ async fn get_ex_string(
     Path(key): Path<String>,
     Query(params): Query<GetExParams>,
 ) -> Result<Json<ApiResponse<Option<String>>>, CacheError> {
-    let service = StringService::new(state.pool.clone());
-
-    let value = service
+    let value = state
+        .string_service
         .get_ex(&key, params.ttl_seconds, params.ttl_ms, params.persist)
         .await?;
 
     Ok(Json(ApiResponse::new(value)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_state;
+    use axum::extract::{Path, Query, State};
+    use axum::Json;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_string_handlers() {
+        let (state, string_repo, _) = test_state();
+        let state = State(state);
+
+        // Missing key -> KeyNotFound
+        let missing = get_string(state.clone(), Path("missing".to_string())).await;
+        assert!(matches!(missing, Err(CacheError::KeyNotFound(_))));
+
+        string_repo.insert("key", "value");
+
+        let found = get_string(state.clone(), Path("key".to_string())).await.unwrap();
+        assert_eq!(found.0.data.as_ref().unwrap().value, "value");
+
+        let set_req = SetStringRequest {
+            value: "new".to_string(),
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: false,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+        };
+        let set_resp = set_string(state.clone(), Path("key".to_string()), Json(set_req)).await.unwrap();
+        assert!(set_resp.0.data.unwrap().success);
+
+        let del_resp = get_del_string(state.clone(), Path("key".to_string())).await.unwrap();
+        assert!(del_resp.0.data.unwrap().existed);
+
+        string_repo.insert("k1", "v1");
+        let mget_req = MGetRequest { keys: vec!["k1".to_string(), "k2".to_string()] };
+        let mget_resp = mget_strings(state.clone(), Json(mget_req)).await.unwrap();
+        assert_eq!(mget_resp.0.data.unwrap().found_count, 1);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("a".to_string(), "1".to_string());
+        let mset_req = MSetRequest { pairs, nx: false };
+        let mset_resp = mset_strings(state.clone(), Json(mset_req)).await.unwrap();
+        assert!(mset_resp.0.data.unwrap().success);
+
+        let mut nx_pairs = HashMap::new();
+        nx_pairs.insert("a".to_string(), "2".to_string());
+        let mset_nx_req = MSetRequest { pairs: nx_pairs, nx: true };
+        let mset_nx_resp = mset_strings(state.clone(), Json(mset_nx_req)).await.unwrap();
+        assert!(!mset_nx_resp.0.data.unwrap().success);
+
+        let incr_req = IncrementRequest { delta: 2, float: false, float_delta: None };
+        let incr_resp = incr_string(state.clone(), Path("counter".to_string()), Json(incr_req)).await.unwrap();
+        assert_eq!(incr_resp.0.data.unwrap().new_value, "2");
+
+        let incr_float = IncrementRequest { delta: 1, float: true, float_delta: Some(1.5) };
+        let incr_float_resp = incr_string(state.clone(), Path("f".to_string()), Json(incr_float)).await.unwrap();
+        assert_eq!(incr_float_resp.0.data.unwrap().new_value, "1.5");
+
+        let decr_req = IncrementRequest { delta: 1, float: false, float_delta: None };
+        let decr_resp = decr_string(state.clone(), Path("counter".to_string()), Json(decr_req)).await.unwrap();
+        assert_eq!(decr_resp.0.data.unwrap().new_value, "1");
+
+        let append_req = AppendRequest { value: "x".to_string() };
+        let append_resp = append_string(state.clone(), Path("k1".to_string()), Json(append_req)).await.unwrap();
+        assert!(append_resp.0.data.unwrap().new_length > 0);
+
+        let len_resp = strlen_string(state.clone(), Path("k1".to_string())).await.unwrap();
+        assert!(len_resp.0.data.unwrap().length > 0);
+
+        let range_params = GetRangeParams { start: 0, end: 1 };
+        let range_resp = get_range(state.clone(), Path("k1".to_string()), Query(range_params)).await.unwrap();
+        assert_eq!(range_resp.0.data.unwrap().start, 0);
+
+        let set_range_req = SetRangeRequest { offset: 0, value: "zz".to_string() };
+        let set_range_resp = set_range(state.clone(), Path("k1".to_string()), Json(set_range_req)).await.unwrap();
+        assert!(set_range_resp.0.data.unwrap().new_length >= 2);
+
+        let get_ex_params = GetExParams { ttl_seconds: None, ttl_ms: None, persist: false };
+        let get_ex_resp = get_ex_string(state, Path("k1".to_string()), Query(get_ex_params)).await.unwrap();
+        assert!(get_ex_resp.0.data.is_some());
+    }
 }

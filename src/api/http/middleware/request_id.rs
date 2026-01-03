@@ -39,3 +39,52 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
 /// Request ID extension
 #[derive(Clone, Debug)]
 pub struct RequestId(pub String);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{middleware, routing::get, Router};
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    async fn ok_handler() -> StatusCode {
+        StatusCode::OK
+    }
+
+    #[tokio::test]
+    async fn test_request_id_generated() {
+        let app = Router::new()
+            .route("/", get(ok_handler))
+            .layer(middleware::from_fn(request_id_middleware));
+
+        let response = app
+            .oneshot(Request::builder().uri("/").body(axum::body::Body::empty()).unwrap())
+            .await
+            .expect("response");
+
+        assert!(response.headers().contains_key(REQUEST_ID_HEADER));
+    }
+
+    #[tokio::test]
+    async fn test_request_id_preserved() {
+        let app = Router::new()
+            .route("/", get(ok_handler))
+            .layer(middleware::from_fn(request_id_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(REQUEST_ID_HEADER, "fixed-id")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(
+            response.headers().get(REQUEST_ID_HEADER).and_then(|v| v.to_str().ok()),
+            Some("fixed-id")
+        );
+    }
+}

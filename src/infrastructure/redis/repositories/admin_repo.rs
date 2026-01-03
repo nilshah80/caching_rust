@@ -921,3 +921,96 @@ fn parse_acl_log_entries(entries: &[Vec<redis::Value>]) -> Vec<AclLogEntry> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_server_info() {
+        let info = "\
+redis_version:7.2.0\n\
+uptime_in_seconds:123\n\
+connected_clients:4\n\
+used_memory:1024\n\
+used_memory_human:1K\n\
+total_system_memory:2048\n\
+used_memory_peak:1536\n\
+expired_keys:1\n\
+keyspace_hits:10\n\
+keyspace_misses:2\n\
+db0:keys=5,expires=0,avg_ttl=0\n";
+        let parsed = parse_server_info(info);
+        assert_eq!(parsed.redis_version, "7.2.0");
+        assert_eq!(parsed.uptime_seconds, 123);
+        assert_eq!(parsed.total_keys, 5);
+        assert_eq!(parsed.keyspace_hits, 10);
+    }
+
+    #[test]
+    fn test_parse_memory_stats() {
+        let stats = vec![
+            redis::Value::BulkString(b"peak.allocated".to_vec()),
+            redis::Value::Int(10),
+            redis::Value::BulkString(b"dataset.percentage".to_vec()),
+            redis::Value::BulkString(b"80.5".to_vec()),
+        ];
+        let parsed = parse_memory_stats(&stats);
+        assert_eq!(parsed.peak_allocated, 10);
+        assert_eq!(parsed.dataset_perc, 80.5);
+    }
+
+    #[test]
+    fn test_parse_client_list() {
+        let output = "id=1 name=test addr=127.0.0.1:6379 fd=7 age=10 idle=5 flags=N db=0 multi=-1 qbuf=0 qbuf-free=0 obl=0 oll=0 omem=0 cmd=get\n";
+        let clients = parse_client_list(output);
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].id, 1);
+        assert_eq!(clients[0].name, "test");
+        assert_eq!(clients[0].cmd, "get");
+    }
+
+    #[test]
+    fn test_parse_slowlog_entries() {
+        let entry = vec![
+            redis::Value::Int(1),
+            redis::Value::Int(2),
+            redis::Value::Int(3),
+            redis::Value::Array(vec![redis::Value::BulkString(b"GET".to_vec())]),
+            redis::Value::BulkString(b"127.0.0.1:6379".to_vec()),
+            redis::Value::BulkString(b"client".to_vec()),
+        ];
+        let parsed = parse_slowlog_entries(&[entry]);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].command, vec!["GET".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_latency_events() {
+        let entry = vec![
+            redis::Value::BulkString(b"command".to_vec()),
+            redis::Value::Int(10),
+            redis::Value::Int(5),
+        ];
+        let parsed = parse_latency_events(&[entry]);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].event, "command");
+    }
+
+    #[test]
+    fn test_parse_acl_log_entries() {
+        let entry = vec![
+            redis::Value::BulkString(b"count".to_vec()),
+            redis::Value::Int(3),
+            redis::Value::BulkString(b"reason".to_vec()),
+            redis::Value::BulkString(b"invalid".to_vec()),
+            redis::Value::BulkString(b"timestamp-created".to_vec()),
+            redis::Value::Int(99),
+        ];
+        let parsed = parse_acl_log_entries(&[entry]);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].count, 3);
+        assert_eq!(parsed[0].reason, "invalid");
+        assert_eq!(parsed[0].timestamp_us, 99);
+    }
+}

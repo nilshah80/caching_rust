@@ -1382,3 +1382,198 @@ pub async fn acl_log(
         .map(|entries| ApiResponse::success(AclLogResponse { entries }))
         .map_err(to_status_code)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_state;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, HeaderValue};
+    use axum::Json;
+
+    fn auth_headers(key: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(ADMIN_API_KEY_HEADER, HeaderValue::from_str(key).expect("header"));
+        headers
+    }
+
+    #[tokio::test]
+    async fn test_admin_helpers() {
+        assert_eq!(default_samples(), 5);
+        assert_eq!(default_pause_mode(), "write");
+        assert_eq!(default_slowlog_count(), 10);
+        assert_eq!(default_genpass_bits(), 256);
+
+        let (state, _, _) = test_state();
+        let ok = verify_admin_key(&auth_headers(&state.config.admin.api_key), &state);
+        assert!(ok.is_ok());
+        let bad = verify_admin_key(&HeaderMap::new(), &state);
+        assert!(bad.is_err());
+
+        assert_eq!(to_status_code(CacheError::InvalidInput("bad".to_string())), StatusCode::BAD_REQUEST);
+        assert_eq!(to_status_code(CacheError::KeyNotFound("k".to_string())), StatusCode::NOT_FOUND);
+        assert_eq!(to_status_code(CacheError::Unauthorized), StatusCode::UNAUTHORIZED);
+        assert_eq!(to_status_code(CacheError::Timeout), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_admin_handlers() {
+        let (state, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let state = State(state);
+
+        let stats = get_pool_stats(state.clone()).await;
+        assert!(stats.success);
+
+        let caps = get_capabilities(state.clone()).await;
+        assert!(caps.success);
+
+        let _ = get_server_info(state.clone(), auth.clone()).await.unwrap();
+        let _ = get_server_time(state.clone(), auth.clone()).await.unwrap();
+        let _ = get_db_size(state.clone(), auth.clone()).await.unwrap();
+        let _ = get_lastsave(state.clone(), auth.clone()).await.unwrap();
+
+        let _ = get_memory_stats(state.clone(), auth.clone()).await.unwrap();
+        let _ = get_memory_usage(
+            state.clone(),
+            auth.clone(),
+            Json(MemoryUsageRequest { key: "k".to_string(), samples: 1 }),
+        )
+        .await
+        .unwrap();
+        let _ = memory_doctor(state.clone(), auth.clone()).await.unwrap();
+        let _ = memory_purge(state.clone(), auth.clone()).await.unwrap();
+
+        let _ = flush_db(state.clone(), auth.clone(), Json(FlushDbRequest { async_mode: false }))
+            .await
+            .unwrap();
+        let _ = flush_all(state.clone(), auth.clone(), Json(FlushDbRequest { async_mode: true }))
+            .await
+            .unwrap();
+        let _ = copy_key(
+            state.clone(),
+            auth.clone(),
+            Json(CopyKeyRequest {
+                source: "a".to_string(),
+                destination: "b".to_string(),
+                db: None,
+                replace: false,
+            }),
+        )
+        .await
+        .unwrap();
+        let _ = move_key(
+            state.clone(),
+            auth.clone(),
+            Json(MoveKeyRequest { key: "a".to_string(), db: 1 }),
+        )
+        .await
+        .unwrap();
+        let _ = swap_db(
+            state.clone(),
+            auth.clone(),
+            Json(SwapDbRequest { db1: 0, db2: 1 }),
+        )
+        .await
+        .unwrap();
+
+        let _ = config_get(
+            state.clone(),
+            auth.clone(),
+            Json(ConfigGetRequest { pattern: "*".to_string() }),
+        )
+        .await
+        .unwrap();
+        let _ = config_set(
+            state.clone(),
+            auth.clone(),
+            Json(ConfigSetRequest { parameter: "maxmemory".to_string(), value: "1".to_string() }),
+        )
+        .await
+        .unwrap();
+        let _ = config_rewrite(state.clone(), auth.clone()).await.unwrap();
+        let _ = config_resetstat(state.clone(), auth.clone()).await.unwrap();
+
+        let _ = save(state.clone(), auth.clone()).await.unwrap();
+        let _ = bgsave(state.clone(), auth.clone()).await.unwrap();
+        let _ = bgrewriteaof(state.clone(), auth.clone()).await.unwrap();
+
+        let _ = client_list(state.clone(), auth.clone()).await.unwrap();
+        let _ = client_kill(
+            state.clone(),
+            auth.clone(),
+            Json(ClientKillRequest { id: None, addr: None, client_type: None }),
+        )
+        .await
+        .unwrap();
+        let _ = client_pause(
+            state.clone(),
+            auth.clone(),
+            Json(ClientPauseRequest { timeout_ms: 1, mode: "write".to_string() }),
+        )
+        .await
+        .unwrap();
+        let _ = client_unpause(state.clone(), auth.clone()).await.unwrap();
+        let _ = client_setname(
+            state.clone(),
+            auth.clone(),
+            Json(ClientSetNameRequest { name: "client".to_string() }),
+        )
+        .await
+        .unwrap();
+        let _ = client_getname(state.clone(), auth.clone()).await.unwrap();
+        let _ = client_id(state.clone(), auth.clone()).await.unwrap();
+
+        let _ = slowlog_get(
+            state.clone(),
+            auth.clone(),
+            Json(SlowlogGetRequest { count: 1 }),
+        )
+        .await
+        .unwrap();
+        let _ = slowlog_len(state.clone(), auth.clone()).await.unwrap();
+        let _ = slowlog_reset(state.clone(), auth.clone()).await.unwrap();
+
+        let _ = latency_latest(state.clone(), auth.clone()).await.unwrap();
+        let _ = latency_history(
+            state.clone(),
+            auth.clone(),
+            Json(LatencyHistoryRequest { event: "command".to_string() }),
+        )
+        .await
+        .unwrap();
+        let _ = latency_doctor(state.clone(), auth.clone()).await.unwrap();
+        let _ = latency_reset(
+            state.clone(),
+            auth.clone(),
+            Json(LatencyResetRequest { events: vec!["command".to_string()] }),
+        )
+        .await
+        .unwrap();
+
+        let _ = acl_list(state.clone(), auth.clone()).await.unwrap();
+        let _ = acl_users(state.clone(), auth.clone()).await.unwrap();
+        let _ = acl_whoami(state.clone(), auth.clone()).await.unwrap();
+        let _ = acl_cat(
+            state.clone(),
+            auth.clone(),
+            Json(AclCatRequest { category: Some("string".to_string()) }),
+        )
+        .await
+        .unwrap();
+        let _ = acl_genpass(
+            state.clone(),
+            auth.clone(),
+            Json(AclGenPassRequest { bits: 64 }),
+        )
+        .await
+        .unwrap();
+        let _ = acl_log(
+            state,
+            auth,
+            Json(AclLogRequest { count: Some(1), reset: false }),
+        )
+        .await
+        .unwrap();
+    }
+}
