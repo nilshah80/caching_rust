@@ -48,7 +48,7 @@ services:
       - SERVER__HOST=0.0.0.0
       - SERVER__PORT=8080
       - REDIS__URL=redis://:devpassword@redis:6379
-      - POOL__MIN_SIZE=10
+      - POOL__MIN_SIZE=5
       - POOL__MAX_SIZE=50
       - ADMIN__API_KEY=dev-admin-key
       - LOG__LEVEL=warn
@@ -79,6 +79,8 @@ services:
       - REDIS_PORT=6379
       - REDIS_PASSWORD=devpassword
       - REDIS_MAX_CONNECTIONS=50
+      - REDIS_MAX_IDLE_CONNECTIONS=25
+      - REDIS_MIN_IDLE_CONNECTIONS=5
       - SERVER_PORT=8080
       - GIN_MODE=release
       - LOG_LEVEL=warn

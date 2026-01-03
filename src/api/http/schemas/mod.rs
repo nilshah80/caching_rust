@@ -3,11 +3,15 @@
 //! DTOs for API requests and responses.
 
 pub mod common;
-pub mod keys;
-pub mod strings;
 pub mod hashes;
+pub mod keys;
+pub mod lists;
+pub mod sets;
+pub mod strings;
 
 pub use common::*;
-pub use keys::*;
-pub use strings::*;
 pub use hashes::*;
+pub use keys::*;
+pub use lists::*;
+pub use sets::*;
+pub use strings::*;

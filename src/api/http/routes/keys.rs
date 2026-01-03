@@ -314,16 +314,31 @@ pub async fn set_expire(
     Path(key): Path<String>,
     Json(request): Json<ExpireRequest>,
 ) -> Result<Json<ApiResponse<ExpireResponse>>, CacheError> {
-    let result = if let Some(seconds) = request.seconds {
-        state.key_service.expire(&key, seconds, request.nx, request.xx, request.gt, request.lt).await?
-    } else if let Some(milliseconds) = request.milliseconds {
-        state.key_service.pexpire(&key, milliseconds, request.nx, request.xx, request.gt, request.lt).await?
-    } else if let Some(timestamp) = request.expire_at {
-        state.key_service.expire_at(&key, timestamp, request.nx, request.xx, request.gt, request.lt).await?
-    } else if let Some(timestamp) = request.pexpire_at {
-        state.key_service.pexpire_at(&key, timestamp, request.nx, request.xx, request.gt, request.lt).await?
-    } else {
-        return Err(CacheError::InvalidInput("One of seconds, milliseconds, expire_at, or pexpire_at is required".to_string()));
+    let ExpireRequest {
+        seconds,
+        milliseconds,
+        expire_at,
+        pexpire_at,
+        nx,
+        xx,
+        gt,
+        lt,
+    } = request;
+
+    let result = match (seconds, milliseconds, expire_at, pexpire_at) {
+        (Some(seconds), _, _, _) => state.key_service.expire(&key, seconds, nx, xx, gt, lt).await?,
+        (None, Some(milliseconds), _, _) => {
+            state.key_service.pexpire(&key, milliseconds, nx, xx, gt, lt).await?
+        }
+        (None, None, Some(timestamp), _) => {
+            state.key_service.expire_at(&key, timestamp, nx, xx, gt, lt).await?
+        }
+        (None, None, None, Some(timestamp)) => state.key_service.pexpire_at(&key, timestamp, nx, xx, gt, lt).await?,
+        _ => {
+            return Err(CacheError::InvalidInput(
+                "One of seconds, milliseconds, expire_at, or pexpire_at is required".to_string(),
+            ));
+        }
     };
 
     Ok(Json(ApiResponse::new(ExpireResponse {
@@ -496,11 +511,7 @@ pub async fn restore_key(
     let data = BASE64
         .decode(&request.data)
         .map_err(|e| CacheError::InvalidInput(format!("Invalid base64 data: {}", e)))?;
-
-    let success = state
-        .key_service
-        .restore(&key, request.ttl, &data, request.replace)
-        .await?;
+    let success = state.key_service.restore(&key, request.ttl, &data, request.replace).await?;
 
     Ok(Json(ApiResponse::new(RestoreResponse { key, success })))
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, HashService, KeyService, StringService};
+use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, StringService};
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, CopyOptions, CopyResult, DeleteResult, DumpResult,
@@ -17,7 +17,10 @@ use crate::domain::entities::{
     SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::{AdminRepository, HashRepository, KeyRepository, StringRepository};
+use crate::domain::repositories::{
+    AdminRepository, BlockingPopResult, HashRepository, InsertPosition, KeyRepository,
+    ListDirection, ListRepository, LPosOptions, SetRepository, SetScanResult, StringRepository,
+};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -891,18 +894,530 @@ impl HashRepository for MockHashRepository {
     }
 }
 
+/// Mock List Repository for testing
+#[derive(Default)]
+pub struct MockListRepository {
+    store: Mutex<HashMap<String, Vec<String>>>,
+}
+
+impl MockListRepository {
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn insert(&self, key: &str, values: Vec<String>) {
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(key.to_string(), values);
+    }
+}
+
+#[async_trait]
+impl ListRepository for MockListRepository {
+    async fn lpush(&self, key: &str, values: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        // Redis LPUSH pushes values left-to-right, each at the head
+        // So LPUSH key a b c results in [c, b, a, ...]
+        for value in values.iter() {
+            entry.insert(0, value.clone());
+        }
+        Ok(entry.len() as i64)
+    }
+
+    async fn rpush(&self, key: &str, values: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        entry.extend(values.iter().cloned());
+        Ok(entry.len() as i64)
+    }
+
+    async fn lpush_x(&self, key: &str, values: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get_mut(key) {
+            for value in values.iter() {
+                entry.insert(0, value.clone());
+            }
+            Ok(entry.len() as i64)
+        } else {
+            Ok(0)
+        }
+    }
+
+    async fn rpush_x(&self, key: &str, values: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get_mut(key) {
+            entry.extend(values.iter().cloned());
+            Ok(entry.len() as i64)
+        } else {
+            Ok(0)
+        }
+    }
+
+    async fn lpop(&self, key: &str, count: Option<u32>) -> Result<Vec<String>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let count = count.unwrap_or(1) as usize;
+        let result: Vec<String> = entry.drain(..count.min(entry.len())).collect();
+        Ok(result)
+    }
+
+    async fn rpop(&self, key: &str, count: Option<u32>) -> Result<Vec<String>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let count = count.unwrap_or(1) as usize;
+        let start = entry.len().saturating_sub(count);
+        let result: Vec<String> = entry.drain(start..).collect();
+        Ok(result)
+    }
+
+    async fn lrange(&self, key: &str, start: i64, stop: i64) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let entry = store.get(key).cloned().unwrap_or_default();
+        let len = entry.len() as i64;
+
+        let start = if start < 0 { (len + start).max(0) } else { start };
+        let stop = if stop < 0 { len + stop } else { stop };
+
+        let start = start as usize;
+        let stop = (stop + 1).min(len) as usize;
+
+        if start >= entry.len() || start >= stop {
+            return Ok(Vec::new());
+        }
+
+        Ok(entry[start..stop].to_vec())
+    }
+
+    async fn llen(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(0, |v| v.len() as i64))
+    }
+
+    async fn lindex(&self, key: &str, index: i64) -> Result<Option<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let entry = store.get(key).cloned().unwrap_or_default();
+        let len = entry.len() as i64;
+        let index = if index < 0 { len + index } else { index };
+        if index < 0 || index >= len {
+            return Ok(None);
+        }
+        Ok(entry.get(index as usize).cloned())
+    }
+
+    async fn lset(&self, key: &str, index: i64, value: &str) -> Result<(), CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let len = entry.len() as i64;
+        let index = if index < 0 { len + index } else { index };
+        if index < 0 || index >= len {
+            return Err(CacheError::InvalidInput("index out of range".to_string()));
+        }
+        entry[index as usize] = value.to_string();
+        Ok(())
+    }
+
+    async fn linsert(
+        &self,
+        key: &str,
+        position: InsertPosition,
+        pivot: &str,
+        value: &str,
+    ) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        if let Some(pos) = entry.iter().position(|v| v == pivot) {
+            let insert_pos = match position {
+                InsertPosition::Before => pos,
+                InsertPosition::After => pos + 1,
+            };
+            entry.insert(insert_pos, value.to_string());
+            Ok(entry.len() as i64)
+        } else {
+            Ok(-1) // pivot not found
+        }
+    }
+
+    async fn lrem(&self, key: &str, count: i64, value: &str) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let mut removed = 0i64;
+        let abs_count = count.unsigned_abs() as usize;
+
+        if count == 0 {
+            // Remove all occurrences
+            entry.retain(|v| {
+                if v == value {
+                    removed += 1;
+                    false
+                } else {
+                    true
+                }
+            });
+        } else if count > 0 {
+            // Remove from head
+            let mut indices = Vec::new();
+            for (i, v) in entry.iter().enumerate() {
+                if v == value && indices.len() < abs_count {
+                    indices.push(i);
+                }
+            }
+            for i in indices.into_iter().rev() {
+                entry.remove(i);
+                removed += 1;
+            }
+        } else {
+            // Remove from tail
+            let mut indices = Vec::new();
+            for (i, v) in entry.iter().enumerate().rev() {
+                if v == value && indices.len() < abs_count {
+                    indices.push(i);
+                }
+            }
+            indices.sort();
+            for i in indices.into_iter().rev() {
+                entry.remove(i);
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    async fn ltrim(&self, key: &str, start: i64, stop: i64) -> Result<(), CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let len = entry.len() as i64;
+
+        let start = if start < 0 { (len + start).max(0) } else { start };
+        let stop = if stop < 0 { len + stop } else { stop };
+
+        let start = start as usize;
+        let stop = (stop + 1).min(len as i64) as usize;
+
+        if start >= entry.len() || start >= stop {
+            entry.clear();
+        } else {
+            *entry = entry[start..stop].to_vec();
+        }
+        Ok(())
+    }
+
+    async fn lpos(
+        &self,
+        key: &str,
+        element: &str,
+        options: LPosOptions,
+    ) -> Result<Vec<i64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let entry = store.get(key).cloned().unwrap_or_default();
+
+        let mut indices = Vec::new();
+        let count = options.count.unwrap_or(1) as usize;
+
+        for (i, v) in entry.iter().enumerate() {
+            if v == element {
+                indices.push(i as i64);
+                if indices.len() >= count {
+                    break;
+                }
+            }
+        }
+        Ok(indices)
+    }
+
+    async fn lmove(
+        &self,
+        source: &str,
+        destination: &str,
+        src_dir: ListDirection,
+        dst_dir: ListDirection,
+    ) -> Result<Option<String>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+
+        let value = {
+            let src = store.get_mut(source);
+            match (src, src_dir) {
+                (Some(list), ListDirection::Left) if !list.is_empty() => Some(list.remove(0)),
+                (Some(list), ListDirection::Right) if !list.is_empty() => list.pop(),
+                _ => None,
+            }
+        };
+
+        if let Some(v) = value.clone() {
+            let dst = store.entry(destination.to_string()).or_default();
+            match dst_dir {
+                ListDirection::Left => dst.insert(0, v),
+                ListDirection::Right => dst.push(v),
+            }
+        }
+
+        Ok(value)
+    }
+
+    async fn rpop_lpush(&self, source: &str, destination: &str) -> Result<Option<String>, CacheError> {
+        self.lmove(source, destination, ListDirection::Right, ListDirection::Left).await
+    }
+
+    async fn blpop(
+        &self,
+        keys: &[String],
+        _timeout: Duration,
+    ) -> Result<Option<BlockingPopResult>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        for key in keys {
+            if let Some(list) = store.get_mut(key) {
+                if !list.is_empty() {
+                    let value = list.remove(0);
+                    return Ok(Some(BlockingPopResult {
+                        key: key.clone(),
+                        value,
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn brpop(
+        &self,
+        keys: &[String],
+        _timeout: Duration,
+    ) -> Result<Option<BlockingPopResult>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        for key in keys {
+            if let Some(list) = store.get_mut(key) {
+                if !list.is_empty() {
+                    let value = list.pop().unwrap();
+                    return Ok(Some(BlockingPopResult {
+                        key: key.clone(),
+                        value,
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn blmove(
+        &self,
+        source: &str,
+        destination: &str,
+        src_dir: ListDirection,
+        dst_dir: ListDirection,
+        _timeout: Duration,
+    ) -> Result<Option<String>, CacheError> {
+        self.lmove(source, destination, src_dir, dst_dir).await
+    }
+
+    async fn brpop_lpush(
+        &self,
+        source: &str,
+        destination: &str,
+        _timeout: Duration,
+    ) -> Result<Option<String>, CacheError> {
+        self.rpop_lpush(source, destination).await
+    }
+}
+
+/// Mock Set Repository for testing
+#[derive(Default)]
+pub struct MockSetRepository {
+    store: Mutex<HashMap<String, std::collections::HashSet<String>>>,
+}
+
+impl MockSetRepository {
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn insert(&self, key: &str, members: Vec<String>) {
+        let mut store = self.store.lock().expect("store lock");
+        let set = store.entry(key.to_string()).or_default();
+        for member in members {
+            set.insert(member);
+        }
+    }
+}
+
+#[async_trait]
+impl SetRepository for MockSetRepository {
+    async fn sadd(&self, key: &str, members: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let set = store.entry(key.to_string()).or_default();
+        let mut added = 0i64;
+        for member in members {
+            if set.insert(member.clone()) {
+                added += 1;
+            }
+        }
+        Ok(added)
+    }
+
+    async fn srem(&self, key: &str, members: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(set) = store.get_mut(key) {
+            let mut removed = 0i64;
+            for member in members {
+                if set.remove(member) {
+                    removed += 1;
+                }
+            }
+            Ok(removed)
+        } else {
+            Ok(0)
+        }
+    }
+
+    async fn smembers(&self, key: &str) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(Vec::new(), |s| s.iter().cloned().collect()))
+    }
+
+    async fn sismember(&self, key: &str, member: &str) -> Result<bool, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(false, |s| s.contains(member)))
+    }
+
+    async fn smismember(&self, key: &str, members: &[String]) -> Result<Vec<bool>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let set = store.get(key);
+        Ok(members.iter().map(|m| set.map_or(false, |s| s.contains(m))).collect())
+    }
+
+    async fn scard(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(0, |s| s.len() as i64))
+    }
+
+    async fn srandmember(&self, key: &str, count: Option<i64>) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if let Some(set) = store.get(key) {
+            let count = count.unwrap_or(1).unsigned_abs() as usize;
+            Ok(set.iter().take(count).cloned().collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn spop(&self, key: &str, count: Option<u32>) -> Result<Vec<String>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(set) = store.get_mut(key) {
+            let count = count.unwrap_or(1) as usize;
+            let members: Vec<String> = set.iter().take(count).cloned().collect();
+            for m in &members {
+                set.remove(m);
+            }
+            Ok(members)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn smove(&self, source: &str, destination: &str, member: &str) -> Result<bool, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let removed = store.get_mut(source).map_or(false, |s| s.remove(member));
+        if removed {
+            store.entry(destination.to_string()).or_default().insert(member.to_string());
+        }
+        Ok(removed)
+    }
+
+    async fn sinter(&self, keys: &[String]) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let first = store.get(&keys[0]).cloned().unwrap_or_default();
+        let result: std::collections::HashSet<String> = keys[1..].iter().fold(first, |acc, k| {
+            store.get(k).map_or_else(std::collections::HashSet::new, |s| acc.intersection(s).cloned().collect())
+        });
+        Ok(result.into_iter().collect())
+    }
+
+    async fn sinterstore(&self, destination: &str, keys: &[String]) -> Result<i64, CacheError> {
+        let result = self.sinter(keys).await?;
+        let count = result.len() as i64;
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(destination.to_string(), result.into_iter().collect());
+        Ok(count)
+    }
+
+    async fn sintercard(&self, keys: &[String], limit: Option<u64>) -> Result<i64, CacheError> {
+        let result = self.sinter(keys).await?;
+        let count = result.len() as i64;
+        Ok(limit.map_or(count, |l| count.min(l as i64)))
+    }
+
+    async fn sunion(&self, keys: &[String]) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let mut result = std::collections::HashSet::new();
+        for key in keys {
+            if let Some(set) = store.get(key) {
+                result.extend(set.iter().cloned());
+            }
+        }
+        Ok(result.into_iter().collect())
+    }
+
+    async fn sunionstore(&self, destination: &str, keys: &[String]) -> Result<i64, CacheError> {
+        let result = self.sunion(keys).await?;
+        let count = result.len() as i64;
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(destination.to_string(), result.into_iter().collect());
+        Ok(count)
+    }
+
+    async fn sdiff(&self, keys: &[String]) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let first = store.get(&keys[0]).cloned().unwrap_or_default();
+        let result: std::collections::HashSet<String> = keys[1..].iter().fold(first, |acc, k| {
+            store.get(k).map_or(acc.clone(), |s| acc.difference(s).cloned().collect())
+        });
+        Ok(result.into_iter().collect())
+    }
+
+    async fn sdiffstore(&self, destination: &str, keys: &[String]) -> Result<i64, CacheError> {
+        let result = self.sdiff(keys).await?;
+        let count = result.len() as i64;
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(destination.to_string(), result.into_iter().collect());
+        Ok(count)
+    }
+
+    async fn sscan(
+        &self,
+        key: &str,
+        _cursor: u64,
+        _pattern: Option<&str>,
+        _count: Option<u64>,
+    ) -> Result<SetScanResult, CacheError> {
+        let members = self.smembers(key).await?;
+        Ok(SetScanResult { cursor: 0, members })
+    }
+}
+
 pub fn test_state_with_repos(
     string_repo: Arc<MockStringRepository>,
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
 ) -> AppState {
     let hash_repo = Arc::new(MockHashRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, key_repo, admin_repo)
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, key_repo, admin_repo)
 }
 
 pub fn test_state_with_all_repos(
     string_repo: Arc<MockStringRepository>,
     hash_repo: Arc<MockHashRepository>,
+    list_repo: Arc<MockListRepository>,
+    set_repo: Arc<MockSetRepository>,
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
 ) -> AppState {
@@ -911,10 +1426,12 @@ pub fn test_state_with_all_repos(
     let capabilities = Arc::new(RedisCapabilities::default_capabilities());
     let string_service = Arc::new(StringService::new_with_repository(string_repo));
     let hash_service = Arc::new(HashService::new_with_repository(hash_repo));
+    let list_service = Arc::new(ListService::new_with_repository(list_repo));
+    let set_service = Arc::new(SetService::new_with_repository(set_repo));
     let key_service = Arc::new(KeyService::new_with_repository(key_repo));
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, key_service, admin_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, key_service, admin_service)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
@@ -930,6 +1447,30 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let key_repo = Arc::new(MockKeyRepository::new());
     let admin_repo = Arc::new(MockAdminRepository::default());
     let hash_repo = Arc::new(MockHashRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), key_repo, admin_repo);
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, key_repo, admin_repo);
     (state, hash_repo)
+}
+
+pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, key_repo, admin_repo);
+    (state, list_repo)
+}
+
+pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), key_repo, admin_repo);
+    (state, set_repo)
 }

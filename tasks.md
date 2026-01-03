@@ -851,8 +851,8 @@ impl InstrumentedPool {
 - [x] **Task 3.2.4**: Create Hash request/response schemas
 - [x] **Task 3.2.5**: Add OpenAPI documentation for hash endpoints ✓
 
-### 3.3 List Operations (with Blocking Command Support)
-- [ ] **Task 3.3.1**: Implement List repository trait
+### 3.3 List Operations (with Blocking Command Support) ✅
+- [x] **Task 3.3.1**: Implement List repository trait
   ```rust
   #[async_trait]
   pub trait ListRepository: Send + Sync {
@@ -872,7 +872,7 @@ impl InstrumentedPool {
   }
   ```
 
-- [ ] **Task 3.3.2**: Implement List operations (non-blocking)
+- [x] **Task 3.3.2**: Implement List operations (non-blocking)
   | Command | Method | Priority |
   |---------|--------|----------|
   | LPUSH | `lpush` | High |
@@ -893,7 +893,7 @@ impl InstrumentedPool {
   | LTRIM | `ltrim` | Medium |
   | LPOS | `lpos` | Low |
 
-- [ ] **Task 3.3.3**: Implement blocking List operations with timeout enforcement
+- [x] **Task 3.3.3**: Implement blocking List operations with timeout enforcement
   ```rust
   // Blocking operations - enforced max timeout
   const MAX_BLOCKING_TIMEOUT: Duration = Duration::from_secs(30);
@@ -948,7 +948,7 @@ impl InstrumentedPool {
   | BRPOP | `brpop` | Medium | Max 30s timeout, returns 204 on timeout |
   | BLMOVE | `blmove` | Low | Max 30s timeout |
 
-- [ ] **Task 3.3.4**: Create List API routes
+- [x] **Task 3.3.4**: Create List API routes
   ```
   # Non-blocking
   POST   /api/v1/lists/:key/lpush
@@ -963,33 +963,35 @@ impl InstrumentedPool {
   POST   /api/v1/lists/:key/brpop   # Returns 204 on timeout
   ```
 
-- [ ] **Task 3.3.5**: Create List request/response schemas
+- [x] **Task 3.3.5**: Create List request/response schemas
+- [x] **Task 3.3.6**: Add OpenAPI documentation for list endpoints ✓
 
-### 3.4 Set Operations
-- [ ] **Task 3.4.1**: Implement Set repository trait
-- [ ] **Task 3.4.2**: Implement Set operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | SADD | `sadd` | High |
-  | SREM | `srem` | High |
-  | SMEMBERS | `smembers` | High |
-  | SISMEMBER | `sismember` | High |
-  | SMISMEMBER | `smismember` | Medium |
-  | SCARD | `scard` | High |
-  | SRANDMEMBER | `srand_member` | Medium |
-  | SPOP | `spop` | Medium |
-  | SMOVE | `smove` | Medium |
-  | SINTER | `sinter` | Medium |
-  | SINTERSTORE | `sinter_store` | Medium |
-  | SINTERCARD | `sinter_card` | Low |
-  | SUNION | `sunion` | Medium |
-  | SUNIONSTORE | `sunion_store` | Medium |
-  | SDIFF | `sdiff` | Medium |
-  | SDIFFSTORE | `sdiff_store` | Medium |
-  | SSCAN | `sscan` | Medium |
+### 3.4 Set Operations ✓
+- [x] **Task 3.4.1**: Implement Set repository trait ✓
+- [x] **Task 3.4.2**: Implement Set operations ✓
+  | Command | Method | Priority | Status |
+  |---------|--------|----------|--------|
+  | SADD | `sadd` | High | ✓ |
+  | SREM | `srem` | High | ✓ |
+  | SMEMBERS | `smembers` | High | ✓ |
+  | SISMEMBER | `sismember` | High | ✓ |
+  | SMISMEMBER | `smismember` | Medium | ✓ |
+  | SCARD | `scard` | High | ✓ |
+  | SRANDMEMBER | `srandmember` | Medium | ✓ |
+  | SPOP | `spop` | Medium | ✓ |
+  | SMOVE | `smove` | Medium | ✓ |
+  | SINTER | `sinter` | Medium | ✓ |
+  | SINTERSTORE | `sinterstore` | Medium | ✓ |
+  | SINTERCARD | `sintercard` | Low | ✓ |
+  | SUNION | `sunion` | Medium | ✓ |
+  | SUNIONSTORE | `sunionstore` | Medium | ✓ |
+  | SDIFF | `sdiff` | Medium | ✓ |
+  | SDIFFSTORE | `sdiffstore` | Medium | ✓ |
+  | SSCAN | `sscan` | Medium | ✓ |
 
-- [ ] **Task 3.4.3**: Create Set API routes
-- [ ] **Task 3.4.4**: Create Set request/response schemas
+- [x] **Task 3.4.3**: Create Set API routes ✓
+- [x] **Task 3.4.4**: Create Set request/response schemas ✓
+- [x] **Task 3.4.5**: Add OpenAPI documentation for set endpoints ✓
 
 ### 3.5 Sorted Set Operations (with Blocking Command Support)
 - [ ] **Task 3.5.1**: Implement Sorted Set repository trait

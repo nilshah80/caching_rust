@@ -3,18 +3,22 @@
 //! Route definitions for all API endpoints.
 
 mod admin;
+mod hashes;
 mod health;
 mod keys;
+mod lists;
 mod openapi;
+mod sets;
 mod strings;
-mod hashes;
 
 pub use admin::admin_routes;
+pub use hashes::hash_routes;
 pub use health::health_routes;
 pub use keys::key_routes;
+pub use lists::list_routes;
 pub use openapi::openapi_routes;
+pub use sets::set_routes;
 pub use strings::string_routes;
-pub use hashes::hash_routes;
 
 use axum::Router;
 use crate::shared::app_state::AppState;
@@ -30,6 +34,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(string_routes())
         // Hash operations
         .merge(hash_routes())
+        // List operations
+        .merge(list_routes())
+        // Set operations
+        .merge(set_routes())
         // Key management operations
         .merge(key_routes())
         // Admin endpoints
@@ -39,9 +47,6 @@ pub fn build_router(state: AppState) -> Router {
 
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:
-    // - hash_routes()
-    // - list_routes()
-    // - set_routes()
     // - sorted_set_routes()
     // - stream_routes() (Redis 5.0+)
     // - json_routes() (requires RedisJSON module)
