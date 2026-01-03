@@ -1,0 +1,27 @@
+[package]
+name = "load-tests"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "load_test"
+path = "src/main.rs"
+
+[[bin]]
+name = "benchmark_compare"
+path = "src/benchmark_compare.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full", "rt-multi-thread", "time", "sync"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
+rand = "0.8"
+hdrhistogram = "7"
+sysinfo = "0.32"
+num_cpus = "1.16"
+anyhow = "1.0"
+futures = "0.3"
+colored = "2"

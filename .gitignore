@@ -2,6 +2,9 @@
 /target/
 Cargo.lock
 
+# Load test target directory
+tests/load/target/
+
 # IDE
 .idea/
 .vscode/
@@ -29,6 +32,9 @@ coverage/
 
 # Benchmark results
 criterion/
+load_test_results_*.json
+benchmark_comparison_*.json
+tests/load/results/
 
 # Debug
 *.pdb
