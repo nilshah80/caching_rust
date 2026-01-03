@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, StringService};
+use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, SortedSetService, StringService};
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, CopyOptions, CopyResult, DeleteResult, DumpResult,
@@ -19,7 +19,9 @@ use crate::domain::entities::{
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BlockingPopResult, HashRepository, InsertPosition, KeyRepository,
-    ListDirection, ListRepository, LPosOptions, SetRepository, SetScanResult, StringRepository,
+    LexRange, ListDirection, ListRepository, LPosOptions, ScoreRange, ScoredMember,
+    SetRepository, SetScanResult, SortedSetRepository, StringRepository, ZAddOptions,
+    ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -1410,7 +1412,8 @@ pub fn test_state_with_repos(
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, key_repo, admin_repo)
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo)
 }
 
 pub fn test_state_with_all_repos(
@@ -1418,6 +1421,7 @@ pub fn test_state_with_all_repos(
     hash_repo: Arc<MockHashRepository>,
     list_repo: Arc<MockListRepository>,
     set_repo: Arc<MockSetRepository>,
+    sorted_set_repo: Arc<MockSortedSetRepository>,
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
 ) -> AppState {
@@ -1428,10 +1432,11 @@ pub fn test_state_with_all_repos(
     let hash_service = Arc::new(HashService::new_with_repository(hash_repo));
     let list_service = Arc::new(ListService::new_with_repository(list_repo));
     let set_service = Arc::new(SetService::new_with_repository(set_repo));
+    let sorted_set_service = Arc::new(SortedSetService::new_with_repository(sorted_set_repo));
     let key_service = Arc::new(KeyService::new_with_repository(key_repo));
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, key_service, admin_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
@@ -1449,7 +1454,8 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, key_repo, admin_repo);
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo);
     (state, hash_repo)
 }
 
@@ -1460,7 +1466,8 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, key_repo, admin_repo);
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo);
     (state, list_repo)
 }
 
@@ -1471,6 +1478,609 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), key_repo, admin_repo);
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo);
     (state, set_repo)
+}
+
+pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo);
+    (state, sorted_set_repo)
+}
+
+/// Mock Sorted Set Repository for testing
+#[derive(Default)]
+pub struct MockSortedSetRepository {
+    store: Mutex<HashMap<String, Vec<ScoredMember>>>,
+}
+
+impl MockSortedSetRepository {
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn sort_members(members: &mut [ScoredMember]) {
+        members.sort_by(|a, b| {
+            a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.member.cmp(&b.member))
+        });
+    }
+}
+
+#[async_trait]
+impl SortedSetRepository for MockSortedSetRepository {
+    async fn zadd(
+        &self,
+        key: &str,
+        members: &[ScoredMember],
+        _options: Option<ZAddOptions>,
+    ) -> Result<ZAddResult, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let mut added = 0i64;
+
+        for member in members {
+            let existing = entry.iter().position(|m| m.member == member.member);
+            match existing {
+                Some(pos) => {
+                    entry[pos] = member.clone();
+                }
+                None => {
+                    entry.push(member.clone());
+                    added += 1;
+                }
+            }
+        }
+
+        Self::sort_members(entry);
+        Ok(ZAddResult { count: added, new_score: None })
+    }
+
+    async fn zadd_incr(
+        &self,
+        key: &str,
+        member: &str,
+        score: f64,
+        _options: Option<ZAddOptions>,
+    ) -> Result<Option<f64>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+
+        let existing = entry.iter().position(|m| m.member == member);
+        let new_score = match existing {
+            Some(pos) => {
+                entry[pos].score += score;
+                entry[pos].score
+            }
+            None => {
+                entry.push(ScoredMember::new(member.to_string(), score));
+                score
+            }
+        };
+
+        Self::sort_members(entry);
+        Ok(Some(new_score))
+    }
+
+    async fn zrem(&self, key: &str, members: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get_mut(key) {
+            let before = entry.len();
+            entry.retain(|m| !members.contains(&m.member));
+            Ok((before - entry.len()) as i64)
+        } else {
+            Ok(0)
+        }
+    }
+
+    async fn zscore(&self, key: &str, member: &str) -> Result<Option<f64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store
+            .get(key)
+            .and_then(|entry| entry.iter().find(|m| m.member == member))
+            .map(|m| m.score))
+    }
+
+    async fn zmscore(&self, key: &str, members: &[String]) -> Result<Vec<Option<f64>>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let entry = store.get(key);
+        Ok(members
+            .iter()
+            .map(|m| {
+                entry.and_then(|e| e.iter().find(|sm| sm.member == *m).map(|sm| sm.score))
+            })
+            .collect())
+    }
+
+    async fn zincrby(&self, key: &str, member: &str, increment: f64) -> Result<f64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+
+        let existing = entry.iter().position(|m| m.member == member);
+        let new_score = match existing {
+            Some(pos) => {
+                entry[pos].score += increment;
+                entry[pos].score
+            }
+            None => {
+                entry.push(ScoredMember::new(member.to_string(), increment));
+                increment
+            }
+        };
+
+        Self::sort_members(entry);
+        Ok(new_score)
+    }
+
+    async fn zcard(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(0, |e| e.len() as i64))
+    }
+
+    async fn zcount(&self, key: &str, range: &ScoreRange) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(0, |entry| {
+            entry
+                .iter()
+                .filter(|m| {
+                    let min_ok = if range.min_exclusive {
+                        m.score > range.min
+                    } else {
+                        m.score >= range.min
+                    };
+                    let max_ok = if range.max_exclusive {
+                        m.score < range.max
+                    } else {
+                        m.score <= range.max
+                    };
+                    min_ok && max_ok
+                })
+                .count() as i64
+        }))
+    }
+
+    async fn zlexcount(&self, key: &str, _range: &LexRange) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(0, |e| e.len() as i64))
+    }
+
+    async fn zrank(&self, key: &str, member: &str) -> Result<Option<i64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store
+            .get(key)
+            .and_then(|entry| entry.iter().position(|m| m.member == member))
+            .map(|p| p as i64))
+    }
+
+    async fn zrevrank(&self, key: &str, member: &str) -> Result<Option<i64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).and_then(|entry| {
+            entry
+                .iter()
+                .position(|m| m.member == member)
+                .map(|p| (entry.len() - 1 - p) as i64)
+        }))
+    }
+
+    async fn zrange(
+        &self,
+        key: &str,
+        start: i64,
+        stop: i64,
+        options: Option<ZRangeOptions>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let entry = store.get(key).cloned().unwrap_or_default();
+        let len = entry.len() as i64;
+
+        let start = if start < 0 { (len + start).max(0) } else { start };
+        let stop = if stop < 0 { len + stop } else { stop };
+        let stop = (stop + 1).min(len) as usize;
+        let start = start as usize;
+
+        if start >= entry.len() || start >= stop {
+            return Ok(Vec::new());
+        }
+
+        let mut result: Vec<ScoredMember> = entry[start..stop].to_vec();
+
+        if let Some(opts) = options {
+            if opts.rev {
+                result.reverse();
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn zrangebyscore(
+        &self,
+        key: &str,
+        range: &ScoreRange,
+        options: Option<ZRangeOptions>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let entry = store.get(key).cloned().unwrap_or_default();
+
+        let mut result: Vec<ScoredMember> = entry
+            .into_iter()
+            .filter(|m| {
+                let min_ok = if range.min_exclusive {
+                    m.score > range.min
+                } else {
+                    m.score >= range.min
+                };
+                let max_ok = if range.max_exclusive {
+                    m.score < range.max
+                } else {
+                    m.score <= range.max
+                };
+                min_ok && max_ok
+            })
+            .collect();
+
+        if let Some(opts) = options {
+            if opts.rev {
+                result.reverse();
+            }
+            if let (Some(offset), Some(count)) = (opts.offset, opts.count) {
+                result = result
+                    .into_iter()
+                    .skip(offset as usize)
+                    .take(count as usize)
+                    .collect();
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn zrangebylex(
+        &self,
+        key: &str,
+        _range: &LexRange,
+        _options: Option<ZRangeOptions>,
+    ) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store
+            .get(key)
+            .map(|e| e.iter().map(|m| m.member.clone()).collect())
+            .unwrap_or_default())
+    }
+
+    async fn zrangestore(
+        &self,
+        destination: &str,
+        source: &str,
+        start: i64,
+        stop: i64,
+        options: Option<ZRangeOptions>,
+    ) -> Result<i64, CacheError> {
+        let members = self.zrange(source, start, stop, options).await?;
+        let count = members.len() as i64;
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(destination.to_string(), members);
+        Ok(count)
+    }
+
+    async fn zremrangebyrank(&self, key: &str, start: i64, stop: i64) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get_mut(key) {
+            let len = entry.len() as i64;
+            let start = if start < 0 { (len + start).max(0) } else { start };
+            let stop = if stop < 0 { len + stop } else { stop };
+            let stop = (stop + 1).min(len) as usize;
+            let start = start as usize;
+
+            if start >= entry.len() || start >= stop {
+                return Ok(0);
+            }
+
+            let removed = stop - start;
+            entry.drain(start..stop);
+            Ok(removed as i64)
+        } else {
+            Ok(0)
+        }
+    }
+
+    async fn zremrangebyscore(&self, key: &str, range: &ScoreRange) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get_mut(key) {
+            let before = entry.len();
+            entry.retain(|m| {
+                let min_ok = if range.min_exclusive {
+                    m.score <= range.min
+                } else {
+                    m.score < range.min
+                };
+                let max_ok = if range.max_exclusive {
+                    m.score >= range.max
+                } else {
+                    m.score > range.max
+                };
+                min_ok || max_ok
+            });
+            Ok((before - entry.len()) as i64)
+        } else {
+            Ok(0)
+        }
+    }
+
+    async fn zremrangebylex(&self, key: &str, _range: &LexRange) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(0, |_| 0))
+    }
+
+    async fn zpopmin(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get_mut(key) {
+            let count = count.unwrap_or(1) as usize;
+            let count = count.min(entry.len());
+            Ok(entry.drain(..count).collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn zpopmax(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get_mut(key) {
+            let count = count.unwrap_or(1) as usize;
+            let count = count.min(entry.len());
+            let start = entry.len() - count;
+            Ok(entry.drain(start..).rev().collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn bzpopmin(
+        &self,
+        keys: &[String],
+        _timeout: f64,
+    ) -> Result<Option<ZPopResult>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        for key in keys {
+            if let Some(entry) = store.get_mut(key) {
+                if !entry.is_empty() {
+                    let member = entry.remove(0);
+                    return Ok(Some(ZPopResult {
+                        key: key.clone(),
+                        members: vec![member],
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn bzpopmax(
+        &self,
+        keys: &[String],
+        _timeout: f64,
+    ) -> Result<Option<ZPopResult>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        for key in keys {
+            if let Some(entry) = store.get_mut(key) {
+                if !entry.is_empty() {
+                    let member = entry.pop().unwrap();
+                    return Ok(Some(ZPopResult {
+                        key: key.clone(),
+                        members: vec![member],
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn zmpop(
+        &self,
+        keys: &[String],
+        direction: ZPopDirection,
+        count: Option<i64>,
+    ) -> Result<Option<ZPopResult>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        for key in keys {
+            if let Some(entry) = store.get_mut(key) {
+                if !entry.is_empty() {
+                    let count = count.unwrap_or(1) as usize;
+                    let count = count.min(entry.len());
+                    let members = match direction {
+                        ZPopDirection::Min => entry.drain(..count).collect(),
+                        ZPopDirection::Max => {
+                            let start = entry.len() - count;
+                            entry.drain(start..).rev().collect()
+                        }
+                    };
+                    return Ok(Some(ZPopResult {
+                        key: key.clone(),
+                        members,
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn bzmpop(
+        &self,
+        keys: &[String],
+        direction: ZPopDirection,
+        _timeout: f64,
+        count: Option<i64>,
+    ) -> Result<Option<ZPopResult>, CacheError> {
+        self.zmpop(keys, direction, count).await
+    }
+
+    async fn zrandmember(
+        &self,
+        key: &str,
+        count: Option<i64>,
+        _with_scores: bool,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if let Some(entry) = store.get(key) {
+            let count = count.unwrap_or(1).unsigned_abs() as usize;
+            Ok(entry.iter().take(count).cloned().collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn zunion(
+        &self,
+        keys: &[String],
+        _options: Option<ZSetAlgebraOptions>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let mut result: HashMap<String, f64> = HashMap::new();
+
+        for key in keys {
+            if let Some(entry) = store.get(key) {
+                for member in entry {
+                    *result.entry(member.member.clone()).or_insert(0.0) += member.score;
+                }
+            }
+        }
+
+        let mut members: Vec<ScoredMember> = result
+            .into_iter()
+            .map(|(member, score)| ScoredMember::new(member, score))
+            .collect();
+        Self::sort_members(&mut members);
+        Ok(members)
+    }
+
+    async fn zunionstore(
+        &self,
+        destination: &str,
+        keys: &[String],
+        options: Option<ZSetAlgebraOptions>,
+    ) -> Result<i64, CacheError> {
+        let members = self.zunion(keys, options).await?;
+        let count = members.len() as i64;
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(destination.to_string(), members);
+        Ok(count)
+    }
+
+    async fn zinter(
+        &self,
+        keys: &[String],
+        _options: Option<ZSetAlgebraOptions>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let first = store.get(&keys[0]).cloned().unwrap_or_default();
+        let mut result: HashMap<String, f64> = first
+            .into_iter()
+            .map(|m| (m.member, m.score))
+            .collect();
+
+        for key in &keys[1..] {
+            if let Some(entry) = store.get(key) {
+                let entry_map: HashMap<String, f64> =
+                    entry.iter().map(|m| (m.member.clone(), m.score)).collect();
+                result.retain(|m, s| {
+                    if let Some(other_score) = entry_map.get(m) {
+                        *s += *other_score;
+                        true
+                    } else {
+                        false
+                    }
+                });
+            } else {
+                return Ok(Vec::new());
+            }
+        }
+
+        let mut members: Vec<ScoredMember> = result
+            .into_iter()
+            .map(|(member, score)| ScoredMember::new(member, score))
+            .collect();
+        Self::sort_members(&mut members);
+        Ok(members)
+    }
+
+    async fn zinterstore(
+        &self,
+        destination: &str,
+        keys: &[String],
+        options: Option<ZSetAlgebraOptions>,
+    ) -> Result<i64, CacheError> {
+        let members = self.zinter(keys, options).await?;
+        let count = members.len() as i64;
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(destination.to_string(), members);
+        Ok(count)
+    }
+
+    async fn zintercard(&self, keys: &[String], limit: Option<u64>) -> Result<i64, CacheError> {
+        let members = self.zinter(keys, None).await?;
+        let count = members.len() as i64;
+        Ok(limit.map_or(count, |l| count.min(l as i64)))
+    }
+
+    async fn zdiff(
+        &self,
+        keys: &[String],
+        _with_scores: bool,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let first = store.get(&keys[0]).cloned().unwrap_or_default();
+        let mut other_members: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for key in &keys[1..] {
+            if let Some(entry) = store.get(key) {
+                for m in entry {
+                    other_members.insert(m.member.clone());
+                }
+            }
+        }
+
+        let mut result: Vec<ScoredMember> = first
+            .into_iter()
+            .filter(|m| !other_members.contains(&m.member))
+            .collect();
+        Self::sort_members(&mut result);
+        Ok(result)
+    }
+
+    async fn zdiffstore(&self, destination: &str, keys: &[String]) -> Result<i64, CacheError> {
+        let members = self.zdiff(keys, false).await?;
+        let count = members.len() as i64;
+        let mut store = self.store.lock().expect("store lock");
+        store.insert(destination.to_string(), members);
+        Ok(count)
+    }
+
+    async fn zscan(
+        &self,
+        key: &str,
+        _cursor: u64,
+        _pattern: Option<&str>,
+        _count: Option<u64>,
+    ) -> Result<ZScanResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let members = store.get(key).cloned().unwrap_or_default();
+        Ok(ZScanResult { cursor: 0, members })
+    }
 }

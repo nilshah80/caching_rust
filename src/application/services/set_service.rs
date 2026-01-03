@@ -252,7 +252,9 @@ mod tests {
 
         // Test SMOVE
         service.sadd("other", vec!["x".to_string()]).await.unwrap();
-        let moved = service.smove("myset", "other", "a").await.unwrap();
+        let remaining = service.smembers("myset").await.unwrap();
+        let member_to_move = remaining.first().expect("member").clone();
+        let moved = service.smove("myset", "other", &member_to_move).await.unwrap();
         assert!(moved);
 
         let other_card = service.scard("other").await.unwrap();

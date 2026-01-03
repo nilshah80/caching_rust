@@ -994,8 +994,8 @@ impl InstrumentedPool {
 - [x] **Task 3.4.5**: Add OpenAPI documentation for set endpoints ✓
 
 ### 3.5 Sorted Set Operations (with Blocking Command Support)
-- [ ] **Task 3.5.1**: Implement Sorted Set repository trait
-- [ ] **Task 3.5.2**: Implement Sorted Set operations (non-blocking)
+- [x] **Task 3.5.1**: Implement Sorted Set repository trait
+- [x] **Task 3.5.2**: Implement Sorted Set operations (non-blocking)
   | Command | Method | Priority |
   |---------|--------|----------|
   | ZADD | `zadd` with options (NX, XX, GT, LT, CH, INCR) | High |
@@ -1030,7 +1030,7 @@ impl InstrumentedPool {
   | ZREMRANGEBYSCORE | `zrem_range_by_score` | Medium |
   | ZREMRANGEBYLEX | `zrem_range_by_lex` | Low |
 
-- [ ] **Task 3.5.3**: Implement blocking Sorted Set operations
+- [x] **Task 3.5.3**: Implement blocking Sorted Set operations
   | Command | Method | Priority | Notes |
   |---------|--------|----------|-------|
   | BZPOPMIN | `bzpop_min` | Low | Max 30s timeout, returns 204 on timeout |
@@ -1038,8 +1038,9 @@ impl InstrumentedPool {
   | ZMPOP | `zmpop` | Low | |
   | BZMPOP | `bzmpop` | Low | Max 30s timeout |
 
-- [ ] **Task 3.5.4**: Create Sorted Set API routes
-- [ ] **Task 3.5.5**: Create Sorted Set request/response schemas
+- [x] **Task 3.5.4**: Create Sorted Set API routes
+- [x] **Task 3.5.5**: Create Sorted Set request/response schemas
+- [x] **Task 3.5.6**: Add OpenAPI documentation for sorted set endpoints
 
 ### 3.6 Stream Operations (with Blocking and SSE Support)
 - [ ] **Task 3.6.1**: Implement Stream repository trait

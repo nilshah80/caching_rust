@@ -9,6 +9,7 @@ mod keys;
 mod lists;
 mod openapi;
 mod sets;
+mod sorted_sets;
 mod strings;
 
 pub use admin::admin_routes;
@@ -18,6 +19,7 @@ pub use keys::key_routes;
 pub use lists::list_routes;
 pub use openapi::openapi_routes;
 pub use sets::set_routes;
+pub use sorted_sets::sorted_set_routes;
 pub use strings::string_routes;
 
 use axum::Router;
@@ -38,6 +40,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(list_routes())
         // Set operations
         .merge(set_routes())
+        // Sorted Set operations
+        .merge(sorted_set_routes())
         // Key management operations
         .merge(key_routes())
         // Admin endpoints
@@ -47,7 +51,6 @@ pub fn build_router(state: AppState) -> Router {
 
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:
-    // - sorted_set_routes()
     // - stream_routes() (Redis 5.0+)
     // - json_routes() (requires RedisJSON module)
     // - search_routes() (requires RediSearch module)
