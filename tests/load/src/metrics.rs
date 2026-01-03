@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use sysinfo::{Pid, System};
 
 /// Resource usage snapshot
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct ResourceSnapshot {
     /// Memory usage in MB
@@ -96,6 +97,7 @@ impl LoadMetrics {
     }
 
     /// Record bytes transferred
+    #[allow(dead_code)]
     pub fn record_bytes(&self, sent: u64, received: u64) {
         self.bytes_sent.fetch_add(sent, Ordering::Relaxed);
         self.bytes_received.fetch_add(received, Ordering::Relaxed);
@@ -321,6 +323,7 @@ pub struct MetricsSummary {
     pub top_errors: Vec<(String, u64)>,
 }
 
+#[allow(dead_code)]
 impl MetricsSummary {
     /// Format as human-readable report
     pub fn format_report(&self) -> String {
@@ -338,15 +341,15 @@ impl MetricsSummary {
         report.push_str(&format!("  Error Rate:   {:.2}%\n", self.error_rate * 100.0));
         report.push('\n');
 
-        report.push_str("Latency (microseconds):\n");
-        report.push_str(&format!("  Min:    {:>10} µs\n", self.latency_min_us));
-        report.push_str(&format!("  P50:    {:>10} µs\n", self.latency_p50_us));
-        report.push_str(&format!("  P95:    {:>10} µs\n", self.latency_p95_us));
-        report.push_str(&format!("  P99:    {:>10} µs\n", self.latency_p99_us));
-        report.push_str(&format!("  P99.9:  {:>10} µs\n", self.latency_p999_us));
-        report.push_str(&format!("  Max:    {:>10} µs\n", self.latency_max_us));
-        report.push_str(&format!("  Mean:   {:>10.2} µs\n", self.latency_mean_us));
-        report.push_str(&format!("  StdDev: {:>10.2} µs\n", self.latency_stddev_us));
+        report.push_str("Latency (milliseconds):\n");
+        report.push_str(&format!("  Min:    {:>10.2} ms\n", self.latency_min_us as f64 / 1000.0));
+        report.push_str(&format!("  P50:    {:>10.2} ms\n", self.latency_p50_us as f64 / 1000.0));
+        report.push_str(&format!("  P95:    {:>10.2} ms\n", self.latency_p95_us as f64 / 1000.0));
+        report.push_str(&format!("  P99:    {:>10.2} ms\n", self.latency_p99_us as f64 / 1000.0));
+        report.push_str(&format!("  P99.9:  {:>10.2} ms\n", self.latency_p999_us as f64 / 1000.0));
+        report.push_str(&format!("  Max:    {:>10.2} ms\n", self.latency_max_us as f64 / 1000.0));
+        report.push_str(&format!("  Mean:   {:>10.2} ms\n", self.latency_mean_us / 1000.0));
+        report.push_str(&format!("  StdDev: {:>10.2} ms\n", self.latency_stddev_us / 1000.0));
         report.push('\n');
 
         report.push_str("Resource Usage:\n");

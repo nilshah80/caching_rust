@@ -5,6 +5,7 @@ A high-performance Redis caching service built in Rust, providing a clean REST A
 ## Features
 
 - **String Operations**: GET, SET, MGET, MSET, INCR, DECR, APPEND, STRLEN, GETRANGE, SETRANGE, GETEX, GETDEL
+- **Hash Operations**: HGET, HSET, HSETNX, HGETALL, HMGET, HDEL, HEXISTS, HKEYS, HVALS, HLEN, HINCRBY, HINCRBYFLOAT, HSTRLEN, HRANDFIELD, HSCAN
 - **Key Operations**: DEL, EXISTS, EXPIRE, TTL, PTTL, PERSIST, TYPE, RENAME, COPY, SCAN, KEYS, RANDOMKEY, TOUCH, UNLINK, DUMP, RESTORE, OBJECT
 - **Admin Operations**: Server info, memory stats, client management, slowlog, latency monitoring, ACL
 - **Connection Pooling**: Instrumented connection pool with metrics

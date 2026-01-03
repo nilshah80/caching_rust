@@ -166,9 +166,9 @@ async fn main() -> Result<()> {
             test_type.clone(),
         ).await?;
         println!(
-            "RPS: {:.0}, P99: {}µs",
+            "RPS: {:.0}, P99: {:.2}ms",
             rust_result.metrics.rps,
-            rust_result.metrics.latency_p99_us
+            rust_result.metrics.latency_p99_us as f64 / 1000.0
         );
 
         // Benchmark Go service
@@ -180,9 +180,9 @@ async fn main() -> Result<()> {
             test_type,
         ).await?;
         println!(
-            "RPS: {:.0}, P99: {}µs",
+            "RPS: {:.0}, P99: {:.2}ms",
             go_result.metrics.rps,
-            go_result.metrics.latency_p99_us
+            go_result.metrics.latency_p99_us as f64 / 1000.0
         );
 
         let comparison = compare_metrics(&rust_result, &go_result);
@@ -389,6 +389,7 @@ fn print_text_results(results: &[(String, ComparisonResult)]) {
         "Rust P99".bold(),
         "Go P99".bold()
     );
+    println!("{:<20} {:>12} {:>12} {:>12} {:>12}", "", "", "", "(ms)", "(ms)");
     println!("{}", "-".repeat(70));
 
     for (name, result) in results {
@@ -404,16 +405,19 @@ fn print_text_results(results: &[(String, ComparisonResult)]) {
             format!("{:.0}", result.go.metrics.rps).normal()
         };
 
+        let rust_p99_ms = result.rust.metrics.latency_p99_us as f64 / 1000.0;
+        let go_p99_ms = result.go.metrics.latency_p99_us as f64 / 1000.0;
+
         let p99_winner = if result.comparison.p99_diff_percent > 0.0 {
-            format!("{}µs", result.rust.metrics.latency_p99_us).green()
+            format!("{:.2}", rust_p99_ms).green()
         } else {
-            format!("{}µs", result.rust.metrics.latency_p99_us).normal()
+            format!("{:.2}", rust_p99_ms).normal()
         };
 
         let go_p99 = if result.comparison.p99_diff_percent <= 0.0 {
-            format!("{}µs", result.go.metrics.latency_p99_us).green()
+            format!("{:.2}", go_p99_ms).green()
         } else {
-            format!("{}µs", result.go.metrics.latency_p99_us).normal()
+            format!("{:.2}", go_p99_ms).normal()
         };
 
         println!(
@@ -425,37 +429,23 @@ fn print_text_results(results: &[(String, ComparisonResult)]) {
     println!();
     println!("{}", "Summary:".yellow().bold());
 
-    let mut rust_wins = 0;
-    let mut go_wins = 0;
-
-    for (_, result) in results {
-        if result.comparison.rps_diff_percent > 0.0 {
-            rust_wins += 1;
-        } else {
-            go_wins += 1;
-        }
-    }
+    let rust_throughput_wins = results.iter()
+        .filter(|(_, r)| r.comparison.rps_diff_percent > 0.0)
+        .count();
 
     println!(
         "  Throughput: Rust wins {}/{} tests",
-        rust_wins,
+        rust_throughput_wins,
         results.len()
     );
 
-    rust_wins = 0;
-    go_wins = 0;
-
-    for (_, result) in results {
-        if result.comparison.p99_diff_percent > 0.0 {
-            rust_wins += 1;
-        } else {
-            go_wins += 1;
-        }
-    }
+    let rust_latency_wins = results.iter()
+        .filter(|(_, r)| r.comparison.p99_diff_percent > 0.0)
+        .count();
 
     println!(
         "  Latency:    Rust wins {}/{} tests",
-        rust_wins,
+        rust_latency_wins,
         results.len()
     );
 }
@@ -467,20 +457,20 @@ fn print_json_results(results: &[(String, ComparisonResult)]) -> Result<()> {
 }
 
 fn print_csv_results(results: &[(String, ComparisonResult)]) {
-    println!("test,rust_rps,go_rps,rps_diff%,rust_p50,go_p50,p50_diff%,rust_p99,go_p99,p99_diff%");
+    println!("test,rust_rps,go_rps,rps_diff%,rust_p50_ms,go_p50_ms,p50_diff%,rust_p99_ms,go_p99_ms,p99_diff%");
 
     for (name, result) in results {
         println!(
-            "{},{:.0},{:.0},{:.1},{},{},{:.1},{},{},{:.1}",
+            "{},{:.0},{:.0},{:.1},{:.2},{:.2},{:.1},{:.2},{:.2},{:.1}",
             name,
             result.rust.metrics.rps,
             result.go.metrics.rps,
             result.comparison.rps_diff_percent,
-            result.rust.metrics.latency_p50_us,
-            result.go.metrics.latency_p50_us,
+            result.rust.metrics.latency_p50_us as f64 / 1000.0,
+            result.go.metrics.latency_p50_us as f64 / 1000.0,
             result.comparison.p50_diff_percent,
-            result.rust.metrics.latency_p99_us,
-            result.go.metrics.latency_p99_us,
+            result.rust.metrics.latency_p99_us as f64 / 1000.0,
+            result.go.metrics.latency_p99_us as f64 / 1000.0,
             result.comparison.p99_diff_percent,
         );
     }

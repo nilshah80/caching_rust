@@ -204,9 +204,9 @@ async fn main() -> Result<()> {
 
         println!("\n{}: {}", result.name.cyan(), status);
         println!("  {}", result.message);
-        println!("  RPS: {:.0}, P99: {}µs, Errors: {:.2}%",
+        println!("  RPS: {:.0}, P99: {:.2}ms, Errors: {:.2}%",
             result.summary.rps,
-            result.summary.latency_p99_us,
+            result.summary.latency_p99_us as f64 / 1000.0,
             result.summary.error_rate * 100.0
         );
     }

@@ -7,12 +7,14 @@ mod health;
 mod keys;
 mod openapi;
 mod strings;
+mod hashes;
 
 pub use admin::admin_routes;
 pub use health::health_routes;
 pub use keys::key_routes;
 pub use openapi::openapi_routes;
 pub use strings::string_routes;
+pub use hashes::hash_routes;
 
 use axum::Router;
 use crate::shared::app_state::AppState;
@@ -26,6 +28,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(health_routes())
         // Always available - core Redis types
         .merge(string_routes())
+        // Hash operations
+        .merge(hash_routes())
         // Key management operations
         .merge(key_routes())
         // Admin endpoints

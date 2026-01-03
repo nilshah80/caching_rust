@@ -13,6 +13,7 @@ use tokio::sync::Semaphore;
 use tokio::time::interval;
 
 /// Rate limiter using token bucket algorithm
+#[allow(dead_code)]
 pub struct RateLimiter {
     tokens: Arc<Semaphore>,
     refill_rate: u64,
@@ -52,6 +53,7 @@ impl RateLimiter {
     }
 
     /// Get current RPS setting
+    #[allow(dead_code)]
     pub fn rps(&self) -> u64 {
         self.refill_rate
     }
@@ -64,6 +66,7 @@ impl Drop for RateLimiter {
 }
 
 /// Load test configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct LoadTestConfig {
     /// Number of concurrent workers
@@ -94,6 +97,7 @@ impl Default for LoadTestConfig {
 }
 
 /// Request function type
+#[allow(dead_code)]
 pub type RequestFn = Box<dyn Fn(LoadTestClient) -> futures::future::BoxFuture<'static, Result<()>> + Send + Sync>;
 
 /// Load test runner
@@ -116,6 +120,7 @@ impl LoadTestRunner {
     }
 
     /// Create runner with shared metrics (for multi-phase tests)
+    #[allow(dead_code)]
     pub fn with_shared_metrics(client: LoadTestClient, config: LoadTestConfig, metrics: SharedMetrics) -> Self {
         Self {
             client,
@@ -126,6 +131,7 @@ impl LoadTestRunner {
     }
 
     /// Set target PID for resource monitoring
+    #[allow(dead_code)]
     pub fn with_target_pid(mut self, pid: u32) -> Self {
         self.target_pid = Some(pid);
         self
@@ -264,6 +270,7 @@ impl LoadTestRunner {
 }
 
 /// Run concurrent requests with custom function
+#[allow(dead_code)]
 pub async fn run_concurrent<F, Fut>(
     client: LoadTestClient,
     concurrency: usize,
@@ -290,6 +297,7 @@ where
 }
 
 /// Progress reporter for long-running tests
+#[allow(dead_code)]
 pub struct ProgressReporter {
     test_name: String,
     total_duration: Duration,
@@ -298,6 +306,7 @@ pub struct ProgressReporter {
     running: Arc<AtomicBool>,
 }
 
+#[allow(dead_code)]
 impl ProgressReporter {
     /// Create new progress reporter
     pub fn new(test_name: &str, total_duration: Duration, metrics: SharedMetrics) -> Self {
@@ -331,8 +340,8 @@ impl ProgressReporter {
                 let p99 = metrics.latency_percentile(99.0);
 
                 println!(
-                    "[{}] Progress: {:.1}% | RPS: {:.0} | Errors: {} | P99: {} µs",
-                    test_name, progress, rps, errors, p99
+                    "[{}] Progress: {:.1}% | RPS: {:.0} | Errors: {} | P99: {:.2} ms",
+                    test_name, progress, rps, errors, p99 as f64 / 1000.0
                 );
 
                 if elapsed >= total_duration {

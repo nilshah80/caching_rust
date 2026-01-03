@@ -807,30 +807,49 @@ impl InstrumentedPool {
   ```
   - **Acceptance**: Schemas validate inputs correctly
 
-### 3.2 Hash Operations
-- [ ] **Task 3.2.1**: Implement Hash repository trait
-- [ ] **Task 3.2.2**: Implement Hash operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | HGET | `hget` | High |
-  | HSET | `hset` | High |
-  | HSETNX | `hset_nx` | High |
-  | HGETALL | `hget_all` | High |
-  | HMGET | `hmget` | High |
-  | HMSET | `hmset` | High |
-  | HDEL | `hdel` | High |
-  | HEXISTS | `hexists` | High |
-  | HKEYS | `hkeys` | Medium |
-  | HVALS | `hvals` | Medium |
-  | HLEN | `hlen` | Medium |
-  | HINCRBY | `hincr_by` | High |
-  | HINCRBYFLOAT | `hincr_by_float` | Medium |
-  | HSTRLEN | `hstr_len` | Low |
-  | HRANDFIELD | `hrand_field` | Low |
-  | HSCAN | `hscan` | Medium |
+### 3.2 Hash Operations ✅ COMPLETED
+- [x] **Task 3.2.1**: Implement Hash repository trait
+- [x] **Task 3.2.2**: Implement Hash operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | HGET | `hget` | ✅ |
+  | HSET | `hset` | ✅ |
+  | HSETNX | `hset_nx` | ✅ |
+  | HGETALL | `hget_all` | ✅ |
+  | HMGET | `hmget` | ✅ |
+  | HMSET | `hmset` | ✅ (via hset) |
+  | HDEL | `hdel` | ✅ |
+  | HEXISTS | `hexists` | ✅ |
+  | HKEYS | `hkeys` | ✅ |
+  | HVALS | `hvals` | ✅ |
+  | HLEN | `hlen` | ✅ |
+  | HINCRBY | `hincr_by` | ✅ |
+  | HINCRBYFLOAT | `hincr_by_float` | ✅ |
+  | HSTRLEN | `hstr_len` | ✅ |
+  | HRANDFIELD | `hrand_field` | ✅ |
+  | HSCAN | `hscan` | ✅ |
 
-- [ ] **Task 3.2.3**: Create Hash API routes
-- [ ] **Task 3.2.4**: Create Hash request/response schemas
+- [x] **Task 3.2.3**: Create Hash API routes
+  | Method | Endpoint | Description |
+  |--------|----------|-------------|
+  | PUT | `/api/v1/hashes/{key}` | Set hash fields (HSET) |
+  | GET | `/api/v1/hashes/{key}` | Get all fields (HGETALL) |
+  | GET | `/api/v1/hashes/{key}/fields/{field}` | Get single field (HGET) |
+  | POST | `/api/v1/hashes/{key}/set-nx` | Set field if not exists (HSETNX) |
+  | POST | `/api/v1/hashes/{key}/fields/get` | Get multiple fields (HMGET) |
+  | DELETE | `/api/v1/hashes/{key}/fields` | Delete fields (HDEL) |
+  | GET | `/api/v1/hashes/{key}/fields/{field}/exists` | Check field exists (HEXISTS) |
+  | GET | `/api/v1/hashes/{key}/keys` | Get field names (HKEYS) |
+  | GET | `/api/v1/hashes/{key}/values` | Get field values (HVALS) |
+  | GET | `/api/v1/hashes/{key}/length` | Get hash length (HLEN) |
+  | PATCH | `/api/v1/hashes/{key}/fields/{field}/incr` | Increment integer (HINCRBY) |
+  | PATCH | `/api/v1/hashes/{key}/fields/{field}/incr-float` | Increment float (HINCRBYFLOAT) |
+  | GET | `/api/v1/hashes/{key}/fields/{field}/length` | Get field length (HSTRLEN) |
+  | GET | `/api/v1/hashes/{key}/random` | Get random field (HRANDFIELD) |
+  | GET | `/api/v1/hashes/{key}/scan` | Scan fields (HSCAN) |
+
+- [x] **Task 3.2.4**: Create Hash request/response schemas
+- [x] **Task 3.2.5**: Add OpenAPI documentation for hash endpoints ✓
 
 ### 3.3 List Operations (with Blocking Command Support)
 - [ ] **Task 3.3.1**: Implement List repository trait

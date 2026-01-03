@@ -25,9 +25,9 @@ const fn default_limit() -> u32 {
     100
 }
 
-/// Scan/cursor parameters
+/// Basic scan/cursor parameters (use keys::ScanParams for extended key scanning)
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct ScanParams {
+pub struct BasicScanParams {
     /// Cursor position (use "0" to start)
     #[serde(default = "default_cursor")]
     pub cursor: String,

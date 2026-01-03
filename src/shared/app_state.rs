@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::application::services::{AdminService, KeyService, StringService};
+use crate::application::services::{AdminService, HashService, KeyService, StringService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -24,6 +24,9 @@ pub struct AppState {
     /// String operations service
     pub string_service: Arc<StringService>,
 
+    /// Hash operations service
+    pub hash_service: Arc<HashService>,
+
     /// Key management service
     pub key_service: Arc<KeyService>,
 
@@ -39,18 +42,21 @@ impl AppState {
         capabilities: Arc<RedisCapabilities>,
     ) -> Self {
         let string_service = Arc::new(StringService::new(pool.clone()));
+        let hash_service = Arc::new(HashService::new(pool.clone()));
         let key_service = Arc::new(KeyService::new(pool.clone()));
         let admin_service = Arc::new(AdminService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, string_service, key_service, admin_service)
+        Self::new_with_services(pool, config, capabilities, string_service, hash_service, key_service, admin_service)
     }
 
     /// Create new application state with custom services (useful for testing)
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_services(
         pool: Arc<InstrumentedPool>,
         config: Arc<Settings>,
         capabilities: Arc<RedisCapabilities>,
         string_service: Arc<StringService>,
+        hash_service: Arc<HashService>,
         key_service: Arc<KeyService>,
         admin_service: Arc<AdminService>,
     ) -> Self {
@@ -59,6 +65,7 @@ impl AppState {
             config,
             capabilities,
             string_service,
+            hash_service,
             key_service,
             admin_service,
         }
@@ -68,7 +75,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MockAdminRepository, MockKeyRepository, MockStringRepository};
+    use crate::test_support::{MockAdminRepository, MockHashRepository, MockKeyRepository, MockStringRepository};
 
     #[test]
     fn test_new_with_services() {
@@ -76,6 +83,7 @@ mod tests {
         let config = Arc::new(Settings::default());
         let capabilities = Arc::new(RedisCapabilities::default_capabilities());
         let string_service = Arc::new(StringService::new_with_repository(Arc::new(MockStringRepository::new())));
+        let hash_service = Arc::new(HashService::new_with_repository(Arc::new(MockHashRepository::new())));
         let key_service = Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
         let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
 
@@ -84,6 +92,7 @@ mod tests {
             config.clone(),
             capabilities.clone(),
             string_service.clone(),
+            hash_service.clone(),
             key_service.clone(),
             admin_service.clone(),
         );

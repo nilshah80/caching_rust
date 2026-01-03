@@ -63,7 +63,7 @@ pub fn key_routes() -> Router<AppState> {
     ),
     tag = "Keys"
 )]
-async fn delete_keys(
+pub async fn delete_keys(
     State(state): State<AppState>,
     Json(request): Json<DeleteKeysRequest>,
 ) -> Result<Json<ApiResponse<DeleteKeysResponse>>, CacheError> {
@@ -92,7 +92,7 @@ async fn delete_keys(
     ),
     tag = "Keys"
 )]
-async fn exists_keys(
+pub async fn exists_keys(
     State(state): State<AppState>,
     Json(request): Json<ExistsRequest>,
 ) -> Result<Json<ApiResponse<ExistsResponse>>, CacheError> {
@@ -117,7 +117,7 @@ async fn exists_keys(
     ),
     tag = "Keys"
 )]
-async fn touch_keys(
+pub async fn touch_keys(
     State(state): State<AppState>,
     Json(request): Json<TouchRequest>,
 ) -> Result<Json<ApiResponse<TouchResponse>>, CacheError> {
@@ -145,7 +145,7 @@ async fn touch_keys(
     ),
     tag = "Keys"
 )]
-async fn scan_keys(
+pub async fn scan_keys(
     State(state): State<AppState>,
     Query(params): Query<ScanParams>,
 ) -> Result<Json<ApiResponse<ScanResponse>>, CacheError> {
@@ -175,7 +175,7 @@ async fn scan_keys(
     ),
     tag = "Keys"
 )]
-async fn list_keys(
+pub async fn list_keys(
     State(state): State<AppState>,
     Query(params): Query<KeysParams>,
 ) -> Result<Json<ApiResponse<KeysResponse>>, CacheError> {
@@ -198,7 +198,7 @@ async fn list_keys(
     ),
     tag = "Keys"
 )]
-async fn random_key(
+pub async fn random_key(
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<RandomKeyResponse>>, CacheError> {
     let result = state.key_service.random_key().await?;
@@ -220,7 +220,7 @@ async fn random_key(
     ),
     tag = "Keys"
 )]
-async fn get_key_info(
+pub async fn get_key_info(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<KeyInfoResponse>>, CacheError> {
@@ -253,7 +253,7 @@ async fn get_key_info(
     ),
     tag = "Keys"
 )]
-async fn delete_single_key(
+pub async fn delete_single_key(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<DeleteKeysResponse>>, CacheError> {
@@ -280,7 +280,7 @@ async fn delete_single_key(
     ),
     tag = "Keys"
 )]
-async fn get_ttl(
+pub async fn get_ttl(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<TtlResponse>>, CacheError> {
@@ -309,7 +309,7 @@ async fn get_ttl(
     ),
     tag = "Keys"
 )]
-async fn set_expire(
+pub async fn set_expire(
     State(state): State<AppState>,
     Path(key): Path<String>,
     Json(request): Json<ExpireRequest>,
@@ -347,7 +347,7 @@ async fn set_expire(
     ),
     tag = "Keys"
 )]
-async fn persist_key(
+pub async fn persist_key(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<PersistResponse>>, CacheError> {
@@ -373,7 +373,7 @@ async fn persist_key(
     ),
     tag = "Keys"
 )]
-async fn get_type(
+pub async fn get_type(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<TypeResponse>>, CacheError> {
@@ -397,7 +397,7 @@ async fn get_type(
     ),
     tag = "Keys"
 )]
-async fn rename_key(
+pub async fn rename_key(
     State(state): State<AppState>,
     Path(key): Path<String>,
     Json(request): Json<RenameRequest>,
@@ -430,7 +430,7 @@ async fn rename_key(
     ),
     tag = "Keys"
 )]
-async fn copy_key(
+pub async fn copy_key(
     State(state): State<AppState>,
     Path(key): Path<String>,
     Json(request): Json<CopyRequest>,
@@ -461,7 +461,7 @@ async fn copy_key(
     ),
     tag = "Keys"
 )]
-async fn dump_key(
+pub async fn dump_key(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<DumpResponse>>, CacheError> {
@@ -488,7 +488,7 @@ async fn dump_key(
     ),
     tag = "Keys"
 )]
-async fn restore_key(
+pub async fn restore_key(
     State(state): State<AppState>,
     Path(key): Path<String>,
     Json(request): Json<RestoreRequest>,
@@ -519,7 +519,7 @@ async fn restore_key(
     ),
     tag = "Keys"
 )]
-async fn get_object_info(
+pub async fn get_object_info(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<ObjectInfoResponse>>, CacheError> {

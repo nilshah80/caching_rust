@@ -45,7 +45,19 @@ use crate::api::http::schemas::strings::{
     MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
     SetStringResponse, StrLenResponse,
 };
-use crate::api::http::schemas::common::{KeyInfo, PaginationParams, ScanParams, TtlInfo};
+use crate::api::http::schemas::common::{KeyInfo, PaginationParams, TtlInfo};
+use crate::api::http::schemas::keys::{
+    ScanParams, DeleteKeysRequest, DeleteKeysResponse, ExistsRequest, ExistsResponse,
+    ExpireRequest, ExpireResponse, TtlResponse, PersistResponse, TypeResponse,
+    RenameRequest, RenameResponse, CopyRequest, CopyResponse, ScanResponse,
+    KeysParams, KeysResponse, TouchRequest, TouchResponse, RandomKeyResponse,
+    DumpResponse, RestoreRequest, RestoreResponse, ObjectInfoResponse, KeyInfoResponse,
+};
+use crate::api::http::schemas::hashes::{
+    GetMultipleFieldsRequest, HashFieldEntry, HashIncrFloatRequest, HashIncrRequest,
+    HashRandomFieldResponse, HashScanResponse, RandomFieldQuery, ScanHashQuery,
+    SetHashNxRequest, SetHashRequest,
+};
 use crate::domain::entities::StringValue;
 use crate::domain::errors::{ErrorDetail, ErrorResponse};
 use crate::infrastructure::redis::capabilities::{
@@ -69,7 +81,9 @@ use crate::shared::app_state::AppState;
     ),
     tags(
         (name = "Health", description = "Health check endpoints"),
+        (name = "Keys", description = "Redis key management operations (DELETE, EXISTS, EXPIRE, TTL, RENAME, COPY, SCAN, etc.)"),
         (name = "Strings", description = "Redis string operations (GET, SET, MGET, MSET, INCR, etc.)"),
+        (name = "Hashes", description = "Redis hash operations (HGET, HSET, HMGET, HGETALL, HINCRBY, etc.)"),
         (name = "Admin", description = "Administrative endpoints (pool stats, capabilities, server info, database ops, config, persistence, client management, monitoring, ACL)")
     ),
     paths(
@@ -77,6 +91,24 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::health::health,
         crate::api::http::routes::health::readiness,
         crate::api::http::routes::health::liveness,
+        // Key endpoints
+        crate::api::http::routes::keys::delete_keys,
+        crate::api::http::routes::keys::exists_keys,
+        crate::api::http::routes::keys::touch_keys,
+        crate::api::http::routes::keys::scan_keys,
+        crate::api::http::routes::keys::list_keys,
+        crate::api::http::routes::keys::random_key,
+        crate::api::http::routes::keys::get_key_info,
+        crate::api::http::routes::keys::delete_single_key,
+        crate::api::http::routes::keys::get_ttl,
+        crate::api::http::routes::keys::set_expire,
+        crate::api::http::routes::keys::persist_key,
+        crate::api::http::routes::keys::get_type,
+        crate::api::http::routes::keys::rename_key,
+        crate::api::http::routes::keys::copy_key,
+        crate::api::http::routes::keys::dump_key,
+        crate::api::http::routes::keys::restore_key,
+        crate::api::http::routes::keys::get_object_info,
         // String endpoints
         crate::api::http::routes::strings::get_string,
         crate::api::http::routes::strings::set_string,
@@ -90,6 +122,22 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::strings::get_range,
         crate::api::http::routes::strings::set_range,
         crate::api::http::routes::strings::get_ex_string,
+        // Hash endpoints
+        crate::api::http::routes::hashes::hget,
+        crate::api::http::routes::hashes::hset,
+        crate::api::http::routes::hashes::hset_nx,
+        crate::api::http::routes::hashes::hgetall,
+        crate::api::http::routes::hashes::hmget,
+        crate::api::http::routes::hashes::hdel,
+        crate::api::http::routes::hashes::hexists,
+        crate::api::http::routes::hashes::hkeys,
+        crate::api::http::routes::hashes::hvals,
+        crate::api::http::routes::hashes::hlen,
+        crate::api::http::routes::hashes::hincr_by,
+        crate::api::http::routes::hashes::hincr_by_float,
+        crate::api::http::routes::hashes::hstr_len,
+        crate::api::http::routes::hashes::hrand_field,
+        crate::api::http::routes::hashes::hscan,
         // Admin - Public endpoints
         crate::api::http::routes::admin::get_pool_stats,
         crate::api::http::routes::admin::get_capabilities,
@@ -150,8 +198,33 @@ use crate::shared::app_state::AppState;
             ErrorDetail,
             KeyInfo,
             PaginationParams,
-            ScanParams,
             TtlInfo,
+            // Key schemas
+            ScanParams,
+            DeleteKeysRequest,
+            DeleteKeysResponse,
+            ExistsRequest,
+            ExistsResponse,
+            ExpireRequest,
+            ExpireResponse,
+            TtlResponse,
+            PersistResponse,
+            TypeResponse,
+            RenameRequest,
+            RenameResponse,
+            CopyRequest,
+            CopyResponse,
+            ScanResponse,
+            KeysParams,
+            KeysResponse,
+            TouchRequest,
+            TouchResponse,
+            RandomKeyResponse,
+            DumpResponse,
+            RestoreRequest,
+            RestoreResponse,
+            ObjectInfoResponse,
+            KeyInfoResponse,
             // String schemas
             StringValue,
             SetStringRequest,
@@ -171,6 +244,17 @@ use crate::shared::app_state::AppState;
             SetRangeRequest,
             SetRangeResponse,
             GetExParams,
+            // Hash schemas
+            SetHashRequest,
+            SetHashNxRequest,
+            GetMultipleFieldsRequest,
+            HashIncrRequest,
+            HashIncrFloatRequest,
+            ScanHashQuery,
+            RandomFieldQuery,
+            HashFieldEntry,
+            HashScanResponse,
+            HashRandomFieldResponse,
             // Admin - Pool & Capabilities
             PoolStats,
             RedisCapabilities,

@@ -262,7 +262,7 @@ pub async fn test_hot_key(base_url: &str) -> Result<TestResult> {
     println!("\n=== Starting {} Test ===", test_name);
 
     let client = LoadTestClient::new(base_url)?;
-    let metrics = create_metrics(test_name);
+    let _metrics = create_metrics(test_name);
 
     let hot_key = "hot_key_test";
 

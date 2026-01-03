@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// HTTP client configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
     /// Base URL for the service
@@ -39,6 +40,7 @@ impl Default for ClientConfig {
 }
 
 /// Response wrapper for API calls
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
@@ -47,6 +49,7 @@ pub struct ApiResponse<T> {
 }
 
 /// String value response
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct StringValue {
     pub value: String,
@@ -122,6 +125,7 @@ impl LoadTestClient {
     }
 
     /// Get base URL
+    #[allow(dead_code)]
     pub fn base_url(&self) -> &str {
         &self.config.base_url
     }
@@ -185,6 +189,7 @@ impl LoadTestClient {
     }
 
     /// Delete a string value (GETDEL)
+    #[allow(dead_code)]
     pub async fn delete_string(&self, key: &str) -> Result<Option<String>> {
         let url = format!("{}/api/v1/strings/{}", self.config.base_url, key);
         let resp = self.client.delete(&url).send().await?;
@@ -244,6 +249,7 @@ impl LoadTestClient {
     }
 
     /// Decrement a counter
+    #[allow(dead_code)]
     pub async fn decr(&self, key: &str, delta: Option<i64>) -> Result<i64> {
         let url = format!("{}/api/v1/strings/{}/decr", self.config.base_url, key);
         let body = IncrementRequest { delta };
@@ -259,6 +265,7 @@ impl LoadTestClient {
     }
 
     /// Append to a string
+    #[allow(dead_code)]
     pub async fn append(&self, key: &str, value: &str) -> Result<u64> {
         let url = format!("{}/api/v1/strings/{}/append", self.config.base_url, key);
 
@@ -288,6 +295,7 @@ impl LoadTestClient {
     }
 
     /// Get string length
+    #[allow(dead_code)]
     pub async fn strlen(&self, key: &str) -> Result<u64> {
         let url = format!("{}/api/v1/strings/{}/length", self.config.base_url, key);
 
@@ -307,6 +315,7 @@ impl LoadTestClient {
     }
 
     /// Execute a request with retry logic
+    #[allow(dead_code)]
     pub async fn with_retry<F, Fut, T>(&self, operation: F) -> Result<T>
     where
         F: Fn() -> Fut,

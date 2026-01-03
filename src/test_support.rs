@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, KeyService, StringService};
+use crate::application::services::{AdminService, HashService, KeyService, StringService};
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, CopyOptions, CopyResult, DeleteResult, DumpResult,
@@ -17,7 +17,7 @@ use crate::domain::entities::{
     SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::{AdminRepository, KeyRepository, StringRepository};
+use crate::domain::repositories::{AdminRepository, HashRepository, KeyRepository, StringRepository};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -693,8 +693,216 @@ impl KeyRepository for MockKeyRepository {
     }
 }
 
+#[derive(Default)]
+pub struct MockHashRepository {
+    store: Mutex<HashMap<String, HashMap<String, String>>>,
+}
+
+impl MockHashRepository {
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn insert(&self, key: &str, field: &str, value: &str) {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        entry.insert(field.to_string(), value.to_string());
+    }
+}
+
+#[async_trait]
+impl HashRepository for MockHashRepository {
+    async fn hget(&self, key: &str, field: &str) -> Result<Option<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).and_then(|map| map.get(field).cloned()))
+    }
+
+    async fn hset(&self, key: &str, pairs: Vec<(String, String)>) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let mut new_fields = 0;
+        for (field, value) in pairs {
+            if !entry.contains_key(&field) {
+                new_fields += 1;
+            }
+            entry.insert(field, value);
+        }
+        Ok(new_fields)
+    }
+
+    async fn hset_nx(&self, key: &str, field: &str, value: &str) -> Result<bool, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        if entry.contains_key(field) {
+            return Ok(false);
+        }
+        entry.insert(field.to_string(), value.to_string());
+        Ok(true)
+    }
+
+    async fn hgetall(&self, key: &str) -> Result<HashMap<String, String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).cloned().unwrap_or_default())
+    }
+
+    async fn hmget(&self, key: &str, fields: &[String]) -> Result<Vec<Option<String>>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let map = store.get(key);
+        Ok(fields
+            .iter()
+            .map(|field| map.and_then(|m| m.get(field).cloned()))
+            .collect())
+    }
+
+    async fn hmset(&self, key: &str, pairs: Vec<(String, String)>) -> Result<(), CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        for (field, value) in pairs {
+            entry.insert(field, value);
+        }
+        Ok(())
+    }
+
+    async fn hdel(&self, key: &str, fields: &[String]) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let mut removed = 0;
+        for field in fields {
+            if entry.remove(field).is_some() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    async fn hexists(&self, key: &str, field: &str) -> Result<bool, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store
+            .get(key)
+            .map_or(false, |map| map.contains_key(field)))
+    }
+
+    async fn hkeys(&self, key: &str) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store
+            .get(key)
+            .map(|map| map.keys().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    async fn hvals(&self, key: &str) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store
+            .get(key)
+            .map(|map| map.values().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    async fn hlen(&self, key: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map_or(0, |map| map.len() as i64))
+    }
+
+    async fn hincr_by(&self, key: &str, field: &str, delta: i64) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let current = entry
+            .get(field)
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(0);
+        let next = current + delta;
+        entry.insert(field.to_string(), next.to_string());
+        Ok(next)
+    }
+
+    async fn hincr_by_float(&self, key: &str, field: &str, delta: f64) -> Result<f64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let current = entry
+            .get(field)
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let next = current + delta;
+        entry.insert(field.to_string(), next.to_string());
+        Ok(next)
+    }
+
+    async fn hstr_len(&self, key: &str, field: &str) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store
+            .get(key)
+            .and_then(|map| map.get(field))
+            .map_or(0, |value| value.len() as i64))
+    }
+
+    async fn hrand_field(&self, key: &str, count: Option<i64>, with_values: bool) -> Result<Vec<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let map = match store.get(key) {
+            Some(map) => map,
+            None => return Ok(Vec::new()),
+        };
+        let mut fields: Vec<String> = map.keys().cloned().collect();
+        fields.sort();
+
+        if count.is_none() {
+            return Ok(fields.into_iter().take(1).collect());
+        }
+
+        let count = count.unwrap();
+        let count = if count < 0 { -count } else { count } as usize;
+        let selected = fields.into_iter().take(count).collect::<Vec<_>>();
+
+        if with_values {
+            let mut result = Vec::new();
+            for field in selected {
+                if let Some(value) = map.get(&field) {
+                    result.push(field);
+                    result.push(value.clone());
+                }
+            }
+            Ok(result)
+        } else {
+            Ok(selected)
+        }
+    }
+
+    async fn hscan(&self, key: &str, _cursor: u64, pattern: Option<String>, count: Option<u64>) -> Result<(u64, Vec<String>), CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let map = match store.get(key) {
+            Some(map) => map,
+            None => return Ok((0, Vec::new())),
+        };
+        let pattern = pattern.unwrap_or_default().replace('*', "");
+        let mut result = Vec::new();
+        for (field, value) in map.iter() {
+            if pattern.is_empty() || field.contains(&pattern) {
+                result.push(field.clone());
+                result.push(value.clone());
+            }
+            if let Some(limit) = count {
+                if (result.len() / 2) as u64 >= limit {
+                    break;
+                }
+            }
+        }
+        Ok((0, result))
+    }
+}
+
 pub fn test_state_with_repos(
     string_repo: Arc<MockStringRepository>,
+    key_repo: Arc<MockKeyRepository>,
+    admin_repo: Arc<MockAdminRepository>,
+) -> AppState {
+    let hash_repo = Arc::new(MockHashRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, key_repo, admin_repo)
+}
+
+pub fn test_state_with_all_repos(
+    string_repo: Arc<MockStringRepository>,
+    hash_repo: Arc<MockHashRepository>,
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
 ) -> AppState {
@@ -702,10 +910,11 @@ pub fn test_state_with_repos(
     let config = Arc::new(Settings::default());
     let capabilities = Arc::new(RedisCapabilities::default_capabilities());
     let string_service = Arc::new(StringService::new_with_repository(string_repo));
+    let hash_service = Arc::new(HashService::new_with_repository(hash_repo));
     let key_service = Arc::new(KeyService::new_with_repository(key_repo));
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, key_service, admin_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, key_service, admin_service)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
@@ -714,4 +923,13 @@ pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyReposito
     let admin_repo = Arc::new(MockAdminRepository::default());
     let state = test_state_with_repos(string_repo.clone(), key_repo.clone(), admin_repo.clone());
     (state, string_repo, key_repo, admin_repo)
+}
+
+pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), key_repo, admin_repo);
+    (state, hash_repo)
 }
