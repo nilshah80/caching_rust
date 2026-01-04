@@ -3,6 +3,7 @@
 //! Concrete implementations of domain repository traits using Redis.
 
 mod admin_repo;
+mod bloom_repo;
 mod hash_repo;
 mod json_repo;
 mod key_repo;
@@ -14,6 +15,7 @@ mod stream_repo;
 mod string_repo;
 
 pub use admin_repo::RedisAdminRepository;
+pub use bloom_repo::RedisBloomRepository;
 pub use hash_repo::RedisHashRepository;
 pub use json_repo::RedisJsonRepository;
 pub use key_repo::RedisKeyRepository;

@@ -3,6 +3,7 @@
 //! Abstract interfaces for data access.
 
 mod admin_repository;
+mod bloom_repository;
 mod hash_repository;
 mod json_repository;
 mod key_repository;
@@ -14,6 +15,7 @@ mod stream_repository;
 mod string_repository;
 
 pub use admin_repository::AdminRepository;
+pub use bloom_repository::BloomRepository;
 pub use hash_repository::HashRepository;
 pub use json_repository::JsonRepository;
 pub use key_repository::KeyRepository;

@@ -3,6 +3,7 @@
 //! Route definitions for all API endpoints.
 
 mod admin;
+mod bloom;
 mod hashes;
 mod health;
 mod json;
@@ -16,6 +17,7 @@ mod streams;
 mod strings;
 
 pub use admin::admin_routes;
+pub use bloom::bloom_routes;
 pub use hashes::hash_routes;
 pub use health::health_routes;
 pub use json::json_routes;
@@ -72,9 +74,13 @@ pub fn build_router(state: AppState) -> Router {
         router = router.merge(search_routes());
     }
 
+    // Conditionally add Bloom routes (requires RedisBloom module)
+    if capabilities.modules.bloom {
+        router = router.merge(bloom_routes());
+    }
+
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:
-    // - bloom_routes() (requires RedisBloom module)
     // - timeseries_routes() (requires RedisTimeSeries module)
     // - functions_routes() (Redis 7.0+)
 
@@ -85,7 +91,7 @@ pub fn build_router(state: AppState) -> Router {
 mod tests {
     use super::*;
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
-    use crate::test_support::{test_state_with_json_repo, test_state_with_search_repo};
+    use crate::test_support::{test_state_with_bloom_repo, test_state_with_json_repo, test_state_with_search_repo};
     use axum::http::Request;
     use std::sync::Arc;
     use tower::ServiceExt;
@@ -133,6 +139,26 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/search/indices")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_with_bloom_routes() {
+        let (mut state, _) = test_state_with_bloom_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.modules.bloom = true;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/bloom/test-key")
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )

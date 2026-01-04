@@ -6,8 +6,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, HashService, JsonService, KeyService, ListService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::domain::entities::{
+    // Bloom entities
+    BloomAddResult, BloomCardResult, BloomExistsResult, BloomInfo, BloomInsertOptions,
+    BloomInsertResult, BloomLoadChunkResult, BloomReserveOptions, BloomReserveResult,
+    BloomScanDumpResult, CuckooAddResult, CuckooCountResult, CuckooDelResult, CuckooExistsResult,
+    CuckooInfo, CuckooInsertOptions, CuckooInsertResult, CuckooLoadChunkResult,
+    CuckooReserveOptions, CuckooReserveResult, CuckooScanDumpResult,
     AclLogEntry, AutoClaimResult, BgRewriteAofResult, BgSaveResult, ClaimResult, ClientInfo,
     ClientKillOptions, ClientPauseOptions, ConsumerGroupInfo, ConsumerInfo, CopyKeyOptions,
     CopyOptions, CopyResult, DeleteResult, DumpResult, ExistsResult, ExpireOptions, ExpireResult,
@@ -31,7 +37,7 @@ use crate::domain::entities::{
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    AdminRepository, BlockingPopResult, HashRepository, InsertPosition, JsonRepository, KeyRepository,
+    AdminRepository, BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository, KeyRepository,
     LexRange, ListDirection, ListRepository, LPosOptions, ScoreRange, ScoredMember,
     SearchRepository, SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
     ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
@@ -1431,7 +1437,8 @@ pub fn test_state_with_repos(
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo)
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1446,6 +1453,7 @@ pub fn test_state_with_all_repos(
     stream_repo: Arc<MockStreamRepository>,
     json_repo: Arc<MockJsonRepository>,
     search_repo: Arc<MockSearchRepository>,
+    bloom_repo: Arc<MockBloomRepository>,
 ) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
     let config = Arc::new(Settings::default());
@@ -1460,8 +1468,9 @@ pub fn test_state_with_all_repos(
     let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
     let json_service = Arc::new(JsonService::new_with_repository(json_repo));
     let search_service = Arc::new(SearchService::new_with_repository(search_repo));
+    let bloom_service = Arc::new(BloomService::new_with_repository(bloom_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
@@ -1483,7 +1492,8 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo);
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
     (state, hash_repo)
 }
 
@@ -1498,7 +1508,8 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo);
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
     (state, list_repo)
 }
 
@@ -1513,7 +1524,8 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo);
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
     (state, set_repo)
 }
 
@@ -1528,7 +1540,8 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo);
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
     (state, sorted_set_repo)
 }
 
@@ -1543,7 +1556,8 @@ pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo);
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo);
     (state, stream_repo)
 }
 
@@ -1558,7 +1572,8 @@ pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo);
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo);
     (state, json_repo)
 }
 
@@ -1573,8 +1588,25 @@ pub fn test_state_with_search_repo() -> (AppState, Arc<MockSearchRepository>) {
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone());
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo);
     (state, search_repo)
+}
+
+pub fn test_state_with_bloom_repo() -> (AppState, Arc<MockBloomRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone());
+    (state, bloom_repo)
 }
 
 /// Mock Sorted Set Repository for testing
@@ -2871,6 +2903,201 @@ impl SearchRepository for MockSearchRepository {
         Ok(DictDumpResult {
             dict: dict.to_string(),
             terms: vec![],
+        })
+    }
+}
+
+/// Mock Bloom Repository for testing
+pub struct MockBloomRepository;
+
+impl MockBloomRepository {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MockBloomRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl BloomRepository for MockBloomRepository {
+    async fn bf_reserve(&self, key: &str, _options: BloomReserveOptions) -> Result<BloomReserveResult, CacheError> {
+        Ok(BloomReserveResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn bf_add(&self, key: &str, _item: &str) -> Result<BloomAddResult, CacheError> {
+        Ok(BloomAddResult {
+            key: key.to_string(),
+            results: vec![true],
+        })
+    }
+
+    async fn bf_madd(&self, key: &str, items: Vec<String>) -> Result<BloomAddResult, CacheError> {
+        Ok(BloomAddResult {
+            key: key.to_string(),
+            results: vec![true; items.len()],
+        })
+    }
+
+    async fn bf_exists(&self, key: &str, _item: &str) -> Result<BloomExistsResult, CacheError> {
+        Ok(BloomExistsResult {
+            key: key.to_string(),
+            results: vec![true],
+        })
+    }
+
+    async fn bf_mexists(&self, key: &str, items: Vec<String>) -> Result<BloomExistsResult, CacheError> {
+        Ok(BloomExistsResult {
+            key: key.to_string(),
+            results: vec![true; items.len()],
+        })
+    }
+
+    async fn bf_insert(&self, key: &str, _options: BloomInsertOptions, items: Vec<String>) -> Result<BloomInsertResult, CacheError> {
+        Ok(BloomInsertResult {
+            key: key.to_string(),
+            results: vec![true; items.len()],
+        })
+    }
+
+    async fn bf_info(&self, _key: &str) -> Result<BloomInfo, CacheError> {
+        Ok(BloomInfo {
+            num_filters: 1,
+            num_items_inserted: 100,
+            capacity: 1000,
+            size: 2048,
+            expansion: Some(2),
+        })
+    }
+
+    async fn bf_card(&self, key: &str) -> Result<BloomCardResult, CacheError> {
+        Ok(BloomCardResult {
+            key: key.to_string(),
+            cardinality: 100,
+        })
+    }
+
+    async fn bf_scandump(&self, _key: &str, iterator: u64) -> Result<BloomScanDumpResult, CacheError> {
+        if iterator == 0 {
+            Ok(BloomScanDumpResult {
+                iterator: 1,
+                data: Some("dGVzdA==".to_string()),
+            })
+        } else {
+            Ok(BloomScanDumpResult {
+                iterator: 0,
+                data: None,
+            })
+        }
+    }
+
+    async fn bf_loadchunk(&self, key: &str, _iterator: u64, _data: &[u8]) -> Result<BloomLoadChunkResult, CacheError> {
+        Ok(BloomLoadChunkResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn cf_reserve(&self, key: &str, _options: CuckooReserveOptions) -> Result<CuckooReserveResult, CacheError> {
+        Ok(CuckooReserveResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn cf_add(&self, key: &str, _item: &str) -> Result<CuckooAddResult, CacheError> {
+        Ok(CuckooAddResult {
+            key: key.to_string(),
+            added: true,
+        })
+    }
+
+    async fn cf_addnx(&self, key: &str, _item: &str) -> Result<CuckooAddResult, CacheError> {
+        Ok(CuckooAddResult {
+            key: key.to_string(),
+            added: true,
+        })
+    }
+
+    async fn cf_insert(&self, key: &str, _options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+        Ok(CuckooInsertResult {
+            key: key.to_string(),
+            results: vec![true; items.len()],
+        })
+    }
+
+    async fn cf_insertnx(&self, key: &str, _options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+        Ok(CuckooInsertResult {
+            key: key.to_string(),
+            results: vec![true; items.len()],
+        })
+    }
+
+    async fn cf_exists(&self, key: &str, _item: &str) -> Result<CuckooExistsResult, CacheError> {
+        Ok(CuckooExistsResult {
+            key: key.to_string(),
+            results: vec![true],
+        })
+    }
+
+    async fn cf_mexists(&self, key: &str, items: Vec<String>) -> Result<CuckooExistsResult, CacheError> {
+        Ok(CuckooExistsResult {
+            key: key.to_string(),
+            results: vec![true; items.len()],
+        })
+    }
+
+    async fn cf_del(&self, key: &str, _item: &str) -> Result<CuckooDelResult, CacheError> {
+        Ok(CuckooDelResult {
+            key: key.to_string(),
+            deleted: true,
+        })
+    }
+
+    async fn cf_count(&self, key: &str, _item: &str) -> Result<CuckooCountResult, CacheError> {
+        Ok(CuckooCountResult {
+            key: key.to_string(),
+            count: 1,
+        })
+    }
+
+    async fn cf_info(&self, _key: &str) -> Result<CuckooInfo, CacheError> {
+        Ok(CuckooInfo {
+            size: 4096,
+            num_buckets: 512,
+            num_filters: 1,
+            num_items_inserted: 100,
+            num_items_deleted: 5,
+            bucket_size: 2,
+            expansion_rate: 1,
+            max_iterations: 20,
+        })
+    }
+
+    async fn cf_scandump(&self, _key: &str, iterator: u64) -> Result<CuckooScanDumpResult, CacheError> {
+        if iterator == 0 {
+            Ok(CuckooScanDumpResult {
+                iterator: 1,
+                data: Some("dGVzdA==".to_string()),
+            })
+        } else {
+            Ok(CuckooScanDumpResult {
+                iterator: 0,
+                data: None,
+            })
+        }
+    }
+
+    async fn cf_loadchunk(&self, key: &str, _iterator: u64, _data: &[u8]) -> Result<CuckooLoadChunkResult, CacheError> {
+        Ok(CuckooLoadChunkResult {
+            key: key.to_string(),
+            success: true,
         })
     }
 }

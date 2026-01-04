@@ -1300,39 +1300,73 @@ Go service does NOT support Stream operations.
 - ✅ Tested: Query explain/execution plans
 - ✅ Tested: Highlighting (HASH only - not supported for JSON)
 
-### 4.3 RedisBloom Operations
-- [ ] **Task 4.3.1**: Implement Bloom Filter operations (gated by `capabilities.modules.bloom`)
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | BF.RESERVE | `bf_reserve` | High |
-  | BF.ADD | `bf_add` | High |
-  | BF.MADD | `bf_madd` | High |
-  | BF.EXISTS | `bf_exists` | High |
-  | BF.MEXISTS | `bf_mexists` | High |
-  | BF.INSERT | `bf_insert` | Medium |
-  | BF.INFO | `bf_info` | High |
-  | BF.SCANDUMP | `bf_scandump` | Low |
-  | BF.LOADCHUNK | `bf_loadchunk` | Low |
-  | BF.CARD | `bf_card` | Medium |
+### 4.3 RedisBloom Operations ✅ COMPLETED
+- [x] **Task 4.3.1**: Implement Bloom Filter operations (gated by `capabilities.modules.bloom`)
+  - Created `src/domain/entities/bloom_value.rs` with Bloom/Cuckoo domain entities
+  - Created `src/domain/repositories/bloom_repository.rs` with BloomRepository trait
+  - Created `src/infrastructure/redis/repositories/bloom_repo.rs` with RedisBloomRepository implementation
+  - Added MockBloomRepository to test_support.rs
 
-- [ ] **Task 4.3.2**: Implement Cuckoo Filter operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | CF.RESERVE | `cf_reserve` | High |
-  | CF.ADD | `cf_add` | High |
-  | CF.ADDNX | `cf_addnx` | Medium |
-  | CF.INSERT | `cf_insert` | Medium |
-  | CF.INSERTNX | `cf_insertnx` | Medium |
-  | CF.EXISTS | `cf_exists` | High |
-  | CF.MEXISTS | `cf_mexists` | Medium |
-  | CF.DEL | `cf_del` | High |
-  | CF.COUNT | `cf_count` | Medium |
-  | CF.SCANDUMP | `cf_scandump` | Low |
-  | CF.LOADCHUNK | `cf_loadchunk` | Low |
-  | CF.INFO | `cf_info` | High |
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | BF.RESERVE | `bf_reserve` | ✅ Implemented with error_rate, capacity, expansion, nonscaling options |
+  | BF.ADD | `bf_add` | ✅ Implemented |
+  | BF.MADD | `bf_madd` | ✅ Implemented |
+  | BF.EXISTS | `bf_exists` | ✅ Implemented |
+  | BF.MEXISTS | `bf_mexists` | ✅ Implemented |
+  | BF.INSERT | `bf_insert` | ✅ Implemented with auto-creation options |
+  | BF.INFO | `bf_info` | ✅ Implemented |
+  | BF.SCANDUMP | `bf_scandump` | ✅ Implemented with base64 encoding |
+  | BF.LOADCHUNK | `bf_loadchunk` | ✅ Implemented |
+  | BF.CARD | `bf_card` | ✅ Implemented |
 
-- [ ] **Task 4.3.3**: Create Bloom/Cuckoo API routes
-- [ ] **Task 4.3.4**: Create Bloom/Cuckoo request/response schemas
+- [x] **Task 4.3.2**: Implement Cuckoo Filter operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | CF.RESERVE | `cf_reserve` | ✅ Implemented with capacity, bucket_size, max_iterations, expansion options |
+  | CF.ADD | `cf_add` | ✅ Implemented |
+  | CF.ADDNX | `cf_addnx` | ✅ Implemented |
+  | CF.INSERT | `cf_insert` | ✅ Implemented with capacity, nocreate options |
+  | CF.INSERTNX | `cf_insertnx` | ✅ Implemented |
+  | CF.EXISTS | `cf_exists` | ✅ Implemented |
+  | CF.MEXISTS | `cf_mexists` | ✅ Implemented |
+  | CF.DEL | `cf_del` | ✅ Implemented (unique to Cuckoo - supports deletion) |
+  | CF.COUNT | `cf_count` | ✅ Implemented |
+  | CF.SCANDUMP | `cf_scandump` | ✅ Implemented with base64 encoding |
+  | CF.LOADCHUNK | `cf_loadchunk` | ✅ Implemented |
+  | CF.INFO | `cf_info` | ✅ Implemented |
+
+- [x] **Task 4.3.3**: Create Bloom/Cuckoo API routes
+  - Created `src/api/http/routes/bloom.rs` with comprehensive REST endpoints
+  - Bloom: POST/GET `/api/v1/bloom/{key}`, POST `/add`, `/exists`, `/insert`, GET `/card`, `/scandump`, POST `/loadchunk`
+  - Cuckoo: POST/GET `/api/v1/cuckoo/{key}`, POST `/add`, `/addnx`, `/exists`, `/insert`, `/insertnx`, DELETE `/del`, POST `/count`, GET `/scandump`, POST `/loadchunk`
+  - Routes conditionally registered when `capabilities.modules.bloom == true`
+- [x] **Task 4.3.4**: Create Bloom/Cuckoo request/response schemas
+  - Created `src/api/http/schemas/bloom.rs` with comprehensive DTOs
+  - Full OpenAPI documentation with utoipa annotations
+  - Validation using validator crate
+
+**Files Created:**
+- `src/domain/entities/bloom_value.rs` (~340 lines)
+- `src/domain/repositories/bloom_repository.rs` (~80 lines)
+- `src/infrastructure/redis/repositories/bloom_repo.rs` (~650 lines)
+- `src/application/services/bloom_service.rs` (~310 lines)
+- `src/api/http/schemas/bloom.rs` (~450 lines)
+- `src/api/http/routes/bloom.rs` (~770 lines)
+
+**Integration Testing Completed:**
+- ✅ BF.RESERVE - Create Bloom filter with error rate and capacity
+- ✅ BF.ADD/BF.MADD - Add items to filter
+- ✅ BF.EXISTS/BF.MEXISTS - Check item existence (apple=true, orange=false)
+- ✅ BF.INFO - Get filter information
+- ✅ BF.CARD - Get cardinality estimate
+- ✅ BF.INSERT - Insert with auto-creation
+- ✅ CF.RESERVE - Create Cuckoo filter
+- ✅ CF.ADD/CF.ADDNX - Add items
+- ✅ CF.EXISTS - Check existence
+- ✅ CF.COUNT - Count item occurrences
+- ✅ CF.DEL - Delete items
+- ✅ CF.INSERT/CF.INSERTNX - Bulk insert with options
 
 ### 4.4 Probabilistic Data Structures
 - [ ] **Task 4.4.1**: Implement Count-Min Sketch operations (gated by `capabilities.modules.bloom`)

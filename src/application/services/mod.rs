@@ -3,6 +3,7 @@
 //! Service layer containing business logic for each domain.
 
 mod admin_service;
+mod bloom_service;
 mod hash_service;
 mod json_service;
 mod key_service;
@@ -14,6 +15,7 @@ mod stream_service;
 mod string_service;
 
 pub use admin_service::AdminService;
+pub use bloom_service::BloomService;
 pub use hash_service::HashService;
 pub use json_service::JsonService;
 pub use key_service::KeyService;

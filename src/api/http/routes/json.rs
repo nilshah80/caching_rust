@@ -810,7 +810,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, HashService, JsonService, KeyService, ListService, SearchService, SetService,
+        AdminService, BloomService, HashService, JsonService, KeyService, ListService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
     use crate::api::http::schemas::json::JsonMSetItemRequest;
@@ -826,7 +826,7 @@ mod tests {
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
-        MockAdminRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
+        MockAdminRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
         MockListRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository,
         MockStreamRepository, MockStringRepository, test_state_with_json_repo,
     };
@@ -1042,6 +1042,8 @@ mod tests {
         let json_service = Arc::new(JsonService::new_with_repository(repo));
         let search_service =
             Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
+        let bloom_service =
+            Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
 
         AppState::new_with_services(
             pool,
@@ -1057,6 +1059,7 @@ mod tests {
             stream_service,
             json_service,
             search_service,
+            bloom_service,
         )
     }
 
