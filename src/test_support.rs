@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, HashService, JsonService, KeyService, ListService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, HashService, JsonService, KeyService, ListService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::domain::entities::{
     AclLogEntry, AutoClaimResult, BgRewriteAofResult, BgSaveResult, ClaimResult, ClientInfo,
     ClientKillOptions, ClientPauseOptions, ConsumerGroupInfo, ConsumerInfo, CopyKeyOptions,
@@ -22,12 +22,18 @@ use crate::domain::entities::{
     JsonGetResult, JsonMGetItem, JsonMGetResult, JsonMSetItem, JsonNumResult, JsonObjKeysResult,
     JsonObjLenResult, JsonRespResult, JsonSetOptions, JsonSetResult, JsonStrAppendResult,
     JsonStrLenResult, JsonToggleResult, JsonTypeResult,
+    // Search entities
+    AggregateOptions, AggregateResult, AliasResult, DictDumpResult, DictResult, ExplainResult,
+    IndexAlterResult, IndexCreateOptions, IndexCreateResult, IndexDropResult, IndexInfo,
+    ProfileResult, ProfileType, SearchFieldSchema, SearchOptions, SearchResult, SpellcheckOptions,
+    SpellcheckResult, SugAddOptions, SugAddResult, SugDelResult, SugGetOptions, SugLenResult,
+    Suggestion, SynonymGroup, SynonymUpdateResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BlockingPopResult, HashRepository, InsertPosition, JsonRepository, KeyRepository,
     LexRange, ListDirection, ListRepository, LPosOptions, ScoreRange, ScoredMember,
-    SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
+    SearchRepository, SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
     ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
     ZSetAlgebraOptions,
 };
@@ -1424,7 +1430,8 @@ pub fn test_state_with_repos(
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo)
+    let search_repo = Arc::new(MockSearchRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1438,6 +1445,7 @@ pub fn test_state_with_all_repos(
     admin_repo: Arc<MockAdminRepository>,
     stream_repo: Arc<MockStreamRepository>,
     json_repo: Arc<MockJsonRepository>,
+    search_repo: Arc<MockSearchRepository>,
 ) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
     let config = Arc::new(Settings::default());
@@ -1451,8 +1459,9 @@ pub fn test_state_with_all_repos(
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
     let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
     let json_service = Arc::new(JsonService::new_with_repository(json_repo));
+    let search_service = Arc::new(SearchService::new_with_repository(search_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
@@ -1473,7 +1482,8 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo);
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo);
     (state, hash_repo)
 }
 
@@ -1487,7 +1497,8 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo);
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo);
     (state, list_repo)
 }
 
@@ -1501,7 +1512,8 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo);
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo);
     (state, set_repo)
 }
 
@@ -1515,7 +1527,8 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo);
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo);
     (state, sorted_set_repo)
 }
 
@@ -1529,7 +1542,8 @@ pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo);
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo);
     (state, stream_repo)
 }
 
@@ -1543,8 +1557,24 @@ pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone());
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo);
     (state, json_repo)
+}
+
+pub fn test_state_with_search_repo() -> (AppState, Arc<MockSearchRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone());
+    (state, search_repo)
 }
 
 /// Mock Sorted Set Repository for testing
@@ -2601,6 +2631,246 @@ impl JsonRepository for MockJsonRepository {
             key: key.to_string(),
             path: path.to_string(),
             resp: Value::Array(vec![Value::String("{".to_string())]),
+        })
+    }
+}
+
+/// Mock Search Repository for testing
+#[derive(Default)]
+pub struct MockSearchRepository;
+
+impl MockSearchRepository {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl SearchRepository for MockSearchRepository {
+    async fn ft_create(
+        &self,
+        index: &str,
+        _options: &IndexCreateOptions,
+        _schema: &[SearchFieldSchema],
+    ) -> Result<IndexCreateResult, CacheError> {
+        Ok(IndexCreateResult {
+            index: index.to_string(),
+            success: true,
+        })
+    }
+
+    async fn ft_drop_index(
+        &self,
+        index: &str,
+        delete_docs: bool,
+    ) -> Result<IndexDropResult, CacheError> {
+        Ok(IndexDropResult {
+            index: index.to_string(),
+            delete_docs,
+            success: true,
+        })
+    }
+
+    async fn ft_info(&self, index: &str) -> Result<IndexInfo, CacheError> {
+        Ok(IndexInfo {
+            index_name: index.to_string(),
+            index_options: vec![],
+            index_definition: std::collections::HashMap::new(),
+            attributes: vec![],
+            num_docs: 0,
+            max_doc_id: None,
+            num_terms: 0,
+            num_records: None,
+            inverted_sz_mb: None,
+            vector_index_sz_mb: None,
+            total_inverted_index_blocks: None,
+            offset_vectors_sz_mb: None,
+            doc_table_size_mb: None,
+            sortable_values_size_mb: None,
+            key_table_size_mb: None,
+            records_per_doc_avg: None,
+            bytes_per_record_avg: None,
+            offsets_per_term_avg: None,
+            offset_bits_per_record_avg: None,
+            indexing: false,
+            percent_indexed: Some(100.0),
+            hash_indexing_failures: None,
+            gc_stats: std::collections::HashMap::new(),
+            cursor_stats: std::collections::HashMap::new(),
+        })
+    }
+
+    async fn ft_list(&self) -> Result<Vec<String>, CacheError> {
+        Ok(vec!["test_index".to_string()])
+    }
+
+    async fn ft_alter(
+        &self,
+        index: &str,
+        field: &SearchFieldSchema,
+    ) -> Result<IndexAlterResult, CacheError> {
+        Ok(IndexAlterResult {
+            index: index.to_string(),
+            field: field.name.clone(),
+            success: true,
+        })
+    }
+
+    async fn ft_search(
+        &self,
+        _index: &str,
+        _query: &str,
+        _options: &SearchOptions,
+    ) -> Result<SearchResult, CacheError> {
+        Ok(SearchResult {
+            total_results: 0,
+            documents: vec![],
+        })
+    }
+
+    async fn ft_aggregate(
+        &self,
+        _index: &str,
+        _query: &str,
+        _options: &AggregateOptions,
+    ) -> Result<AggregateResult, CacheError> {
+        Ok(AggregateResult {
+            total_results: 0,
+            rows: vec![],
+        })
+    }
+
+    async fn ft_explain(
+        &self,
+        _index: &str,
+        _query: &str,
+        _dialect: Option<u32>,
+    ) -> Result<ExplainResult, CacheError> {
+        Ok(ExplainResult {
+            plan: "INTERSECT".to_string(),
+        })
+    }
+
+    async fn ft_profile(
+        &self,
+        _index: &str,
+        _profile_type: ProfileType,
+        _limited: bool,
+        _query: &str,
+        _search_options: Option<&SearchOptions>,
+        _aggregate_options: Option<&AggregateOptions>,
+    ) -> Result<ProfileResult, CacheError> {
+        Ok(ProfileResult {
+            results: serde_json::Value::Null,
+            profile: std::collections::HashMap::new(),
+        })
+    }
+
+    async fn ft_aliasadd(&self, alias: &str, index: &str) -> Result<AliasResult, CacheError> {
+        Ok(AliasResult {
+            alias: alias.to_string(),
+            index: index.to_string(),
+            success: true,
+        })
+    }
+
+    async fn ft_aliasdel(&self, alias: &str) -> Result<AliasResult, CacheError> {
+        Ok(AliasResult {
+            alias: alias.to_string(),
+            index: String::new(),
+            success: true,
+        })
+    }
+
+    async fn ft_aliasupdate(&self, alias: &str, index: &str) -> Result<AliasResult, CacheError> {
+        Ok(AliasResult {
+            alias: alias.to_string(),
+            index: index.to_string(),
+            success: true,
+        })
+    }
+
+    async fn ft_sugadd(
+        &self,
+        key: &str,
+        _string: &str,
+        _score: f64,
+        _options: &SugAddOptions,
+    ) -> Result<SugAddResult, CacheError> {
+        Ok(SugAddResult {
+            key: key.to_string(),
+            size: 1,
+        })
+    }
+
+    async fn ft_sugget(
+        &self,
+        _key: &str,
+        _prefix: &str,
+        _options: &SugGetOptions,
+    ) -> Result<Vec<Suggestion>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn ft_sugdel(&self, key: &str, _string: &str) -> Result<SugDelResult, CacheError> {
+        Ok(SugDelResult {
+            key: key.to_string(),
+            deleted: true,
+        })
+    }
+
+    async fn ft_suglen(&self, key: &str) -> Result<SugLenResult, CacheError> {
+        Ok(SugLenResult {
+            key: key.to_string(),
+            size: 0,
+        })
+    }
+
+    async fn ft_syndump(&self, _index: &str) -> Result<Vec<SynonymGroup>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn ft_synupdate(
+        &self,
+        index: &str,
+        group_id: &str,
+        _skip_initial_scan: bool,
+        _terms: &[String],
+    ) -> Result<SynonymUpdateResult, CacheError> {
+        Ok(SynonymUpdateResult {
+            index: index.to_string(),
+            group_id: group_id.to_string(),
+            success: true,
+        })
+    }
+
+    async fn ft_spellcheck(
+        &self,
+        _index: &str,
+        _query: &str,
+        _options: &SpellcheckOptions,
+    ) -> Result<SpellcheckResult, CacheError> {
+        Ok(SpellcheckResult { results: vec![] })
+    }
+
+    async fn ft_dictadd(&self, dict: &str, terms: &[String]) -> Result<DictResult, CacheError> {
+        Ok(DictResult {
+            dict: dict.to_string(),
+            count: terms.len() as i64,
+        })
+    }
+
+    async fn ft_dictdel(&self, dict: &str, terms: &[String]) -> Result<DictResult, CacheError> {
+        Ok(DictResult {
+            dict: dict.to_string(),
+            count: terms.len() as i64,
+        })
+    }
+
+    async fn ft_dictdump(&self, dict: &str) -> Result<DictDumpResult, CacheError> {
+        Ok(DictDumpResult {
+            dict: dict.to_string(),
+            terms: vec![],
         })
     }
 }

@@ -87,10 +87,7 @@ async fn json_set(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state
-        .json_service
-        .json_set(&key, &request.path, request.value, request.nx, request.xx)
-        .await?;
+    let result = state.json_service.json_set(&key, &request.path, request.value, request.nx, request.xx).await?;
 
     Ok(Json(ApiResponse::new(JsonSetResponse {
         key: result.key,
@@ -186,10 +183,7 @@ async fn json_mget(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state
-        .json_service
-        .json_mget(request.keys.clone(), &request.path)
-        .await?;
+    let result = state.json_service.json_mget(request.keys.clone(), &request.path).await?;
 
     let results: Vec<JsonMGetItem> = result
         .results
@@ -238,7 +232,8 @@ async fn json_mset(
         })
         .collect();
 
-    state.json_service.json_mset(items).await?;
+    let result = state.json_service.json_mset(items).await;
+    result?;
 
     Ok(Json(ApiResponse::new(())))
 }
@@ -331,10 +326,7 @@ async fn json_str_append(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state
-        .json_service
-        .json_str_append(&key, &request.path, &request.value)
-        .await?;
+    let result = state.json_service.json_str_append(&key, &request.path, &request.value).await?;
 
     Ok(Json(ApiResponse::new(JsonStrAppendResponse {
         key: result.key,
@@ -532,10 +524,7 @@ async fn json_arr_append(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state
-        .json_service
-        .json_arr_append(&key, &request.path, request.values)
-        .await?;
+    let result = state.json_service.json_arr_append(&key, &request.path, request.values).await?;
 
     Ok(Json(ApiResponse::new(JsonArrAppendResponse {
         key: result.key,
@@ -604,10 +593,7 @@ async fn json_arr_insert(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state
-        .json_service
-        .json_arr_insert(&key, &request.path, request.index, request.values)
-        .await?;
+    let result = state.json_service.json_arr_insert(&key, &request.path, request.index, request.values).await?;
 
     Ok(Json(ApiResponse::new(JsonArrInsertResponse {
         key: result.key,
@@ -815,15 +801,19 @@ async fn json_resp(
 mod tests {
     use super::*;
     use axum::body::Body;
+    use axum::extract::{Path, State};
     use axum::http::Request;
+    use axum::Json;
+    use serde_json::json;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, HashService, JsonService, KeyService, ListService, SetService,
+        AdminService, HashService, JsonService, KeyService, ListService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
+    use crate::api::http::schemas::json::JsonMSetItemRequest;
     use crate::domain::entities::{
         JsonArrAppendResult, JsonArrIndexResult, JsonArrInsertResult, JsonArrLenResult,
         JsonArrPopResult, JsonArrTrimResult, JsonClearResult, JsonDebugMemoryResult, JsonDelResult,
@@ -837,8 +827,8 @@ mod tests {
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
         MockAdminRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
-        MockListRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository,
-        MockStringRepository, test_state_with_json_repo,
+        MockListRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository,
+        MockStreamRepository, MockStringRepository, test_state_with_json_repo,
     };
 
     struct SequenceJsonRepository {
@@ -1050,6 +1040,8 @@ mod tests {
         let stream_service =
             Arc::new(StreamService::new_with_repository(Arc::new(MockStreamRepository::new())));
         let json_service = Arc::new(JsonService::new_with_repository(repo));
+        let search_service =
+            Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
 
         AppState::new_with_services(
             pool,
@@ -1064,6 +1056,7 @@ mod tests {
             admin_service,
             stream_service,
             json_service,
+            search_service,
         )
     }
 
@@ -1398,5 +1391,80 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_json_handlers_direct_calls() {
+        let (state, _) = test_state_with_json_repo();
+
+        let response = json_set(
+            State(state.clone()),
+            Path("key".to_string()),
+            Json(JsonSetRequest {
+                value: json!({"a": 1}),
+                path: "$".to_string(),
+                nx: false,
+                xx: false,
+            }),
+        )
+        .await;
+        assert!(response.is_ok());
+
+        let response = json_mget(
+            State(state.clone()),
+            Json(JsonMGetRequest {
+                keys: vec!["k1".to_string()],
+                path: "$".to_string(),
+            }),
+        )
+        .await;
+        assert!(response.is_ok());
+
+        let response = json_mset(
+            State(state.clone()),
+            Json(JsonMSetRequest {
+                items: vec![JsonMSetItemRequest {
+                    key: "k1".to_string(),
+                    path: "$".to_string(),
+                    value: json!({"a": 1}),
+                }],
+            }),
+        )
+        .await;
+        assert!(response.is_ok());
+
+        let response = json_str_append(
+            State(state.clone()),
+            Path("key".to_string()),
+            Json(JsonStrAppendRequest {
+                path: "$".to_string(),
+                value: "more".to_string(),
+            }),
+        )
+        .await;
+        assert!(response.is_ok());
+
+        let response = json_arr_append(
+            State(state.clone()),
+            Path("key".to_string()),
+            Json(JsonArrAppendRequest {
+                path: "$".to_string(),
+                values: vec![json!(1)],
+            }),
+        )
+        .await;
+        assert!(response.is_ok());
+
+        let response = json_arr_insert(
+            State(state),
+            Path("key".to_string()),
+            Json(JsonArrInsertRequest {
+                path: "$".to_string(),
+                index: 0,
+                values: vec![json!(1)],
+            }),
+        )
+        .await;
+        assert!(response.is_ok());
     }
 }

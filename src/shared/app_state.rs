@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::application::services::{AdminService, HashService, JsonService, KeyService, ListService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, HashService, JsonService, KeyService, ListService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -47,6 +47,9 @@ pub struct AppState {
 
     /// JSON operations service (RedisJSON module)
     pub json_service: Arc<JsonService>,
+
+    /// Search operations service (RediSearch module)
+    pub search_service: Arc<SearchService>,
 }
 
 impl AppState {
@@ -65,8 +68,9 @@ impl AppState {
         let admin_service = Arc::new(AdminService::new(pool.clone()));
         let stream_service = Arc::new(StreamService::new(pool.clone()));
         let json_service = Arc::new(JsonService::new(pool.clone()));
+        let search_service = Arc::new(SearchService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service)
+        Self::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -84,6 +88,7 @@ impl AppState {
         admin_service: Arc<AdminService>,
         stream_service: Arc<StreamService>,
         json_service: Arc<JsonService>,
+        search_service: Arc<SearchService>,
     ) -> Self {
         Self {
             pool,
@@ -98,6 +103,7 @@ impl AppState {
             admin_service,
             stream_service,
             json_service,
+            search_service,
         }
     }
 }
@@ -105,7 +111,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MockAdminRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
+    use crate::test_support::{MockAdminRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
 
     #[test]
     fn test_new_with_services() {
@@ -121,6 +127,7 @@ mod tests {
         let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
         let stream_service = Arc::new(StreamService::new_with_repository(Arc::new(MockStreamRepository::new())));
         let json_service = Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
+        let search_service = Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -135,6 +142,7 @@ mod tests {
             admin_service.clone(),
             stream_service.clone(),
             json_service.clone(),
+            search_service.clone(),
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);

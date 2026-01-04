@@ -1230,52 +1230,75 @@ Go service does NOT support Stream operations.
   - Debug: `GET /debug/memory`, `/resp`
 - [x] **Task 4.1.4**: Create JSON request/response schemas with OpenAPI documentation
 
-### 4.2 RediSearch Operations
-- [ ] **Task 4.2.1**: Implement Search repository trait (gated by `capabilities.modules.search`)
-- [ ] **Task 4.2.2**: Implement Search Index operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | FT.CREATE | `ft_create` | High |
-  | FT.DROPINDEX | `ft_drop_index` | High |
-  | FT.INFO | `ft_info` | High |
-  | FT.ALTER | `ft_alter` | Medium |
-  | FT._LIST | `ft_list` | Medium |
+### 4.2 RediSearch Operations ✅ COMPLETED
+- [x] **Task 4.2.1**: Implement Search repository trait (gated by `capabilities.modules.search`)
+  - Created `src/domain/repositories/search_repository.rs` with SearchRepository trait
+  - Created `src/infrastructure/redis/repositories/search_repo.rs` with RedisSearchRepository implementation
+  - Added MockSearchRepository to test_support.rs
+- [x] **Task 4.2.2**: Implement Search Index operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | FT.CREATE | `ft_create` | ✅ Implemented with full schema support (TEXT, TAG, NUMERIC, GEO, VECTOR, GEOSHAPE) |
+  | FT.DROPINDEX | `ft_drop_index` | ✅ Implemented with optional document deletion |
+  | FT.INFO | `ft_info` | ✅ Implemented with comprehensive index statistics |
+  | FT.ALTER | `ft_alter` | ✅ Implemented |
+  | FT._LIST | `ft_list` | ✅ Implemented |
 
-- [ ] **Task 4.2.3**: Implement Search Query operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | FT.SEARCH | `ft_search` with all options | High |
-  | FT.AGGREGATE | `ft_aggregate` | High |
-  | FT.EXPLAIN | `ft_explain` | Medium |
-  | FT.PROFILE | `ft_profile` | Low |
+- [x] **Task 4.2.3**: Implement Search Query operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | FT.SEARCH | `ft_search` | ✅ Full implementation with filters, sorting, pagination, highlighting, summarization |
+  | FT.AGGREGATE | `ft_aggregate` | ✅ Implemented with GROUPBY, SORTBY, APPLY, LIMIT, FILTER pipeline steps |
+  | FT.EXPLAIN | `ft_explain` | ✅ Implemented |
+  | FT.PROFILE | `ft_profile` | ✅ Implemented for both SEARCH and AGGREGATE |
 
-- [ ] **Task 4.2.4**: Implement Search Alias operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | FT.ALIASADD | `ft_alias_add` | Medium |
-  | FT.ALIASDEL | `ft_alias_del` | Medium |
-  | FT.ALIASUPDATE | `ft_alias_update` | Medium |
+- [x] **Task 4.2.4**: Implement Search Alias operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | FT.ALIASADD | `ft_alias_add` | ✅ Implemented |
+  | FT.ALIASDEL | `ft_alias_del` | ✅ Implemented |
+  | FT.ALIASUPDATE | `ft_alias_update` | ✅ Implemented |
 
-- [ ] **Task 4.2.5**: Implement Autocomplete operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | FT.SUGADD | `ft_sug_add` | Medium |
-  | FT.SUGGET | `ft_sug_get` | Medium |
-  | FT.SUGDEL | `ft_sug_del` | Medium |
-  | FT.SUGLEN | `ft_sug_len` | Medium |
+- [x] **Task 4.2.5**: Implement Autocomplete operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | FT.SUGADD | `ft_sug_add` | ✅ Implemented with increment and payload support |
+  | FT.SUGGET | `ft_sug_get` | ✅ Implemented with fuzzy, scores, payloads options |
+  | FT.SUGDEL | `ft_sug_del` | ✅ Implemented |
+  | FT.SUGLEN | `ft_sug_len` | ✅ Implemented |
 
-- [ ] **Task 4.2.6**: Implement Synonym/Spellcheck operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | FT.SYNDUMP | `ft_syn_dump` | Low |
-  | FT.SYNUPDATE | `ft_syn_update` | Low |
-  | FT.SPELLCHECK | `ft_spell_check` | Low |
-  | FT.DICTADD | `ft_dict_add` | Low |
-  | FT.DICTDEL | `ft_dict_del` | Low |
-  | FT.DICTDUMP | `ft_dict_dump` | Low |
+- [x] **Task 4.2.6**: Implement Synonym/Spellcheck operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | FT.SYNDUMP | `ft_syn_dump` | ✅ Implemented |
+  | FT.SYNUPDATE | `ft_syn_update` | ✅ Implemented |
+  | FT.SPELLCHECK | `ft_spell_check` | ✅ Implemented with distance and dictionary options |
+  | FT.DICTADD | `ft_dict_add` | ✅ Implemented |
+  | FT.DICTDEL | `ft_dict_del` | ✅ Implemented |
+  | FT.DICTDUMP | `ft_dict_dump` | ✅ Implemented |
 
-- [ ] **Task 4.2.7**: Create Search API routes
-- [ ] **Task 4.2.8**: Create Search request/response schemas
+- [x] **Task 4.2.7**: Create Search API routes
+  - Created `src/api/http/routes/search.rs` with comprehensive REST endpoints
+  - Index: POST/GET/DELETE `/api/v1/search/indices`, GET `/api/v1/search/indices/{index}`
+  - Query: POST `/api/v1/search/indices/{index}/search`, `/aggregate`, `/explain`, `/profile`
+  - Alias: POST/DELETE/PUT `/api/v1/search/aliases`
+  - Suggest: POST/GET/DELETE `/api/v1/search/suggest/{key}`
+  - Synonym: GET/PUT `/api/v1/search/indices/{index}/synonyms`
+  - Spellcheck: POST `/api/v1/search/indices/{index}/spellcheck`
+  - Dictionary: POST/DELETE/GET `/api/v1/search/dicts/{dict}/terms`
+- [x] **Task 4.2.8**: Create Search request/response schemas
+  - Created `src/api/http/schemas/search.rs` with comprehensive DTOs
+  - Full OpenAPI documentation with utoipa annotations
+  - Validation using validator crate
+
+**Integration Testing Completed:**
+- ✅ Created HASH-based index (products_hash_idx) with 1000 products
+- ✅ Created JSON-based index (articles_json_idx) with 1000 articles
+- ✅ Tested: Basic search, pagination, numeric filters, TAG filters, sorting
+- ✅ Tested: Aggregation with GROUPBY, reducers (COUNT, AVG, SUM), SORTBY
+- ✅ Tested: Spellcheck with misspelled terms
+- ✅ Tested: Query explain/execution plans
+- ✅ Tested: Highlighting (HASH only - not supported for JSON)
 
 ### 4.3 RedisBloom Operations
 - [ ] **Task 4.3.1**: Implement Bloom Filter operations (gated by `capabilities.modules.bloom`)

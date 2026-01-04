@@ -977,8 +977,8 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, HashService, JsonService, KeyService, ListService, SetService, SortedSetService,
-        StreamService, StringService,
+        AdminService, HashService, JsonService, KeyService, ListService, SearchService, SetService,
+        SortedSetService, StreamService, StringService,
     };
     use crate::domain::entities::{
         AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
@@ -990,7 +990,8 @@ mod tests {
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
         MockAdminRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
-        MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+        MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository,
+        MockStringRepository,
     };
 
     struct SequenceStreamRepository {
@@ -1294,6 +1295,8 @@ mod tests {
         let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
         let json_service =
             Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
+        let search_service =
+            Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
 
         AppState::new_with_services(
             pool,
@@ -1308,6 +1311,7 @@ mod tests {
             admin_service,
             stream_service,
             json_service,
+            search_service,
         )
     }
 

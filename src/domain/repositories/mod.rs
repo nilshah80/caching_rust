@@ -7,6 +7,7 @@ mod hash_repository;
 mod json_repository;
 mod key_repository;
 mod list_repository;
+mod search_repository;
 mod set_repository;
 mod sorted_set_repository;
 mod stream_repository;
@@ -19,6 +20,7 @@ pub use key_repository::KeyRepository;
 pub use list_repository::{
     BlockingPopResult, InsertPosition, ListDirection, ListRepository, LPosOptions,
 };
+pub use search_repository::SearchRepository;
 pub use set_repository::{SetRepository, SetScanResult};
 pub use sorted_set_repository::{
     LexRange, ScoreRange, ScoredMember, SortedSetRepository, ZAddOptions, ZAddResult,

@@ -9,6 +9,7 @@ mod json;
 mod keys;
 mod lists;
 mod openapi;
+mod search;
 mod sets;
 mod sorted_sets;
 mod streams;
@@ -21,6 +22,7 @@ pub use json::json_routes;
 pub use keys::key_routes;
 pub use lists::list_routes;
 pub use openapi::openapi_routes;
+pub use search::search_routes;
 pub use sets::set_routes;
 pub use sorted_sets::sorted_set_routes;
 pub use streams::{stream_admin_routes, stream_routes};
@@ -65,9 +67,13 @@ pub fn build_router(state: AppState) -> Router {
         router = router.merge(json_routes());
     }
 
+    // Conditionally add Search routes (requires RediSearch module)
+    if capabilities.modules.search {
+        router = router.merge(search_routes());
+    }
+
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:
-    // - search_routes() (requires RediSearch module)
     // - bloom_routes() (requires RedisBloom module)
     // - timeseries_routes() (requires RedisTimeSeries module)
     // - functions_routes() (Redis 7.0+)
@@ -79,7 +85,7 @@ pub fn build_router(state: AppState) -> Router {
 mod tests {
     use super::*;
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
-    use crate::test_support::test_state_with_json_repo;
+    use crate::test_support::{test_state_with_json_repo, test_state_with_search_repo};
     use axum::http::Request;
     use std::sync::Arc;
     use tower::ServiceExt;
@@ -107,6 +113,26 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/json/key?path=$")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_with_search_routes() {
+        let (mut state, _) = test_state_with_search_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.modules.search = true;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/search/indices")
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )
