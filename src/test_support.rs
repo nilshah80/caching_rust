@@ -6,22 +6,25 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, SortedSetService, StringService};
+use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, SortedSetService, StreamService, StringService};
 use crate::domain::entities::{
-    AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, CopyOptions, CopyResult, DeleteResult, DumpResult,
-    ExistsResult, ExpireOptions, ExpireResult, FlushOptions, FlushResult, KeyInfo, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, PersistResult, RandomKeyResult, RenameResult,
-    ScanResult, ServerInfo, ServerTime, SlowlogEntry, TouchResult,
-    AppendResult, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult,
-    SetResult, StringValue,
+    AclLogEntry, AutoClaimResult, BgRewriteAofResult, BgSaveResult, ClaimResult, ClientInfo,
+    ClientKillOptions, ClientPauseOptions, ConsumerGroupInfo, ConsumerInfo, CopyKeyOptions,
+    CopyOptions, CopyResult, DeleteResult, DumpResult, ExistsResult, ExpireOptions, ExpireResult,
+    FlushOptions, FlushResult, KeyInfo, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
+    PendingEntry, PendingSummary, PersistResult, RandomKeyResult, RenameResult, ScanResult,
+    ServerInfo, ServerTime, SlowlogEntry, StreamEntry, StreamInfo, StreamReadResult, TouchResult,
+    XAddOptions, XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions,
+    XReadGroupOptions, XReadOptions, XTrimStrategy, AppendResult, GetExOptions, MGetResult,
+    RangeResult, SetOptions, SetRangeResult, SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BlockingPopResult, HashRepository, InsertPosition, KeyRepository,
     LexRange, ListDirection, ListRepository, LPosOptions, ScoreRange, ScoredMember,
-    SetRepository, SetScanResult, SortedSetRepository, StringRepository, ZAddOptions,
-    ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
+    SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
+    ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
+    ZSetAlgebraOptions,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -1413,9 +1416,11 @@ pub fn test_state_with_repos(
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo)
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn test_state_with_all_repos(
     string_repo: Arc<MockStringRepository>,
     hash_repo: Arc<MockHashRepository>,
@@ -1424,6 +1429,7 @@ pub fn test_state_with_all_repos(
     sorted_set_repo: Arc<MockSortedSetRepository>,
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
+    stream_repo: Arc<MockStreamRepository>,
 ) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
     let config = Arc::new(Settings::default());
@@ -1435,8 +1441,9 @@ pub fn test_state_with_all_repos(
     let sorted_set_service = Arc::new(SortedSetService::new_with_repository(sorted_set_repo));
     let key_service = Arc::new(KeyService::new_with_repository(key_repo));
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
+    let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
@@ -1455,7 +1462,8 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo);
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo);
     (state, hash_repo)
 }
 
@@ -1467,7 +1475,8 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo);
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo);
     (state, list_repo)
 }
 
@@ -1479,7 +1488,8 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo);
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo);
     (state, set_repo)
 }
 
@@ -1491,8 +1501,22 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo);
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo);
     (state, sorted_set_repo)
+}
+
+pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone());
+    (state, stream_repo)
 }
 
 /// Mock Sorted Set Repository for testing
@@ -2082,5 +2106,235 @@ impl SortedSetRepository for MockSortedSetRepository {
         let store = self.store.lock().expect("store lock");
         let members = store.get(key).cloned().unwrap_or_default();
         Ok(ZScanResult { cursor: 0, members })
+    }
+}
+
+/// Mock Stream Repository for testing
+#[derive(Default)]
+pub struct MockStreamRepository;
+
+impl MockStreamRepository {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl StreamRepository for MockStreamRepository {
+    async fn xadd(
+        &self,
+        _key: &str,
+        _fields: &HashMap<String, String>,
+        _options: XAddOptions,
+    ) -> Result<String, CacheError> {
+        Ok("1704000001234-0".to_string())
+    }
+
+    async fn xlen(&self, _key: &str) -> Result<i64, CacheError> {
+        Ok(10)
+    }
+
+    async fn xrange(
+        &self,
+        _key: &str,
+        _start: &str,
+        _end: &str,
+        _count: Option<i64>,
+    ) -> Result<Vec<StreamEntry>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn xrevrange(
+        &self,
+        _key: &str,
+        _end: &str,
+        _start: &str,
+        _count: Option<i64>,
+    ) -> Result<Vec<StreamEntry>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn xdel(&self, _key: &str, ids: &[String]) -> Result<i64, CacheError> {
+        Ok(ids.len() as i64)
+    }
+
+    async fn xtrim(&self, _key: &str, _strategy: XTrimStrategy) -> Result<i64, CacheError> {
+        Ok(5)
+    }
+
+    async fn xinfo_stream(&self, _key: &str, _full: bool) -> Result<StreamInfo, CacheError> {
+        Ok(StreamInfo {
+            length: 10,
+            groups: 2,
+            first_entry_id: Some("1704000001234-0".to_string()),
+            last_entry_id: Some("1704000001235-0".to_string()),
+            first_entry: None,
+            last_entry: None,
+            max_deleted_entry_id: None,
+            entries_added: Some(100),
+            radix_tree_keys: None,
+            radix_tree_nodes: None,
+        })
+    }
+
+    async fn xread(
+        &self,
+        _streams: &[(String, String)],
+        _options: XReadOptions,
+    ) -> Result<Option<Vec<StreamReadResult>>, CacheError> {
+        Ok(Some(vec![]))
+    }
+
+    async fn xread_blocking(
+        &self,
+        _streams: &[(String, String)],
+        _count: Option<i64>,
+        _timeout: Duration,
+    ) -> Result<Option<Vec<StreamReadResult>>, CacheError> {
+        Ok(None)
+    }
+
+    async fn xgroup_create(
+        &self,
+        _key: &str,
+        _group: &str,
+        _id: &str,
+        _options: XGroupCreateOptions,
+    ) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn xgroup_destroy(&self, _key: &str, _group: &str) -> Result<bool, CacheError> {
+        Ok(true)
+    }
+
+    async fn xgroup_setid(
+        &self,
+        _key: &str,
+        _group: &str,
+        _id: &str,
+        _entries_read: Option<i64>,
+    ) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn xgroup_createconsumer(
+        &self,
+        _key: &str,
+        _group: &str,
+        _consumer: &str,
+    ) -> Result<bool, CacheError> {
+        Ok(true)
+    }
+
+    async fn xgroup_delconsumer(
+        &self,
+        _key: &str,
+        _group: &str,
+        _consumer: &str,
+    ) -> Result<i64, CacheError> {
+        Ok(5)
+    }
+
+    async fn xinfo_groups(&self, _key: &str) -> Result<Vec<ConsumerGroupInfo>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn xinfo_consumers(
+        &self,
+        _key: &str,
+        _group: &str,
+    ) -> Result<Vec<ConsumerInfo>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn xreadgroup(
+        &self,
+        _group: &str,
+        _consumer: &str,
+        _streams: &[(String, String)],
+        _options: XReadGroupOptions,
+    ) -> Result<Option<Vec<StreamReadResult>>, CacheError> {
+        Ok(Some(vec![]))
+    }
+
+    async fn xreadgroup_blocking(
+        &self,
+        _group: &str,
+        _consumer: &str,
+        _streams: &[(String, String)],
+        _count: Option<i64>,
+        _no_ack: bool,
+        _timeout: Duration,
+    ) -> Result<Option<Vec<StreamReadResult>>, CacheError> {
+        Ok(None)
+    }
+
+    async fn xack(
+        &self,
+        _key: &str,
+        _group: &str,
+        ids: &[String],
+    ) -> Result<i64, CacheError> {
+        Ok(ids.len() as i64)
+    }
+
+    async fn xpending_summary(
+        &self,
+        _key: &str,
+        _group: &str,
+    ) -> Result<PendingSummary, CacheError> {
+        Ok(PendingSummary {
+            count: 0,
+            min_id: None,
+            max_id: None,
+            consumers: HashMap::new(),
+        })
+    }
+
+    async fn xpending(
+        &self,
+        _key: &str,
+        _group: &str,
+        _options: XPendingOptions,
+    ) -> Result<Vec<PendingEntry>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn xclaim(
+        &self,
+        _key: &str,
+        _group: &str,
+        _consumer: &str,
+        _ids: &[String],
+        _options: XClaimOptions,
+    ) -> Result<ClaimResult, CacheError> {
+        Ok(ClaimResult { entries: vec![] })
+    }
+
+    async fn xautoclaim(
+        &self,
+        _key: &str,
+        _group: &str,
+        _consumer: &str,
+        _min_idle_time_ms: i64,
+        _start: &str,
+        _options: XAutoClaimOptions,
+    ) -> Result<AutoClaimResult, CacheError> {
+        Ok(AutoClaimResult {
+            next_id: "0-0".to_string(),
+            entries: vec![],
+            deleted_ids: vec![],
+        })
+    }
+
+    async fn xsetid(
+        &self,
+        _key: &str,
+        _last_id: &str,
+        _entries_added: Option<i64>,
+        _max_deleted_id: Option<&str>,
+    ) -> Result<(), CacheError> {
+        Ok(())
     }
 }

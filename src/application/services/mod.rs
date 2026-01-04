@@ -8,6 +8,7 @@ mod key_service;
 mod list_service;
 mod set_service;
 mod sorted_set_service;
+mod stream_service;
 mod string_service;
 
 pub use admin_service::AdminService;
@@ -16,4 +17,5 @@ pub use key_service::KeyService;
 pub use list_service::ListService;
 pub use set_service::SetService;
 pub use sorted_set_service::SortedSetService;
+pub use stream_service::StreamService;
 pub use string_service::StringService;

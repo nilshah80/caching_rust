@@ -56,6 +56,10 @@ tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "time
 tokio-tungstenite = "0.26"
 futures = "0.3"
 
+# SSE Streaming support
+tokio-stream = "0.1"
+async-stream = "0.3"
+
 [dev-dependencies]
 tokio-test = "0.4"
 testcontainers = "0.23"

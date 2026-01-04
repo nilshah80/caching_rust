@@ -8,6 +8,7 @@ mod key_repository;
 mod list_repository;
 mod set_repository;
 mod sorted_set_repository;
+mod stream_repository;
 mod string_repository;
 
 pub use admin_repository::AdminRepository;
@@ -22,4 +23,5 @@ pub use sorted_set_repository::{
     ZAggregate, ZPopDirection, ZPopResult, ZRangeOptions, ZRangeType, ZScanResult,
     ZSetAlgebraOptions,
 };
+pub use stream_repository::StreamRepository;
 pub use string_repository::StringRepository;

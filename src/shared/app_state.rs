@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, SortedSetService, StringService};
+use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, SortedSetService, StreamService, StringService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -41,6 +41,9 @@ pub struct AppState {
 
     /// Admin operations service
     pub admin_service: Arc<AdminService>,
+
+    /// Stream operations service
+    pub stream_service: Arc<StreamService>,
 }
 
 impl AppState {
@@ -57,8 +60,9 @@ impl AppState {
         let sorted_set_service = Arc::new(SortedSetService::new(pool.clone()));
         let key_service = Arc::new(KeyService::new(pool.clone()));
         let admin_service = Arc::new(AdminService::new(pool.clone()));
+        let stream_service = Arc::new(StreamService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service)
+        Self::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -74,6 +78,7 @@ impl AppState {
         sorted_set_service: Arc<SortedSetService>,
         key_service: Arc<KeyService>,
         admin_service: Arc<AdminService>,
+        stream_service: Arc<StreamService>,
     ) -> Self {
         Self {
             pool,
@@ -86,6 +91,7 @@ impl AppState {
             sorted_set_service,
             key_service,
             admin_service,
+            stream_service,
         }
     }
 }
@@ -93,7 +99,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MockAdminRepository, MockHashRepository, MockKeyRepository, MockListRepository, MockSetRepository, MockSortedSetRepository, MockStringRepository};
+    use crate::test_support::{MockAdminRepository, MockHashRepository, MockKeyRepository, MockListRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
 
     #[test]
     fn test_new_with_services() {
@@ -107,6 +113,7 @@ mod tests {
         let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(MockSortedSetRepository::new())));
         let key_service = Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
         let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
+        let stream_service = Arc::new(StreamService::new_with_repository(Arc::new(MockStreamRepository::new())));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -119,6 +126,7 @@ mod tests {
             sorted_set_service.clone(),
             key_service.clone(),
             admin_service.clone(),
+            stream_service.clone(),
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);

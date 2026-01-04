@@ -325,23 +325,22 @@ impl InstrumentedPool {
         let redis_version = RedisCapabilities::parse_version(&info);
         info!(version = %redis_version, "Detected Redis version");
 
-        // Get loaded modules
-        let modules_result: Result<Vec<Vec<String>>, _> = redis::cmd("MODULE")
+        // Get loaded modules using redis::Value for flexible parsing
+        // Redis 8 returns: [["name", "module1", "ver", "123", ...], ["name", "module2", ...]]
+        let modules_result: Result<redis::Value, _> = redis::cmd("MODULE")
             .arg("LIST")
             .query_async(&mut conn)
             .await;
 
-        let modules = modules_result.unwrap_or_default();
+        let module_names = extract_module_names(modules_result.ok());
+        debug!(?module_names, "Detected Redis modules");
 
         let module_capabilities = ModuleCapabilities {
-            json: RedisCapabilities::detect_module(&modules, "rejson")
-                || RedisCapabilities::detect_module(&modules, "redisjson"),
-            search: RedisCapabilities::detect_module(&modules, "search")
-                || RedisCapabilities::detect_module(&modules, "ft"),
-            bloom: RedisCapabilities::detect_module(&modules, "bf")
-                || RedisCapabilities::detect_module(&modules, "bloom"),
-            timeseries: RedisCapabilities::detect_module(&modules, "timeseries"),
-            graph: RedisCapabilities::detect_module(&modules, "graph"),
+            json: module_names.iter().any(|n| n.contains("rejson") || n.contains("redisjson")),
+            search: module_names.iter().any(|n| n.contains("search") || n == "ft"),
+            bloom: module_names.iter().any(|n| n == "bf" || n.contains("bloom")),
+            timeseries: module_names.iter().any(|n| n.contains("timeseries")),
+            graph: module_names.iter().any(|n| n.contains("graph")),
         };
 
         // Check cluster mode
@@ -382,6 +381,37 @@ impl InstrumentedPool {
             "capability detection disabled in tests".to_string(),
         ))
     }
+}
+
+/// Extract module names from Redis MODULE LIST response
+/// Redis 8 returns: Array([Array([BulkString("name"), BulkString("timeseries"), ...])])
+/// We look for "name" keys and extract the following value as the module name
+#[cfg(not(test))]
+fn extract_module_names(value: Option<redis::Value>) -> Vec<String> {
+    let mut names = Vec::new();
+
+    if let Some(redis::Value::Array(modules)) = value {
+        for module in modules {
+            if let redis::Value::Array(fields) = module {
+                // Look for "name" key and get the next value
+                let mut iter = fields.iter();
+                while let Some(field) = iter.next() {
+                    if let redis::Value::BulkString(key) = field {
+                        if key == b"name" {
+                            if let Some(redis::Value::BulkString(name_bytes)) = iter.next() {
+                                if let Ok(name) = String::from_utf8(name_bytes.clone()) {
+                                    names.push(name.to_lowercase());
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    names
 }
 
 #[cfg(test)]

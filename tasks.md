@@ -1042,114 +1042,97 @@ impl InstrumentedPool {
 - [x] **Task 3.5.5**: Create Sorted Set request/response schemas
 - [x] **Task 3.5.6**: Add OpenAPI documentation for sorted set endpoints
 
-### 3.6 Stream Operations (with Blocking and SSE Support)
-- [ ] **Task 3.6.1**: Implement Stream repository trait
-- [ ] **Task 3.6.2**: Implement Stream operations (non-blocking)
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | XADD | `xadd` with options (MAXLEN, MINID, NOMKSTREAM) | High |
-  | XRANGE | `xrange` | High |
-  | XREVRANGE | `xrev_range` | High |
-  | XLEN | `xlen` | High |
-  | XTRIM | `xtrim` | Medium |
-  | XDEL | `xdel` | Medium |
-  | XGROUP CREATE | `xgroup_create` | High |
-  | XGROUP DESTROY | `xgroup_destroy` | Medium |
-  | XGROUP SETID | `xgroup_setid` | Low |
-  | XGROUP DELCONSUMER | `xgroup_del_consumer` | Medium |
-  | XGROUP CREATECONSUMER | `xgroup_create_consumer` | Medium |
-  | XACK | `xack` | High |
-  | XCLAIM | `xclaim` | Medium |
-  | XAUTOCLAIM | `xauto_claim` | Medium |
-  | XPENDING | `xpending` | High |
-  | XINFO STREAM | `xinfo_stream` | High |
-  | XINFO GROUPS | `xinfo_groups` | High |
-  | XINFO CONSUMERS | `xinfo_consumers` | Medium |
-  | XSETID | `xsetid` | Low |
+### 3.6 Stream Operations (with Blocking and SSE Support) ✅ COMPLETED
+- [x] **Task 3.6.1**: Implement Stream repository trait ✓
+  - Created `src/domain/repositories/stream_repository.rs` with async trait methods
+  - Created `src/domain/entities/stream.rs` with comprehensive domain entities
+- [x] **Task 3.6.2**: Implement Stream operations (non-blocking) ✓
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | XADD | `xadd` with options (MAXLEN, MINID, NOMKSTREAM) | ✅ |
+  | XRANGE | `xrange` | ✅ |
+  | XREVRANGE | `xrevrange` | ✅ |
+  | XLEN | `xlen` | ✅ |
+  | XTRIM | `xtrim` | ✅ |
+  | XDEL | `xdel` | ✅ |
+  | XGROUP CREATE | `xgroup_create` | ✅ |
+  | XGROUP DESTROY | `xgroup_destroy` | ✅ |
+  | XGROUP SETID | `xgroup_setid` | ✅ |
+  | XGROUP DELCONSUMER | `xgroup_delconsumer` | ✅ |
+  | XGROUP CREATECONSUMER | `xgroup_createconsumer` | ✅ |
+  | XACK | `xack` | ✅ |
+  | XCLAIM | `xclaim` | ✅ |
+  | XAUTOCLAIM | `xautoclaim` | ✅ |
+  | XPENDING | `xpending` (summary + detail) | ✅ |
+  | XINFO STREAM | `xinfo_stream` | ✅ |
+  | XINFO GROUPS | `xinfo_groups` | ✅ |
+  | XINFO CONSUMERS | `xinfo_consumers` | ✅ |
+  | XSETID | `xsetid` | ✅ |
 
-- [ ] **Task 3.6.3**: Implement blocking Stream operations with SSE
-  ```rust
-  // XREAD with blocking - use Server-Sent Events for streaming
-  pub async fn xread_stream(
-      State(state): State<AppState>,
-      Path(key): Path<String>,
-      Query(params): Query<XReadStreamParams>,
-  ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-      let stream = async_stream::stream! {
-          let mut conn = match state.command_pool.get().await {
-              Ok(c) => c,
-              Err(e) => {
-                  yield Ok(Event::default().data(format!("error: {}", e)));
-                  return;
-              }
-          };
+- [x] **Task 3.6.3**: Implement blocking Stream operations with SSE ✓
+  - Implemented with Architecture Decision 3: max 30s timeout enforcement
+  - SSE endpoints use iterative XREAD BLOCK with proper keep-alive
+  - Negative block_ms values are clamped to 0
+  - `enforce_block_ms()` helper applies consistent timeout limits
+  | Command | Method | Status | Notes |
+  |---------|--------|--------|-------|
+  | XREAD | `xread` | ✅ | Non-blocking version |
+  | XREAD BLOCK | `xread_blocking` | ✅ | With max 30s timeout |
+  | XREAD (SSE) | `stream_subscribe` | ✅ | SSE endpoint for streaming |
+  | XREADGROUP | `xreadgroup` | ✅ | Non-blocking version |
+  | XREADGROUP BLOCK | `xreadgroup_blocking` | ✅ | With max 30s timeout |
+  | XREADGROUP (SSE) | `stream_group_subscribe` | ✅ | SSE endpoint for consumer groups |
 
-          let mut last_id = params.start_id.unwrap_or_else(|| "$".to_string());
-          let block_ms = params.block_ms.unwrap_or(5000).min(30000); // Max 30s per iteration
-
-          loop {
-              let result: Option<Vec<(String, Vec<(String, HashMap<String, String>)>)>> =
-                  redis::cmd("XREAD")
-                      .arg("COUNT").arg(params.count.unwrap_or(10))
-                      .arg("BLOCK").arg(block_ms)
-                      .arg("STREAMS").arg(&key).arg(&last_id)
-                      .query_async(&mut *conn)
-                      .await
-                      .ok();
-
-              if let Some(streams) = result {
-                  for (_, entries) in streams {
-                      for (id, fields) in entries {
-                          last_id = id.clone();
-                          let event = StreamEntry { id, fields };
-                          yield Ok(Event::default()
-                              .event("message")
-                              .data(serde_json::to_string(&event).unwrap()));
-                      }
-                  }
-              }
-
-              // Check if client disconnected
-              tokio::task::yield_now().await;
-          }
-      };
-
-      Sse::new(stream).keep_alive(
-          axum::response::sse::KeepAlive::new()
-              .interval(Duration::from_secs(15))
-              .text("ping")
-      )
-  }
+- [x] **Task 3.6.4**: Create Stream API routes ✓
   ```
-  | Command | Method | Priority | Notes |
-  |---------|--------|----------|-------|
-  | XREAD | `xread` | High | Non-blocking version |
-  | XREAD BLOCK | `xread_stream` | High | SSE endpoint for streaming |
-  | XREADGROUP | `xread_group` | High | Non-blocking version |
-  | XREADGROUP BLOCK | `xread_group_stream` | Medium | SSE endpoint for streaming |
+  # Basic stream operations
+  POST   /api/v1/streams/{key}/add          # XADD
+  GET    /api/v1/streams/{key}/length       # XLEN
+  GET    /api/v1/streams/{key}/range        # XRANGE
+  GET    /api/v1/streams/{key}/revrange     # XREVRANGE
+  DELETE /api/v1/streams/{key}/entries      # XDEL
+  POST   /api/v1/streams/{key}/trim         # XTRIM
+  GET    /api/v1/streams/{key}/info         # XINFO STREAM
 
-- [ ] **Task 3.6.4**: Create Stream API routes
-  ```
-  # Non-blocking
-  POST   /api/v1/streams/:key/add
-  GET    /api/v1/streams/:key/range
-  GET    /api/v1/streams/:key/length
-  POST   /api/v1/streams/:key/read
-  DELETE /api/v1/streams/:key/entries
+  # Read operations
+  POST   /api/v1/streams/read               # XREAD (multi-stream)
+  POST   /api/v1/streams/read/blocking      # XREAD BLOCK
 
-  # Consumer groups
-  POST   /api/v1/streams/:key/groups
-  DELETE /api/v1/streams/:key/groups/:group
-  POST   /api/v1/streams/:key/groups/:group/read
-  POST   /api/v1/streams/:key/groups/:group/ack
-  GET    /api/v1/streams/:key/groups/:group/pending
+  # SSE streaming
+  GET    /api/v1/streams/{key}/subscribe    # SSE stream
 
-  # Streaming (SSE)
-  GET    /api/v1/streams/:key/subscribe          # SSE stream
-  GET    /api/v1/streams/:key/groups/:group/subscribe  # SSE stream
+  # Consumer group info (public)
+  GET    /api/v1/streams/{key}/groups                       # XINFO GROUPS
+  GET    /api/v1/streams/{key}/groups/{group}/consumers     # XINFO CONSUMERS
+
+  # Consumer group read operations
+  POST   /api/v1/streams/{key}/groups/{group}/read          # XREADGROUP
+  POST   /api/v1/streams/{key}/groups/{group}/read/blocking # XREADGROUP BLOCK
+  POST   /api/v1/streams/{key}/groups/{group}/ack           # XACK
+  GET    /api/v1/streams/{key}/groups/{group}/pending       # XPENDING summary
+  GET    /api/v1/streams/{key}/groups/{group}/pending/detail # XPENDING detail
+  POST   /api/v1/streams/{key}/groups/{group}/claim         # XCLAIM
+  POST   /api/v1/streams/{key}/groups/{group}/autoclaim     # XAUTOCLAIM
+  GET    /api/v1/streams/{key}/groups/{group}/subscribe     # SSE consumer group
+
+  # Admin-protected (require X-Admin-Api-Key header)
+  POST   /api/v1/streams/{key}/groups                       # XGROUP CREATE
+  DELETE /api/v1/streams/{key}/groups/{group}               # XGROUP DESTROY
+  POST   /api/v1/streams/{key}/groups/{group}/setid         # XGROUP SETID
+  POST   /api/v1/streams/{key}/groups/{group}/consumers     # XGROUP CREATECONSUMER
+  DELETE /api/v1/streams/{key}/groups/{group}/consumers/{consumer}  # XGROUP DELCONSUMER
+  POST   /api/v1/streams/{key}/setid                        # XSETID
   ```
 
-- [ ] **Task 3.6.5**: Create Stream request/response schemas
+- [x] **Task 3.6.5**: Create Stream request/response schemas ✓
+  - Created comprehensive schemas in `src/api/http/schemas/streams.rs`
+  - Added OpenAPI documentation with all stream endpoints registered
+  - Proper JSON escaping for SSE error payloads using `serde_json::json!()`
+  - Path key enforcement in XREADGROUP handlers (prevents reading other streams)
+
+**Note**: Stream operations require Redis 5.0+ (detected via capabilities at startup).
+Consumer group management endpoints are admin-protected.
+Go service does NOT support Stream operations.
 
 ### 3.7 Key Operations ✅ COMPLETED
 - [x] **Task 3.7.1**: Implement Key repository trait

@@ -10,6 +10,7 @@ mod lists;
 mod openapi;
 mod sets;
 mod sorted_sets;
+mod streams;
 mod strings;
 
 pub use admin::admin_routes;
@@ -20,6 +21,7 @@ pub use lists::list_routes;
 pub use openapi::openapi_routes;
 pub use sets::set_routes;
 pub use sorted_sets::sorted_set_routes;
+pub use streams::{stream_admin_routes, stream_routes};
 pub use strings::string_routes;
 
 use axum::Router;
@@ -27,9 +29,9 @@ use crate::shared::app_state::AppState;
 
 /// Build the complete API router based on detected capabilities
 pub fn build_router(state: AppState) -> Router {
-    let _capabilities = state.capabilities.clone();
+    let capabilities = state.capabilities.clone();
 
-    let router = Router::new()
+    let mut router = Router::new()
         // Always available - health checks
         .merge(health_routes())
         // Always available - core Redis types
@@ -49,9 +51,15 @@ pub fn build_router(state: AppState) -> Router {
         // OpenAPI documentation
         .merge(openapi_routes());
 
+    // Conditionally add stream routes (Redis 5.0+)
+    if capabilities.features.streams {
+        router = router
+            .merge(stream_routes())
+            .merge(stream_admin_routes());
+    }
+
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:
-    // - stream_routes() (Redis 5.0+)
     // - json_routes() (requires RedisJSON module)
     // - search_routes() (requires RediSearch module)
     // - bloom_routes() (requires RedisBloom module)
