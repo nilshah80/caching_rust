@@ -3,6 +3,7 @@
 //! Shared state passed to all request handlers.
 
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::infrastructure::config::Settings;
@@ -20,6 +21,10 @@ pub struct AppState {
 
     /// Detected Redis capabilities
     pub capabilities: Arc<RedisCapabilities>,
+
+    /// Semaphore to limit concurrent SSE/streaming connections
+    /// Prevents pool exhaustion from long-lived blocking connections
+    pub sse_semaphore: Arc<Semaphore>,
 
     /// String operations service
     pub string_service: Arc<StringService>,
@@ -62,6 +67,7 @@ impl AppState {
         config: Arc<Settings>,
         capabilities: Arc<RedisCapabilities>,
     ) -> Self {
+        let sse_semaphore = Arc::new(Semaphore::new(config.blocking.max_sse_connections));
         let string_service = Arc::new(StringService::new(pool.clone()));
         let hash_service = Arc::new(HashService::new(pool.clone()));
         let list_service = Arc::new(ListService::new(pool.clone()));
@@ -74,7 +80,7 @@ impl AppState {
         let search_service = Arc::new(SearchService::new(pool.clone()));
         let bloom_service = Arc::new(BloomService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service)
+        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -83,6 +89,7 @@ impl AppState {
         pool: Arc<InstrumentedPool>,
         config: Arc<Settings>,
         capabilities: Arc<RedisCapabilities>,
+        sse_semaphore: Arc<Semaphore>,
         string_service: Arc<StringService>,
         hash_service: Arc<HashService>,
         list_service: Arc<ListService>,
@@ -99,6 +106,7 @@ impl AppState {
             pool,
             config,
             capabilities,
+            sse_semaphore,
             string_service,
             hash_service,
             list_service,
@@ -124,6 +132,7 @@ mod tests {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let config = Arc::new(Settings::default());
         let capabilities = Arc::new(RedisCapabilities::default_capabilities());
+        let sse_semaphore = Arc::new(Semaphore::new(config.blocking.max_sse_connections));
         let string_service = Arc::new(StringService::new_with_repository(Arc::new(MockStringRepository::new())));
         let hash_service = Arc::new(HashService::new_with_repository(Arc::new(MockHashRepository::new())));
         let list_service = Arc::new(ListService::new_with_repository(Arc::new(MockListRepository::new())));
@@ -140,6 +149,7 @@ mod tests {
             pool.clone(),
             config.clone(),
             capabilities.clone(),
+            sse_semaphore,
             string_service.clone(),
             hash_service.clone(),
             list_service.clone(),

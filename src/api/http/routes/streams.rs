@@ -14,8 +14,6 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use futures::stream::Stream;
-use std::convert::Infallible;
 use std::time::Duration;
 
 use crate::api::http::middleware::admin_auth::ADMIN_API_KEY_HEADER;
@@ -285,10 +283,12 @@ pub async fn xread(
     Json(req): Json<StreamReadRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
     let streams: Vec<(String, String)> = (&req).into();
-    let result = state
-        .stream_service
-        .xread(streams, req.to_options())
-        .await?;
+    // Apply default count if not specified to prevent unbounded reads
+    let mut options = req.to_options();
+    if options.count.is_none() {
+        options.count = Some(state.config.blocking.default_stream_read_count as i64);
+    }
+    let result = state.stream_service.xread(streams, options).await?;
 
     match result {
         Some(entries) => Ok(Json(ApiResponse::success(entries)).into_response()),
@@ -320,9 +320,14 @@ pub async fn xread_blocking(
         .map(|s| (s.key.clone(), s.id.clone()))
         .collect();
 
+    // Apply default count if not specified to prevent unbounded reads
+    let count = req
+        .count
+        .or(Some(state.config.blocking.default_stream_read_count as i64));
+
     let result = state
         .stream_service
-        .xread_blocking(streams, req.count, req.timeout_seconds)
+        .xread_blocking(streams, count, req.timeout_seconds)
         .await?;
 
     match result {
@@ -336,6 +341,7 @@ pub async fn xread_blocking(
 /// GET /api/v1/streams/{key}/subscribe
 ///
 /// Subscribe to stream entries via Server-Sent Events.
+/// Uses a semaphore to limit concurrent SSE connections and prevent pool exhaustion.
 #[utoipa::path(
     get,
     path = "/api/v1/streams/{key}/subscribe",
@@ -344,7 +350,8 @@ pub async fn xread_blocking(
         StreamSubscribeQuery
     ),
     responses(
-        (status = 200, description = "SSE stream of entries", content_type = "text/event-stream")
+        (status = 200, description = "SSE stream of entries", content_type = "text/event-stream"),
+        (status = 503, description = "Too many concurrent SSE connections")
     ),
     tag = "Streams"
 )]
@@ -352,10 +359,24 @@ pub async fn stream_subscribe(
     State(state): State<AppState>,
     Path(key): Path<String>,
     Query(query): Query<StreamSubscribeQuery>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Result<impl IntoResponse, CacheError> {
+    // Try to acquire SSE connection permit
+    let permit = match state.sse_semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            // Too many concurrent SSE connections - return standard error response
+            return Err(CacheError::SubscriptionLimitReached);
+        }
+    };
+
+    let default_count = state.config.blocking.default_stream_read_count;
     let stream = async_stream::stream! {
+        // Hold the permit for the lifetime of this SSE connection
+        let _permit = permit;
+
         let mut last_id = query.last_id.clone();
-        let count = query.count;
+        // Use configured default if no count specified
+        let count = query.count.or(Some(default_count as i64));
         let block_ms = crate::application::services::StreamService::default_sse_block_ms();
 
         loop {
@@ -371,7 +392,7 @@ pub async fn stream_subscribe(
                         for entry in result.entries {
                             last_id = entry.id.clone();
                             let data = serde_json::to_string(&entry).unwrap_or_default();
-                            yield Ok(Event::default().event("message").data(data));
+                            yield Ok::<_, std::convert::Infallible>(Event::default().event("message").data(data));
                         }
                     }
                 }
@@ -380,7 +401,7 @@ pub async fn stream_subscribe(
                 }
                 Err(e) => {
                     let error_data = serde_json::json!({ "error": e.to_string() }).to_string();
-                    yield Ok(Event::default().event("error").data(error_data));
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("error").data(error_data));
                     break;
                 }
             }
@@ -390,11 +411,11 @@ pub async fn stream_subscribe(
         }
     };
 
-    Sse::new(stream).keep_alive(
+    Ok(Sse::new(stream).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(15))
             .text("ping"),
-    )
+    ))
 }
 
 // ========== Consumer Group Info ==========
@@ -474,9 +495,15 @@ pub async fn xreadgroup(
     let id = req.streams.first().map(|s| s.id.clone()).unwrap_or_else(|| ">".to_string());
     let streams = vec![(key, id)];
 
+    // Apply default count if not specified to prevent unbounded reads
+    let mut options = req.to_options();
+    if options.count.is_none() {
+        options.count = Some(state.config.blocking.default_stream_read_count as i64);
+    }
+
     let result = state
         .stream_service
-        .xreadgroup(&group, &req.consumer, streams, req.to_options())
+        .xreadgroup(&group, &req.consumer, streams, options)
         .await?;
 
     match result {
@@ -513,13 +540,18 @@ pub async fn xreadgroup_blocking(
     let id = req.streams.first().map(|s| s.id.clone()).unwrap_or_else(|| ">".to_string());
     let streams = vec![(key, id)];
 
+    // Apply default count if not specified to prevent unbounded reads
+    let count = req
+        .count
+        .or(Some(state.config.blocking.default_stream_read_count as i64));
+
     let result = state
         .stream_service
         .xreadgroup_blocking(
             &group,
             &req.consumer,
             streams,
-            req.count,
+            count,
             req.no_ack,
             req.timeout_seconds,
         ).await?;
@@ -680,6 +712,7 @@ pub async fn xautoclaim(
 /// GET /api/v1/streams/{key}/groups/{group}/subscribe
 ///
 /// Subscribe to stream entries as a consumer group member via Server-Sent Events.
+/// Uses a semaphore to limit concurrent SSE connections and prevent pool exhaustion.
 #[utoipa::path(
     get,
     path = "/api/v1/streams/{key}/groups/{group}/subscribe",
@@ -690,7 +723,8 @@ pub async fn xautoclaim(
     ),
     responses(
         (status = 200, description = "SSE stream of entries", content_type = "text/event-stream"),
-        (status = 400, description = "Invalid request")
+        (status = 400, description = "Invalid request"),
+        (status = 503, description = "Too many concurrent SSE connections")
     ),
     tag = "Streams"
 )]
@@ -698,10 +732,24 @@ pub async fn stream_group_subscribe(
     State(state): State<AppState>,
     Path((key, group)): Path<(String, String)>,
     Query(query): Query<StreamGroupSubscribeQuery>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Result<impl IntoResponse, CacheError> {
+    // Try to acquire SSE connection permit
+    let permit = match state.sse_semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            // Too many concurrent SSE connections - return standard error response
+            return Err(CacheError::SubscriptionLimitReached);
+        }
+    };
+
+    let default_count = state.config.blocking.default_stream_read_count;
     let stream = async_stream::stream! {
+        // Hold the permit for the lifetime of this SSE connection
+        let _permit = permit;
+
         let consumer = query.consumer.clone();
-        let count = query.count;
+        // Use configured default if no count specified
+        let count = query.count.or(Some(default_count as i64));
         let no_ack = query.no_ack;
         let block_ms = crate::application::services::StreamService::default_sse_block_ms();
 
@@ -718,7 +766,7 @@ pub async fn stream_group_subscribe(
                     for result in results {
                         for entry in result.entries {
                             let data = serde_json::to_string(&entry).unwrap_or_default();
-                            yield Ok(Event::default().event("message").data(data));
+                            yield Ok::<_, std::convert::Infallible>(Event::default().event("message").data(data));
                         }
                     }
                 }
@@ -727,7 +775,7 @@ pub async fn stream_group_subscribe(
                 }
                 Err(e) => {
                     let error_data = serde_json::json!({ "error": e.to_string() }).to_string();
-                    yield Ok(Event::default().event("error").data(error_data));
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("error").data(error_data));
                     break;
                 }
             }
@@ -737,11 +785,11 @@ pub async fn stream_group_subscribe(
         }
     };
 
-    Sse::new(stream).keep_alive(
+    Ok(Sse::new(stream).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(15))
             .text("ping"),
-    )
+    ))
 }
 
 // ========== Admin-Protected Consumer Group Management ==========
@@ -1299,11 +1347,13 @@ mod tests {
             Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
         let bloom_service =
             Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
+        let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
 
         AppState::new_with_services(
             pool,
             config,
             capabilities,
+            sse_semaphore,
             string_service,
             hash_service,
             list_service,
@@ -1997,5 +2047,94 @@ mod tests {
         let frame = next_sse_frame(&mut body).await.expect("error frame");
         let text = String::from_utf8_lossy(&frame);
         assert!(text.contains("event: error"));
+    }
+
+    /// Helper to create state with a specific number of SSE permits
+    fn state_with_sse_permits(stream_repo: Arc<dyn StreamRepository>, max_sse: usize) -> AppState {
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let mut settings = Settings::default();
+        settings.blocking.max_sse_connections = max_sse;
+        let config = Arc::new(settings);
+        let capabilities = Arc::new(RedisCapabilities::default_capabilities());
+        let string_service =
+            Arc::new(StringService::new_with_repository(Arc::new(MockStringRepository::new())));
+        let hash_service =
+            Arc::new(HashService::new_with_repository(Arc::new(MockHashRepository::new())));
+        let list_service =
+            Arc::new(ListService::new_with_repository(Arc::new(MockListRepository::new())));
+        let set_service =
+            Arc::new(SetService::new_with_repository(Arc::new(MockSetRepository::new())));
+        let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(
+            MockSortedSetRepository::new(),
+        )));
+        let key_service =
+            Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
+        let admin_service =
+            Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
+        let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
+        let json_service =
+            Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
+        let search_service =
+            Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
+        let bloom_service =
+            Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
+        let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(max_sse));
+
+        AppState::new_with_services(
+            pool,
+            config,
+            capabilities,
+            sse_semaphore,
+            string_service,
+            hash_service,
+            list_service,
+            set_service,
+            sorted_set_service,
+            key_service,
+            admin_service,
+            stream_service,
+            json_service,
+            search_service,
+            bloom_service,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_stream_subscribe_sse_limit_reached() {
+        // Create state with 0 SSE permits - all SSE requests should be rejected
+        let state = state_with_sse_permits(Arc::new(MockStreamRepository::new()), 0);
+
+        let result = stream_subscribe(
+            State(state),
+            Path("stream".to_string()),
+            Query(StreamSubscribeQuery {
+                last_id: "0".to_string(),
+                count: Some(1),
+            }),
+        )
+        .await;
+
+        // Should return CacheError::SubscriptionLimitReached
+        assert!(matches!(result, Err(CacheError::SubscriptionLimitReached)));
+    }
+
+    #[tokio::test]
+    async fn test_stream_group_subscribe_sse_limit_reached() {
+        // Create state with 0 SSE permits - all SSE requests should be rejected
+        let state = state_with_sse_permits(Arc::new(MockStreamRepository::new()), 0);
+
+        let result = stream_group_subscribe(
+            State(state),
+            Path(("stream".to_string(), "group".to_string())),
+            Query(StreamGroupSubscribeQuery {
+                consumer: "c1".to_string(),
+                count: Some(1),
+                no_ack: false,
+            }),
+        )
+        .await;
+
+        // Should return CacheError::SubscriptionLimitReached
+        assert!(matches!(result, Err(CacheError::SubscriptionLimitReached)));
     }
 }

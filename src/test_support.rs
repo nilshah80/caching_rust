@@ -1455,9 +1455,28 @@ pub fn test_state_with_all_repos(
     search_repo: Arc<MockSearchRepository>,
     bloom_repo: Arc<MockBloomRepository>,
 ) -> AppState {
+    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, Settings::default())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn test_state_with_all_repos_and_config(
+    string_repo: Arc<MockStringRepository>,
+    hash_repo: Arc<MockHashRepository>,
+    list_repo: Arc<MockListRepository>,
+    set_repo: Arc<MockSetRepository>,
+    sorted_set_repo: Arc<MockSortedSetRepository>,
+    key_repo: Arc<MockKeyRepository>,
+    admin_repo: Arc<MockAdminRepository>,
+    stream_repo: Arc<MockStreamRepository>,
+    json_repo: Arc<MockJsonRepository>,
+    search_repo: Arc<MockSearchRepository>,
+    bloom_repo: Arc<MockBloomRepository>,
+    config: Settings,
+) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
-    let config = Arc::new(Settings::default());
+    let config = Arc::new(config);
     let capabilities = Arc::new(RedisCapabilities::default_capabilities());
+    let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
     let string_service = Arc::new(StringService::new_with_repository(string_repo));
     let hash_service = Arc::new(HashService::new_with_repository(hash_repo));
     let list_service = Arc::new(ListService::new_with_repository(list_repo));
@@ -1470,7 +1489,24 @@ pub fn test_state_with_all_repos(
     let search_service = Arc::new(SearchService::new_with_repository(search_repo));
     let bloom_service = Arc::new(BloomService::new_with_repository(bloom_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service)
+    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service)
+}
+
+/// Create test state with custom config
+pub fn test_state_with_config(config: Settings) -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, config);
+    (state, string_repo, key_repo, admin_repo)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {

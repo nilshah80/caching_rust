@@ -83,7 +83,7 @@ async fn get_string(
     request_body = SetStringRequest,
     responses(
         (status = 200, description = "Key set successfully", body = SetStringResponse),
-        (status = 400, description = "Invalid request")
+        (status = 400, description = "Invalid request - value size exceeds limit")
     ),
     tag = "Strings"
 )]
@@ -92,6 +92,15 @@ async fn set_string(
     Path(key): Path<String>,
     Json(request): Json<SetStringRequest>,
 ) -> Result<Json<ApiResponse<SetStringResponse>>, CacheError> {
+    // Validate value size to prevent OOM
+    let max_value_size = state.config.server.max_value_size_bytes;
+    if request.value.len() > max_value_size {
+        return Err(CacheError::InvalidInput(format!(
+            "Value size ({} bytes) exceeds maximum allowed size of {} bytes",
+            request.value.len(), max_value_size
+        )));
+    }
+
     let result = state
         .string_service
         .set(
@@ -150,7 +159,7 @@ async fn get_del_string(
     request_body = MGetRequest,
     responses(
         (status = 200, description = "Values retrieved", body = MGetResponse),
-        (status = 400, description = "Invalid request")
+        (status = 400, description = "Invalid request - batch size exceeds limit")
     ),
     tag = "Strings"
 )]
@@ -158,7 +167,16 @@ async fn mget_strings(
     State(state): State<AppState>,
     Json(request): Json<MGetRequest>,
 ) -> Result<Json<ApiResponse<MGetResponse>>, CacheError> {
+    let max_batch_size = state.config.server.max_batch_size;
     let total_requested = request.keys.len();
+
+    // Validate batch size to prevent OOM
+    if total_requested > max_batch_size {
+        return Err(CacheError::InvalidInput(format!(
+            "Batch size {} exceeds maximum allowed size of {}",
+            total_requested, max_batch_size
+        )));
+    }
 
     let result = state.string_service.mget(request.keys).await?;
 
@@ -179,7 +197,7 @@ async fn mget_strings(
     request_body = MSetRequest,
     responses(
         (status = 200, description = "Values set", body = MSetResponse),
-        (status = 400, description = "Invalid request")
+        (status = 400, description = "Invalid request - batch size or value size exceeds limit")
     ),
     tag = "Strings"
 )]
@@ -187,6 +205,28 @@ async fn mset_strings(
     State(state): State<AppState>,
     Json(request): Json<MSetRequest>,
 ) -> Result<Json<ApiResponse<MSetResponse>>, CacheError> {
+    let max_batch_size = state.config.server.max_batch_size;
+    let max_value_size = state.config.server.max_value_size_bytes;
+    let batch_size = request.pairs.len();
+
+    // Validate batch size to prevent OOM
+    if batch_size > max_batch_size {
+        return Err(CacheError::InvalidInput(format!(
+            "Batch size {} exceeds maximum allowed size of {}",
+            batch_size, max_batch_size
+        )));
+    }
+
+    // Validate individual value sizes
+    for (key, value) in &request.pairs {
+        if value.len() > max_value_size {
+            return Err(CacheError::InvalidInput(format!(
+                "Value for key '{}' ({} bytes) exceeds maximum allowed size of {} bytes",
+                key, value.len(), max_value_size
+            )));
+        }
+    }
+
     let pairs: Vec<(String, String)> = request.pairs.into_iter().collect();
     let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
 
@@ -284,7 +324,8 @@ async fn decr_string(
     ),
     request_body = AppendRequest,
     responses(
-        (status = 200, description = "Value appended", body = AppendResponse)
+        (status = 200, description = "Value appended", body = AppendResponse),
+        (status = 400, description = "Invalid request - resulting value size exceeds limit")
     ),
     tag = "Strings"
 )]
@@ -293,6 +334,21 @@ async fn append_string(
     Path(key): Path<String>,
     Json(request): Json<AppendRequest>,
 ) -> Result<Json<ApiResponse<AppendResponse>>, CacheError> {
+    let max_value_size = state.config.server.max_value_size_bytes;
+
+    // Check current string length and validate resulting size won't exceed limit.
+    // Note: This check is non-atomic; concurrent writes could exceed the limit.
+    // Accepted risk: the race window is minimal and overage is bounded by max_body_size.
+    // Strict enforcement would require Lua scripts, adding latency and complexity.
+    let current_len = state.string_service.str_len(&key).await?;
+    let new_len = current_len as usize + request.value.len();
+    if new_len > max_value_size {
+        return Err(CacheError::InvalidInput(format!(
+            "Resulting value size ({} bytes) would exceed maximum allowed size of {} bytes",
+            new_len, max_value_size
+        )));
+    }
+
     let result = state.string_service.append(&key, &request.value).await?;
 
     Ok(Json(ApiResponse::new(AppendResponse {
@@ -367,7 +423,7 @@ async fn get_range(
     request_body = SetRangeRequest,
     responses(
         (status = 200, description = "Range set", body = SetRangeResponse),
-        (status = 400, description = "Invalid offset")
+        (status = 400, description = "Invalid offset or resulting value size exceeds limit")
     ),
     tag = "Strings"
 )]
@@ -376,6 +432,29 @@ async fn set_range(
     Path(key): Path<String>,
     Json(request): Json<SetRangeRequest>,
 ) -> Result<Json<ApiResponse<SetRangeResponse>>, CacheError> {
+    // Validate offset is non-negative
+    if request.offset < 0 {
+        return Err(CacheError::InvalidInput(
+            "Offset must be non-negative".to_string()
+        ));
+    }
+
+    let max_value_size = state.config.server.max_value_size_bytes;
+
+    // SETRANGE can expand the string: new_len = max(current_len, offset + value.len()).
+    // Note: This check is non-atomic; concurrent writes could exceed the limit.
+    // Accepted risk: the race window is minimal and overage is bounded by max_body_size.
+    // Strict enforcement would require Lua scripts, adding latency and complexity.
+    let current_len = state.string_service.str_len(&key).await?;
+    let end_position = request.offset as usize + request.value.len();
+    let new_len = std::cmp::max(current_len as usize, end_position);
+    if new_len > max_value_size {
+        return Err(CacheError::InvalidInput(format!(
+            "Resulting value size ({} bytes) would exceed maximum allowed size of {} bytes",
+            new_len, max_value_size
+        )));
+    }
+
     let result = state.string_service.set_range(&key, request.offset, &request.value).await?;
 
     Ok(Json(ApiResponse::new(SetRangeResponse {
@@ -418,7 +497,8 @@ async fn get_ex_string(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_state;
+    use crate::test_support::{test_state, test_state_with_config};
+    use crate::infrastructure::config::Settings;
     use axum::extract::{Path, Query, State};
     use axum::Json;
     use std::collections::HashMap;
@@ -499,5 +579,132 @@ mod tests {
         let get_ex_params = GetExParams { ttl_seconds: None, ttl_ms: None, persist: false };
         let get_ex_resp = get_ex_string(state, Path("k1".to_string()), Query(get_ex_params)).await.unwrap();
         assert!(get_ex_resp.0.data.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_set_value_size_limit() {
+        // Create config with small max_value_size for testing
+        let mut config = Settings::default();
+        config.server.max_value_size_bytes = 10; // Only 10 bytes allowed
+        let (state, _, _, _) = test_state_with_config(config);
+        let state = State(state);
+
+        // Value within limit should succeed
+        let small_req = SetStringRequest {
+            value: "small".to_string(), // 5 bytes
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: false,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+        };
+        let result = set_string(state.clone(), Path("key".to_string()), Json(small_req)).await;
+        assert!(result.is_ok());
+
+        // Value exceeding limit should fail with InvalidInput
+        let large_req = SetStringRequest {
+            value: "this is way too large".to_string(), // > 10 bytes
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: false,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+        };
+        let result = set_string(state.clone(), Path("key2".to_string()), Json(large_req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_mset_value_size_limit() {
+        let mut config = Settings::default();
+        config.server.max_value_size_bytes = 10;
+        let (state, _, _, _) = test_state_with_config(config);
+        let state = State(state);
+
+        // One value exceeds limit
+        let mut pairs = HashMap::new();
+        pairs.insert("a".to_string(), "small".to_string()); // OK
+        pairs.insert("b".to_string(), "this is too large for limit".to_string()); // Exceeds
+        let req = MSetRequest { pairs, nx: false };
+        let result = mset_strings(state.clone(), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_mget_batch_size_limit() {
+        let mut config = Settings::default();
+        config.server.max_batch_size = 2; // Only 2 keys allowed
+        let (state, _, _, _) = test_state_with_config(config);
+        let state = State(state);
+
+        // Batch within limit should succeed
+        let small_req = MGetRequest { keys: vec!["a".to_string(), "b".to_string()] };
+        let result = mget_strings(state.clone(), Json(small_req)).await;
+        assert!(result.is_ok());
+
+        // Batch exceeding limit should fail
+        let large_req = MGetRequest {
+            keys: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        };
+        let result = mget_strings(state.clone(), Json(large_req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_append_size_limit() {
+        let mut config = Settings::default();
+        config.server.max_value_size_bytes = 10;
+        let (state, string_repo, _, _) = test_state_with_config(config);
+        let state = State(state);
+
+        // Set initial value (5 bytes)
+        string_repo.insert("key", "hello");
+
+        // Append within limit should succeed (5 + 3 = 8 < 10)
+        let small_append = AppendRequest { value: "abc".to_string() };
+        let result = append_string(state.clone(), Path("key".to_string()), Json(small_append)).await;
+        assert!(result.is_ok());
+
+        // Append that would exceed limit should fail (8 + 5 = 13 > 10)
+        let large_append = AppendRequest { value: "world".to_string() };
+        let result = append_string(state.clone(), Path("key".to_string()), Json(large_append)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_set_range_size_limit() {
+        let mut config = Settings::default();
+        config.server.max_value_size_bytes = 10;
+        let (state, string_repo, _, _) = test_state_with_config(config);
+        let state = State(state);
+
+        // Set initial value (5 bytes)
+        string_repo.insert("key", "hello");
+
+        // SETRANGE within current length should succeed
+        let in_range = SetRangeRequest { offset: 0, value: "hi".to_string() };
+        let result = set_range(state.clone(), Path("key".to_string()), Json(in_range)).await;
+        assert!(result.is_ok());
+
+        // SETRANGE that would expand beyond limit should fail
+        // offset 8 + value "xyz" (3 bytes) = 11 bytes > 10 limit
+        let expand = SetRangeRequest { offset: 8, value: "xyz".to_string() };
+        let result = set_range(state.clone(), Path("key".to_string()), Json(expand)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_set_range_negative_offset() {
+        let (state, string_repo, _, _) = test_state();
+        let state = State(state);
+
+        string_repo.insert("key", "hello");
+
+        // Negative offset should fail with InvalidInput
+        let neg_offset = SetRangeRequest { offset: -1, value: "x".to_string() };
+        let result = set_range(state.clone(), Path("key".to_string()), Json(neg_offset)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(ref msg)) if msg.contains("non-negative")));
     }
 }

@@ -6,6 +6,8 @@
 use std::time::Duration;
 
 #[cfg(not(test))]
+use axum::extract::DefaultBodyLimit;
+#[cfg(not(test))]
 use tokio::net::TcpListener;
 #[cfg(not(test))]
 use tokio::signal;
@@ -42,6 +44,8 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
     // Add middleware
     let app = app.layer(
         ServiceBuilder::new()
+            // Add request body size limit (prevents OOM from large payloads)
+            .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
             // Add tracing
             .layer(TraceLayer::new_for_http())
             // Add request timeout (returns 408 Request Timeout on timeout)
@@ -56,6 +60,12 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
                     .allow_methods(Any)
                     .allow_headers(Any),
             ),
+    );
+
+    info!(
+        max_body_size_mb = config.max_body_size_bytes / 1024 / 1024,
+        max_batch_size = config.max_batch_size,
+        "Request limits configured"
     );
 
     // Create listener

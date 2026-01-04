@@ -70,10 +70,12 @@ pub struct MGetRequest {
     pub keys: Vec<String>,
 }
 
-/// MGet response
+/// MGet response (matches Rust service format)
 #[derive(Debug, Deserialize)]
 pub struct MGetResponse {
-    pub values: std::collections::HashMap<String, Option<String>>,
+    pub found: std::collections::HashMap<String, String>,
+    #[allow(dead_code)]
+    pub missing: Vec<String>,
 }
 
 /// MSet request
@@ -82,17 +84,23 @@ pub struct MSetRequest {
     pub pairs: std::collections::HashMap<String, String>,
 }
 
-/// Increment request
+/// Increment request (matches Rust service format)
 #[derive(Debug, Serialize)]
 pub struct IncrementRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delta: Option<i64>,
+    #[serde(default = "default_delta")]
+    pub delta: i64,
 }
 
-/// Increment response
+fn default_delta() -> i64 {
+    1
+}
+
+/// Increment response (matches Rust service format)
 #[derive(Debug, Deserialize)]
 pub struct IncrementResponse {
-    pub value: i64,
+    #[allow(dead_code)]
+    pub key: String,
+    pub new_value: String,
 }
 
 /// Load test HTTP client
@@ -154,14 +162,22 @@ impl LoadTestClient {
     /// Set a string value
     pub async fn set_string(&self, key: &str, value: &str, ttl: Option<u64>) -> Result<()> {
         let url = format!("{}/api/v1/strings/{}", self.config.base_url, key);
-        let body = SetStringRequest {
+
+        #[derive(Serialize)]
+        struct SetRequest {
+            value: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            ttl_seconds: Option<u64>,
+        }
+
+        let body = SetRequest {
             value: value.to_string(),
-            ttl,
+            ttl_seconds: ttl,
         };
 
         let resp = self
             .client
-            .post(&url)
+            .put(&url)  // Use PUT instead of POST for Rust service
             .json(&body)
             .send()
             .await?;
@@ -207,13 +223,22 @@ impl LoadTestClient {
     /// Multi-get strings
     pub async fn mget(&self, keys: Vec<String>) -> Result<std::collections::HashMap<String, Option<String>>> {
         let url = format!("{}/api/v1/strings/mget", self.config.base_url);
-        let body = MGetRequest { keys };
+        let body = MGetRequest { keys: keys.clone() };
 
         let resp = self.client.post(&url).json(&body).send().await?;
 
         if resp.status().is_success() {
             let api_resp: ApiResponse<MGetResponse> = resp.json().await?;
-            Ok(api_resp.data.map_or(std::collections::HashMap::new(), |r| r.values))
+            // Convert Rust service format {found, missing} to expected {key -> Option<value>}
+            let result: std::collections::HashMap<String, Option<String>> = api_resp.data.map_or_else(
+                || keys.iter().map(|k| (k.clone(), None)).collect(),
+                |r| {
+                    keys.iter()
+                        .map(|k| (k.clone(), r.found.get(k).cloned()))
+                        .collect()
+                }
+            );
+            Ok(result)
         } else {
             Err(anyhow!("MGET failed: {}", resp.status()))
         }
@@ -236,13 +261,13 @@ impl LoadTestClient {
     /// Increment a counter
     pub async fn incr(&self, key: &str, delta: Option<i64>) -> Result<i64> {
         let url = format!("{}/api/v1/strings/{}/incr", self.config.base_url, key);
-        let body = IncrementRequest { delta };
+        let body = IncrementRequest { delta: delta.unwrap_or(1) };
 
         let resp = self.client.patch(&url).json(&body).send().await?;
 
         if resp.status().is_success() {
             let api_resp: ApiResponse<IncrementResponse> = resp.json().await?;
-            Ok(api_resp.data.map_or(0, |r| r.value))
+            Ok(api_resp.data.map_or(0, |r| r.new_value.parse::<i64>().unwrap_or(0)))
         } else {
             Err(anyhow!("INCR failed: {}", resp.status()))
         }
@@ -252,13 +277,13 @@ impl LoadTestClient {
     #[allow(dead_code)]
     pub async fn decr(&self, key: &str, delta: Option<i64>) -> Result<i64> {
         let url = format!("{}/api/v1/strings/{}/decr", self.config.base_url, key);
-        let body = IncrementRequest { delta };
+        let body = IncrementRequest { delta: delta.unwrap_or(1) };
 
         let resp = self.client.patch(&url).json(&body).send().await?;
 
         if resp.status().is_success() {
             let api_resp: ApiResponse<IncrementResponse> = resp.json().await?;
-            Ok(api_resp.data.map_or(0, |r| r.value))
+            Ok(api_resp.data.map_or(0, |r| r.new_value.parse::<i64>().unwrap_or(0)))
         } else {
             Err(anyhow!("DECR failed: {}", resp.status()))
         }

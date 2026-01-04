@@ -1044,11 +1044,13 @@ mod tests {
             Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
         let bloom_service =
             Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
+        let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
 
         AppState::new_with_services(
             pool,
             config,
             capabilities,
+            sse_semaphore,
             string_service,
             hash_service,
             list_service,

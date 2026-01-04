@@ -2,13 +2,24 @@
 //!
 //! Comprehensive metrics tracking for load tests including latency percentiles,
 //! error rates, throughput, and resource usage (memory, CPU, GC).
+//!
+//! Memory-bounded: Uses ring buffers for resource snapshots and limits error
+//! type cardinality to prevent unbounded memory growth in long-running tests.
 
 use hdrhistogram::Histogram;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, System};
+
+/// Maximum number of resource snapshots to keep (ring buffer size)
+/// At 1 snapshot/second, this covers ~16 minutes of data
+const MAX_RESOURCE_SNAPSHOTS: usize = 1000;
+
+/// Maximum number of unique error types to track
+/// Prevents memory growth from high-cardinality error messages
+const MAX_ERROR_TYPES: usize = 100;
 
 /// Resource usage snapshot
 #[allow(dead_code)]
@@ -40,8 +51,8 @@ pub struct LoadMetrics {
     latency_histogram: RwLock<Histogram<u64>>,
     /// Error counts by type
     error_counts: RwLock<HashMap<String, u64>>,
-    /// Resource snapshots
-    resource_snapshots: RwLock<Vec<ResourceSnapshot>>,
+    /// Resource snapshots (VecDeque for O(1) pop_front)
+    resource_snapshots: RwLock<VecDeque<ResourceSnapshot>>,
     /// Bytes sent
     bytes_sent: AtomicU64,
     /// Bytes received
@@ -61,7 +72,7 @@ impl LoadMetrics {
                 Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
             ),
             error_counts: RwLock::new(HashMap::new()),
-            resource_snapshots: RwLock::new(Vec::new()),
+            resource_snapshots: RwLock::new(VecDeque::new()),
             bytes_sent: AtomicU64::new(0),
             bytes_received: AtomicU64::new(0),
         }
@@ -77,7 +88,7 @@ impl LoadMetrics {
         }
     }
 
-    /// Record a failed request
+    /// Record a failed request (limits unique error types to prevent memory growth)
     pub fn record_failure(&self, latency: Duration, error: &str) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
         self.failed_requests.fetch_add(1, Ordering::Relaxed);
@@ -92,7 +103,15 @@ impl LoadMetrics {
             error.to_string()
         };
         if let Ok(mut errors) = self.error_counts.write() {
-            *errors.entry(error_key).or_insert(0) += 1;
+            // If key exists, increment it; otherwise only add if under cardinality limit
+            if errors.contains_key(&error_key) {
+                *errors.get_mut(&error_key).unwrap() += 1;
+            } else if errors.len() < MAX_ERROR_TYPES {
+                errors.insert(error_key, 1);
+            } else {
+                // At cardinality limit: increment "other" bucket
+                *errors.entry("(other errors)".to_string()).or_insert(0) += 1;
+            }
         }
     }
 
@@ -103,10 +122,14 @@ impl LoadMetrics {
         self.bytes_received.fetch_add(received, Ordering::Relaxed);
     }
 
-    /// Record resource usage snapshot
+    /// Record resource usage snapshot (ring buffer - removes oldest when full)
     pub fn record_resource_usage(&self, snapshot: ResourceSnapshot) {
         if let Ok(mut snapshots) = self.resource_snapshots.write() {
-            snapshots.push(snapshot);
+            // Ring buffer: pop_front is O(1) for VecDeque
+            if snapshots.len() >= MAX_RESOURCE_SNAPSHOTS {
+                snapshots.pop_front();
+            }
+            snapshots.push_back(snapshot);
         }
     }
 
@@ -486,5 +509,69 @@ mod tests {
         assert_eq!(metrics.max_memory_mb(), 200.0);
         assert_eq!(metrics.avg_cpu_percent(), 65.0);
         assert_eq!(metrics.max_cpu_percent(), 80.0);
+    }
+
+    #[test]
+    fn test_resource_snapshots_ring_buffer() {
+        let metrics = LoadMetrics::new("test");
+
+        // Fill to capacity + 10 to test ring buffer behavior
+        for i in 0..(MAX_RESOURCE_SNAPSHOTS + 10) {
+            metrics.record_resource_usage(ResourceSnapshot {
+                memory_mb: i as f64,
+                cpu_percent: 0.0,
+                thread_count: 1,
+                timestamp: i as u64,
+            });
+        }
+
+        // Should be capped at MAX_RESOURCE_SNAPSHOTS
+        let snapshots = metrics.resource_snapshots.read().unwrap();
+        assert_eq!(snapshots.len(), MAX_RESOURCE_SNAPSHOTS);
+
+        // Oldest snapshots (0-9) should have been evicted
+        // First snapshot should now be index 10
+        assert_eq!(snapshots[0].timestamp, 10);
+        // Last snapshot should be the most recent
+        assert_eq!(snapshots[MAX_RESOURCE_SNAPSHOTS - 1].timestamp, (MAX_RESOURCE_SNAPSHOTS + 9) as u64);
+    }
+
+    #[test]
+    fn test_error_cardinality_limit() {
+        let metrics = LoadMetrics::new("test");
+
+        // Record MAX_ERROR_TYPES unique errors
+        for i in 0..MAX_ERROR_TYPES {
+            metrics.record_failure(Duration::from_micros(100), &format!("error_{}", i));
+        }
+
+        // Record more unique errors - these should go to "other" bucket
+        for i in 0..50 {
+            metrics.record_failure(Duration::from_micros(100), &format!("overflow_error_{}", i));
+        }
+
+        let errors = metrics.error_counts.read().unwrap();
+        // Should have MAX_ERROR_TYPES original errors + 1 "other" bucket
+        assert_eq!(errors.len(), MAX_ERROR_TYPES + 1);
+        // "other" bucket should have 50 errors
+        assert_eq!(errors.get("(other errors)"), Some(&50));
+    }
+
+    #[test]
+    fn test_existing_error_increments_over_limit() {
+        let metrics = LoadMetrics::new("test");
+
+        // Fill up to cardinality limit
+        for i in 0..MAX_ERROR_TYPES {
+            metrics.record_failure(Duration::from_micros(100), &format!("error_{}", i));
+        }
+
+        // Recording an existing error should still work
+        metrics.record_failure(Duration::from_micros(100), "error_0");
+        metrics.record_failure(Duration::from_micros(100), "error_0");
+
+        let errors = metrics.error_counts.read().unwrap();
+        assert_eq!(errors.get("error_0"), Some(&3)); // 1 original + 2 additional
+        assert_eq!(errors.len(), MAX_ERROR_TYPES); // No new keys added
     }
 }

@@ -31,6 +31,18 @@ pub struct ServerConfig {
     /// Request timeout in milliseconds (default: 30000)
     #[serde(default = "default_request_timeout")]
     pub request_timeout_ms: u64,
+
+    /// Maximum request body size in bytes (default: 10MB)
+    #[serde(default = "default_max_body_size")]
+    pub max_body_size_bytes: usize,
+
+    /// Maximum batch size for bulk operations like MSET, MGET (default: 1000)
+    #[serde(default = "default_max_batch_size")]
+    pub max_batch_size: usize,
+
+    /// Maximum string value size in bytes (default: 512KB)
+    #[serde(default = "default_max_value_size")]
+    pub max_value_size_bytes: usize,
 }
 
 /// Redis connection configuration
@@ -115,6 +127,18 @@ pub struct BlockingConfig {
     /// Default blocking timeout in seconds (default: 5)
     #[serde(default = "default_blocking_timeout")]
     pub default_timeout_seconds: u32,
+
+    /// Maximum concurrent SSE/streaming connections (default: 5)
+    /// Limits how many SSE connections can hold pool connections simultaneously
+    /// to prevent pool exhaustion from long-lived streaming requests.
+    /// Default is half of pool.max_size (10) to leave room for regular requests.
+    #[serde(default = "default_max_sse_connections")]
+    pub max_sse_connections: usize,
+
+    /// Default count for unbounded XREAD operations (default: 100)
+    /// Prevents OOM when reading large streams without explicit count
+    #[serde(default = "default_stream_read_count")]
+    pub default_stream_read_count: usize,
 }
 
 /// Admin API configuration
@@ -147,6 +171,18 @@ fn default_port() -> u16 {
 
 fn default_request_timeout() -> u64 {
     30000
+}
+
+fn default_max_body_size() -> usize {
+    10 * 1024 * 1024 // 10MB
+}
+
+fn default_max_batch_size() -> usize {
+    1000
+}
+
+fn default_max_value_size() -> usize {
+    512 * 1024 // 512KB
 }
 
 fn default_redis_url() -> String {
@@ -193,6 +229,16 @@ fn default_blocking_timeout() -> u32 {
     5
 }
 
+fn default_max_sse_connections() -> usize {
+    // Default to half of pool max (5) to leave room for regular requests
+    // Users should configure this based on their pool.max_size
+    5
+}
+
+fn default_stream_read_count() -> usize {
+    100
+}
+
 fn default_log_level() -> String {
     "info".to_string()
 }
@@ -207,6 +253,9 @@ impl Default for ServerConfig {
             host: default_host(),
             port: default_port(),
             request_timeout_ms: default_request_timeout(),
+            max_body_size_bytes: default_max_body_size(),
+            max_batch_size: default_max_batch_size(),
+            max_value_size_bytes: default_max_value_size(),
         }
     }
 }
@@ -253,6 +302,8 @@ impl Default for BlockingConfig {
         Self {
             max_timeout_seconds: default_max_blocking_timeout(),
             default_timeout_seconds: default_blocking_timeout(),
+            max_sse_connections: default_max_sse_connections(),
+            default_stream_read_count: default_stream_read_count(),
         }
     }
 }
@@ -299,6 +350,9 @@ impl Settings {
             .set_default("server.host", "0.0.0.0")?
             .set_default("server.port", 8080)?
             .set_default("server.request_timeout_ms", 30000)?
+            .set_default("server.max_body_size_bytes", 10 * 1024 * 1024)?
+            .set_default("server.max_batch_size", 1000)?
+            .set_default("server.max_value_size_bytes", 512 * 1024)?
             .set_default("redis.url", "redis://localhost:6379")?
             .set_default("redis.database", 0)?
             .set_default("redis.tls_enabled", false)?
@@ -313,6 +367,8 @@ impl Settings {
             .set_default("pubsub.idle_timeout_ms", 300_000)?
             .set_default("blocking.max_timeout_seconds", 30)?
             .set_default("blocking.default_timeout_seconds", 5)?
+            .set_default("blocking.max_sse_connections", 5)?
+            .set_default("blocking.default_stream_read_count", 100)?
             .set_default("admin.api_key", "changeme-admin-key")?
             .set_default("log.level", "info")?
             .set_default("log.format", "json")?
