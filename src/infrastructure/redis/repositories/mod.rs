@@ -4,6 +4,7 @@
 
 mod admin_repo;
 mod hash_repo;
+mod json_repo;
 mod key_repo;
 mod list_repo;
 mod set_repo;
@@ -13,6 +14,7 @@ mod string_repo;
 
 pub use admin_repo::RedisAdminRepository;
 pub use hash_repo::RedisHashRepository;
+pub use json_repo::RedisJsonRepository;
 pub use key_repo::RedisKeyRepository;
 pub use list_repo::RedisListRepository;
 pub use set_repo::RedisSetRepository;

@@ -5,6 +5,7 @@
 mod admin;
 mod hashes;
 mod health;
+mod json;
 mod keys;
 mod lists;
 mod openapi;
@@ -16,6 +17,7 @@ mod strings;
 pub use admin::admin_routes;
 pub use hashes::hash_routes;
 pub use health::health_routes;
+pub use json::json_routes;
 pub use keys::key_routes;
 pub use lists::list_routes;
 pub use openapi::openapi_routes;
@@ -58,9 +60,13 @@ pub fn build_router(state: AppState) -> Router {
             .merge(stream_admin_routes());
     }
 
+    // Conditionally add JSON routes (requires RedisJSON module)
+    if capabilities.modules.json {
+        router = router.merge(json_routes());
+    }
+
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:
-    // - json_routes() (requires RedisJSON module)
     // - search_routes() (requires RediSearch module)
     // - bloom_routes() (requires RedisBloom module)
     // - timeseries_routes() (requires RedisTimeSeries module)
@@ -72,16 +78,38 @@ pub fn build_router(state: AppState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_state;
+    use crate::infrastructure::redis::capabilities::RedisCapabilities;
+    use crate::test_support::test_state_with_json_repo;
     use axum::http::Request;
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn test_build_router_health() {
-        let (state, _, _, _) = test_state();
+        let (state, _) = test_state_with_json_repo();
         let app = build_router(state);
         let response = app
             .oneshot(Request::builder().uri("/health").body(axum::body::Body::empty()).unwrap())
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_with_json_routes() {
+        let (mut state, _) = test_state_with_json_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.modules.json = true;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/json/key?path=$")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .expect("response");
         assert_eq!(response.status(), axum::http::StatusCode::OK);

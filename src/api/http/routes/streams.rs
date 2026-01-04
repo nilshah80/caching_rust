@@ -522,8 +522,7 @@ pub async fn xreadgroup_blocking(
             req.count,
             req.no_ack,
             req.timeout_seconds,
-        )
-        .await?;
+        ).await?;
 
     match result {
         Some(entries) => Ok(Json(ApiResponse::success(entries)).into_response()),
@@ -672,8 +671,7 @@ pub async fn xautoclaim(
             req.min_idle_time_ms,
             &req.start,
             req.to_options(),
-        )
-        .await?;
+        ).await?;
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -776,10 +774,7 @@ pub async fn xgroup_create(
 ) -> Result<Json<ApiResponse<ConsumerGroupCreateResponse>>, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    state
-        .stream_service
-        .xgroup_create(&key, &req.group, &req.id, req.to_options())
-        .await?;
+    state.stream_service.xgroup_create(&key, &req.group, &req.id, req.to_options()).await?;
 
     Ok(Json(ApiResponse::success(ConsumerGroupCreateResponse {
         created: true,
@@ -851,10 +846,7 @@ pub async fn xgroup_setid(
 ) -> Result<impl IntoResponse, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    state
-        .stream_service
-        .xgroup_setid(&key, &group, &req.id, req.entries_read)
-        .await?;
+    state.stream_service.xgroup_setid(&key, &group, &req.id, req.entries_read).await?;
 
     Ok(StatusCode::OK)
 }
@@ -888,10 +880,8 @@ pub async fn xgroup_createconsumer(
 ) -> Result<Json<ApiResponse<ConsumerOperationResponse>>, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    let created = state
-        .stream_service
-        .xgroup_createconsumer(&key, &group, &req.consumer)
-        .await?;
+    let created =
+        state.stream_service.xgroup_createconsumer(&key, &group, &req.consumer).await?;
 
     Ok(Json(ApiResponse::success(ConsumerOperationResponse {
         result: if created { 1 } else { 0 },
@@ -925,10 +915,8 @@ pub async fn xgroup_delconsumer(
 ) -> Result<Json<ApiResponse<ConsumerOperationResponse>>, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    let pending_count = state
-        .stream_service
-        .xgroup_delconsumer(&key, &group, &consumer)
-        .await?;
+    let pending_count =
+        state.stream_service.xgroup_delconsumer(&key, &group, &consumer).await?;
 
     Ok(Json(ApiResponse::success(ConsumerOperationResponse {
         result: pending_count,
@@ -970,8 +958,7 @@ pub async fn xsetid(
             &req.last_id,
             req.entries_added,
             req.max_deleted_id.as_deref(),
-        )
-        .await?;
+        ).await?;
 
     Ok(StatusCode::OK)
 }
@@ -990,7 +977,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, HashService, KeyService, ListService, SetService, SortedSetService,
+        AdminService, HashService, JsonService, KeyService, ListService, SetService, SortedSetService,
         StreamService, StringService,
     };
     use crate::domain::entities::{
@@ -1002,7 +989,7 @@ mod tests {
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
-        MockAdminRepository, MockHashRepository, MockKeyRepository, MockListRepository,
+        MockAdminRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
         MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository,
     };
 
@@ -1305,6 +1292,8 @@ mod tests {
         let admin_service =
             Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
         let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
+        let json_service =
+            Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
 
         AppState::new_with_services(
             pool,
@@ -1318,6 +1307,7 @@ mod tests {
             key_service,
             admin_service,
             stream_service,
+            json_service,
         )
     }
 

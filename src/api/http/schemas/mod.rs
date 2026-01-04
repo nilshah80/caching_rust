@@ -4,6 +4,7 @@
 
 pub mod common;
 pub mod hashes;
+pub mod json;
 pub mod keys;
 pub mod lists;
 pub mod sets;
@@ -13,6 +14,7 @@ pub mod strings;
 
 pub use common::*;
 pub use hashes::*;
+pub use json::*;
 pub use keys::*;
 pub use lists::*;
 pub use sets::*;

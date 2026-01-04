@@ -1193,34 +1193,42 @@ Go service does NOT support Stream operations.
 > **Note**: All module routes are conditionally registered based on capability detection.
 > Routes for unavailable modules return `501 Not Implemented` with error code `MODULE_NOT_AVAILABLE`.
 
-### 4.1 RedisJSON Operations
-- [ ] **Task 4.1.1**: Implement JSON repository trait (gated by `capabilities.modules.json`)
-- [ ] **Task 4.1.2**: Implement JSON operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | JSON.SET | `json_set` | High |
-  | JSON.GET | `json_get` | High |
-  | JSON.MGET | `json_mget` | High |
-  | JSON.DEL | `json_del` | High |
-  | JSON.TYPE | `json_type` | Medium |
-  | JSON.STRLEN | `json_str_len` | Medium |
-  | JSON.ARRLEN | `json_arr_len` | Medium |
-  | JSON.ARRAPPEND | `json_arr_append` | Medium |
-  | JSON.ARRINDEX | `json_arr_index` | Medium |
-  | JSON.ARRINSERT | `json_arr_insert` | Medium |
-  | JSON.ARRPOP | `json_arr_pop` | Medium |
-  | JSON.ARRTRIM | `json_arr_trim` | Medium |
-  | JSON.OBJKEYS | `json_obj_keys` | Medium |
-  | JSON.OBJLEN | `json_obj_len` | Medium |
-  | JSON.NUMINCRBY | `json_num_incr_by` | Medium |
-  | JSON.NUMMULTBY | `json_num_mult_by` | Low |
-  | JSON.TOGGLE | `json_toggle` | Medium |
-  | JSON.CLEAR | `json_clear` | Medium |
-  | JSON.RESP | `json_resp` | Low |
-  | JSON.DEBUG MEMORY | `json_debug_memory` | Low |
+### 4.1 RedisJSON Operations ✅ COMPLETE
+- [x] **Task 4.1.1**: Implement JSON repository trait (gated by `capabilities.modules.json`)
+- [x] **Task 4.1.2**: Implement JSON operations (22 commands total)
+  | Command | Method | Priority | Status |
+  |---------|--------|----------|--------|
+  | JSON.SET | `json_set` | High | ✅ |
+  | JSON.GET | `json_get` | High | ✅ |
+  | JSON.MGET | `json_mget` | High | ✅ |
+  | JSON.MSET | `json_mset` | High | ✅ (Extra) |
+  | JSON.DEL | `json_del` | High | ✅ |
+  | JSON.TYPE | `json_type` | Medium | ✅ |
+  | JSON.STRLEN | `json_str_len` | Medium | ✅ |
+  | JSON.STRAPPEND | `json_str_append` | Medium | ✅ (Extra) |
+  | JSON.ARRLEN | `json_arr_len` | Medium | ✅ |
+  | JSON.ARRAPPEND | `json_arr_append` | Medium | ✅ |
+  | JSON.ARRINDEX | `json_arr_index` | Medium | ✅ |
+  | JSON.ARRINSERT | `json_arr_insert` | Medium | ✅ |
+  | JSON.ARRPOP | `json_arr_pop` | Medium | ✅ |
+  | JSON.ARRTRIM | `json_arr_trim` | Medium | ✅ |
+  | JSON.OBJKEYS | `json_obj_keys` | Medium | ✅ |
+  | JSON.OBJLEN | `json_obj_len` | Medium | ✅ |
+  | JSON.NUMINCRBY | `json_num_incr_by` | Medium | ✅ |
+  | JSON.NUMMULTBY | `json_num_mult_by` | Low | ✅ |
+  | JSON.TOGGLE | `json_toggle` | Medium | ✅ |
+  | JSON.CLEAR | `json_clear` | Medium | ✅ |
+  | JSON.RESP | `json_resp` | Low | ✅ |
+  | JSON.DEBUG MEMORY | `json_debug_memory` | Low | ✅ |
 
-- [ ] **Task 4.1.3**: Create JSON API routes
-- [ ] **Task 4.1.4**: Create JSON request/response schemas
+- [x] **Task 4.1.3**: Create JSON API routes (22 endpoints)
+  - Core: `PUT/GET/DELETE /api/v1/json/{key}`, `POST /api/v1/json/mget`, `POST /api/v1/json/mset`
+  - String: `GET /api/v1/json/{key}/strlen`, `PATCH /api/v1/json/{key}/strappend`
+  - Numeric: `PATCH /api/v1/json/{key}/numincrby`, `/nummultby`, `/toggle`, `POST /clear`
+  - Array: `GET /arrlen`, `POST /arrappend`, `/arrindex`, `/arrinsert`, `DELETE /arrpop`, `POST /arrtrim`
+  - Object: `GET /objlen`, `/objkeys`
+  - Debug: `GET /debug/memory`, `/resp`
+- [x] **Task 4.1.4**: Create JSON request/response schemas with OpenAPI documentation
 
 ### 4.2 RediSearch Operations
 - [ ] **Task 4.2.1**: Implement Search repository trait (gated by `capabilities.modules.search`)

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, HashService, KeyService, ListService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, HashService, JsonService, KeyService, ListService, SetService, SortedSetService, StreamService, StringService};
 use crate::domain::entities::{
     AclLogEntry, AutoClaimResult, BgRewriteAofResult, BgSaveResult, ClaimResult, ClientInfo,
     ClientKillOptions, ClientPauseOptions, ConsumerGroupInfo, ConsumerInfo, CopyKeyOptions,
@@ -17,15 +17,21 @@ use crate::domain::entities::{
     XAddOptions, XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions,
     XReadGroupOptions, XReadOptions, XTrimStrategy, AppendResult, GetExOptions, MGetResult,
     RangeResult, SetOptions, SetRangeResult, SetResult, StringValue,
+    JsonArrAppendResult, JsonArrIndexResult, JsonArrInsertResult, JsonArrLenResult,
+    JsonArrPopResult, JsonArrTrimResult, JsonClearResult, JsonDebugMemoryResult, JsonDelResult,
+    JsonGetResult, JsonMGetItem, JsonMGetResult, JsonMSetItem, JsonNumResult, JsonObjKeysResult,
+    JsonObjLenResult, JsonRespResult, JsonSetOptions, JsonSetResult, JsonStrAppendResult,
+    JsonStrLenResult, JsonToggleResult, JsonTypeResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    AdminRepository, BlockingPopResult, HashRepository, InsertPosition, KeyRepository,
+    AdminRepository, BlockingPopResult, HashRepository, InsertPosition, JsonRepository, KeyRepository,
     LexRange, ListDirection, ListRepository, LPosOptions, ScoreRange, ScoredMember,
     SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
     ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
     ZSetAlgebraOptions,
 };
+use serde_json::Value;
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -1417,7 +1423,8 @@ pub fn test_state_with_repos(
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo)
+    let json_repo = Arc::new(MockJsonRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1430,6 +1437,7 @@ pub fn test_state_with_all_repos(
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
     stream_repo: Arc<MockStreamRepository>,
+    json_repo: Arc<MockJsonRepository>,
 ) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
     let config = Arc::new(Settings::default());
@@ -1442,8 +1450,9 @@ pub fn test_state_with_all_repos(
     let key_service = Arc::new(KeyService::new_with_repository(key_repo));
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
     let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
+    let json_service = Arc::new(JsonService::new_with_repository(json_repo));
 
-    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service)
+    AppState::new_with_services(pool, config, capabilities, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service)
 }
 
 pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
@@ -1463,7 +1472,8 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo);
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo);
     (state, hash_repo)
 }
 
@@ -1476,7 +1486,8 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo);
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo);
     (state, list_repo)
 }
 
@@ -1489,7 +1500,8 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo);
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo);
     (state, set_repo)
 }
 
@@ -1502,7 +1514,8 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo);
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo);
     (state, sorted_set_repo)
 }
 
@@ -1515,8 +1528,23 @@ pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo);
     (state, stream_repo)
+}
+
+pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone());
+    (state, json_repo)
 }
 
 /// Mock Sorted Set Repository for testing
@@ -2336,5 +2364,243 @@ impl StreamRepository for MockStreamRepository {
         _max_deleted_id: Option<&str>,
     ) -> Result<(), CacheError> {
         Ok(())
+    }
+}
+
+/// Mock JSON Repository for testing
+#[derive(Default)]
+pub struct MockJsonRepository;
+
+impl MockJsonRepository {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl JsonRepository for MockJsonRepository {
+    async fn json_set(
+        &self,
+        key: &str,
+        path: &str,
+        _value: Value,
+        _options: JsonSetOptions,
+    ) -> Result<JsonSetResult, CacheError> {
+        Ok(JsonSetResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            success: true,
+        })
+    }
+
+    async fn json_get(&self, key: &str, paths: &[String]) -> Result<Option<JsonGetResult>, CacheError> {
+        Ok(Some(JsonGetResult {
+            key: key.to_string(),
+            paths: paths.to_vec(),
+            value: Value::Null,
+        }))
+    }
+
+    async fn json_mget(&self, keys: &[String], path: &str) -> Result<JsonMGetResult, CacheError> {
+        Ok(JsonMGetResult {
+            results: keys.iter().map(|k| JsonMGetItem { key: k.clone(), value: Some(Value::Null) }).collect(),
+            path: path.to_string(),
+        })
+    }
+
+    async fn json_mset(&self, _items: &[JsonMSetItem]) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn json_del(&self, key: &str, path: &str) -> Result<JsonDelResult, CacheError> {
+        Ok(JsonDelResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            deleted_count: 1,
+        })
+    }
+
+    async fn json_type(&self, key: &str, path: &str) -> Result<JsonTypeResult, CacheError> {
+        Ok(JsonTypeResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            types: vec![Some("object".to_string())],
+        })
+    }
+
+    async fn json_str_len(&self, key: &str, path: &str) -> Result<JsonStrLenResult, CacheError> {
+        Ok(JsonStrLenResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            lengths: vec![Some(5)],
+        })
+    }
+
+    async fn json_str_append(
+        &self,
+        key: &str,
+        path: &str,
+        _value: &str,
+    ) -> Result<JsonStrAppendResult, CacheError> {
+        Ok(JsonStrAppendResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            new_lengths: vec![Some(10)],
+        })
+    }
+
+    async fn json_num_incr_by(
+        &self,
+        key: &str,
+        path: &str,
+        _value: f64,
+    ) -> Result<JsonNumResult, CacheError> {
+        Ok(JsonNumResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            values: Value::Array(vec![Value::Number(serde_json::Number::from(1))]),
+        })
+    }
+
+    async fn json_num_mult_by(
+        &self,
+        key: &str,
+        path: &str,
+        _value: f64,
+    ) -> Result<JsonNumResult, CacheError> {
+        Ok(JsonNumResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            values: Value::Array(vec![Value::Number(serde_json::Number::from(2))]),
+        })
+    }
+
+    async fn json_toggle(&self, key: &str, path: &str) -> Result<JsonToggleResult, CacheError> {
+        Ok(JsonToggleResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            values: vec![Some(true)],
+        })
+    }
+
+    async fn json_clear(&self, key: &str, path: &str) -> Result<JsonClearResult, CacheError> {
+        Ok(JsonClearResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            cleared_count: 1,
+        })
+    }
+
+    async fn json_arr_len(&self, key: &str, path: &str) -> Result<JsonArrLenResult, CacheError> {
+        Ok(JsonArrLenResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            lengths: vec![Some(3)],
+        })
+    }
+
+    async fn json_arr_append(
+        &self,
+        key: &str,
+        path: &str,
+        _values: &[Value],
+    ) -> Result<JsonArrAppendResult, CacheError> {
+        Ok(JsonArrAppendResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            new_lengths: vec![Some(5)],
+        })
+    }
+
+    async fn json_arr_index(
+        &self,
+        key: &str,
+        path: &str,
+        _value: &Value,
+        _start: Option<i64>,
+        _stop: Option<i64>,
+    ) -> Result<JsonArrIndexResult, CacheError> {
+        Ok(JsonArrIndexResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            indices: vec![Some(0)],
+        })
+    }
+
+    async fn json_arr_insert(
+        &self,
+        key: &str,
+        path: &str,
+        _index: i64,
+        _values: &[Value],
+    ) -> Result<JsonArrInsertResult, CacheError> {
+        Ok(JsonArrInsertResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            new_lengths: vec![Some(5)],
+        })
+    }
+
+    async fn json_arr_pop(
+        &self,
+        key: &str,
+        path: &str,
+        _index: Option<i64>,
+    ) -> Result<JsonArrPopResult, CacheError> {
+        Ok(JsonArrPopResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            values: vec![Some(Value::String("popped".to_string()))],
+        })
+    }
+
+    async fn json_arr_trim(
+        &self,
+        key: &str,
+        path: &str,
+        _start: i64,
+        _stop: i64,
+    ) -> Result<JsonArrTrimResult, CacheError> {
+        Ok(JsonArrTrimResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            new_lengths: vec![Some(2)],
+        })
+    }
+
+    async fn json_obj_len(&self, key: &str, path: &str) -> Result<JsonObjLenResult, CacheError> {
+        Ok(JsonObjLenResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            lengths: vec![Some(3)],
+        })
+    }
+
+    async fn json_obj_keys(&self, key: &str, path: &str) -> Result<JsonObjKeysResult, CacheError> {
+        Ok(JsonObjKeysResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            keys: vec![Some(vec!["a".to_string(), "b".to_string()])],
+        })
+    }
+
+    async fn json_debug_memory(
+        &self,
+        key: &str,
+        path: &str,
+    ) -> Result<JsonDebugMemoryResult, CacheError> {
+        Ok(JsonDebugMemoryResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            memory_bytes: vec![Some(128)],
+        })
+    }
+
+    async fn json_resp(&self, key: &str, path: &str) -> Result<JsonRespResult, CacheError> {
+        Ok(JsonRespResult {
+            key: key.to_string(),
+            path: path.to_string(),
+            resp: Value::Array(vec![Value::String("{".to_string())]),
+        })
     }
 }
