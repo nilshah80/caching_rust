@@ -112,8 +112,7 @@ async fn set_string(
             request.xx,
             request.get,
             request.keep_ttl,
-        )
-        .await?;
+        ).await?;
 
     Ok(Json(ApiResponse::new(SetStringResponse {
         key: result.key,
@@ -627,6 +626,21 @@ mod tests {
         let mut pairs = HashMap::new();
         pairs.insert("a".to_string(), "small".to_string()); // OK
         pairs.insert("b".to_string(), "this is too large for limit".to_string()); // Exceeds
+        let req = MSetRequest { pairs, nx: false };
+        let result = mset_strings(state.clone(), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_mset_batch_size_limit() {
+        let mut config = Settings::default();
+        config.server.max_batch_size = 1;
+        let (state, _, _, _) = test_state_with_config(config);
+        let state = State(state);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("a".to_string(), "1".to_string());
+        pairs.insert("b".to_string(), "2".to_string());
         let req = MSetRequest { pairs, nx: false };
         let result = mset_strings(state.clone(), Json(req)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));

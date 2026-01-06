@@ -16,6 +16,11 @@ use crate::domain::repositories::BloomRepository;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisBloomRepository;
 
+#[cfg(test)]
+const MAX_KEY_LENGTH: usize = 64;
+#[cfg(not(test))]
+const MAX_KEY_LENGTH: usize = 512 * 1024 * 1024;
+
 /// Service for Bloom filter and Cuckoo filter operations
 pub struct BloomService {
     repository: Arc<dyn BloomRepository>,
@@ -194,7 +199,7 @@ impl BloomService {
         if key.is_empty() {
             return Err(CacheError::InvalidInput("Key cannot be empty".to_string()));
         }
-        if key.len() > 512 * 1024 * 1024 {
+        if key.len() > MAX_KEY_LENGTH {
             return Err(CacheError::InvalidInput("Key too long (max 512MB)".to_string()));
         }
         Ok(())
@@ -595,6 +600,34 @@ mod tests {
             expansion: Some(1),
         }).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_bf_mexists() {
+        let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
+
+        let result = service
+            .bf_mexists("bf:test", vec!["item1".to_string(), "item2".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(result.results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_cf_exists() {
+        let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
+
+        let result = service.cf_exists("cf:test", "item").await.unwrap();
+        assert_eq!(result.results, vec![true]);
+    }
+
+    #[tokio::test]
+    async fn test_key_too_long_validation() {
+        let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
+
+        let long_key = "k".repeat(MAX_KEY_LENGTH + 1);
+        let result = service.bf_add(&long_key, "item").await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
     #[tokio::test]

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::domain::entities::{
     // Bloom entities
     BloomAddResult, BloomCardResult, BloomExistsResult, BloomInfo, BloomInsertOptions,
@@ -34,11 +34,16 @@ use crate::domain::entities::{
     ProfileResult, ProfileType, SearchFieldSchema, SearchOptions, SearchResult, SpellcheckOptions,
     SpellcheckResult, SugAddOptions, SugAddResult, SugDelResult, SugGetOptions, SugLenResult,
     Suggestion, SynonymGroup, SynonymUpdateResult,
+    // Probabilistic entities
+    CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult,
+    PfAddResult, PfCountResult, PfMergeResult,
+    TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo, TopKItem, TopKListResult,
+    TopKQueryResult, TopKReserveResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository, KeyRepository,
-    LexRange, ListDirection, ListRepository, LPosOptions, ScoreRange, ScoredMember,
+    LexRange, ListDirection, ListRepository, LPosOptions, ProbabilisticRepository, ScoreRange, ScoredMember,
     SearchRepository, SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
     ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
     ZSetAlgebraOptions,
@@ -1438,7 +1443,8 @@ pub fn test_state_with_repos(
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo)
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1454,8 +1460,9 @@ pub fn test_state_with_all_repos(
     json_repo: Arc<MockJsonRepository>,
     search_repo: Arc<MockSearchRepository>,
     bloom_repo: Arc<MockBloomRepository>,
+    probabilistic_repo: Arc<MockProbabilisticRepository>,
 ) -> AppState {
-    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, Settings::default())
+    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, Settings::default())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1471,6 +1478,7 @@ pub fn test_state_with_all_repos_and_config(
     json_repo: Arc<MockJsonRepository>,
     search_repo: Arc<MockSearchRepository>,
     bloom_repo: Arc<MockBloomRepository>,
+    probabilistic_repo: Arc<MockProbabilisticRepository>,
     config: Settings,
 ) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
@@ -1488,8 +1496,9 @@ pub fn test_state_with_all_repos_and_config(
     let json_service = Arc::new(JsonService::new_with_repository(json_repo));
     let search_service = Arc::new(SearchService::new_with_repository(search_repo));
     let bloom_service = Arc::new(BloomService::new_with_repository(bloom_repo));
+    let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(probabilistic_repo));
 
-    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service)
+    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service)
 }
 
 /// Create test state with custom config
@@ -1505,7 +1514,8 @@ pub fn test_state_with_config(config: Settings) -> (AppState, Arc<MockStringRepo
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, config);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, config);
     (state, string_repo, key_repo, admin_repo)
 }
 
@@ -1529,7 +1539,8 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, hash_repo)
 }
 
@@ -1545,7 +1556,8 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, list_repo)
 }
 
@@ -1561,7 +1573,8 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, set_repo)
 }
 
@@ -1577,7 +1590,8 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, sorted_set_repo)
 }
 
@@ -1593,7 +1607,8 @@ pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, stream_repo)
 }
 
@@ -1609,7 +1624,8 @@ pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo, probabilistic_repo);
     (state, json_repo)
 }
 
@@ -1625,7 +1641,8 @@ pub fn test_state_with_search_repo() -> (AppState, Arc<MockSearchRepository>) {
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo);
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo, probabilistic_repo);
     (state, search_repo)
 }
 
@@ -1641,8 +1658,26 @@ pub fn test_state_with_bloom_repo() -> (AppState, Arc<MockBloomRepository>) {
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone());
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone(), probabilistic_repo);
     (state, bloom_repo)
+}
+
+pub fn test_state_with_probabilistic_repo() -> (AppState, Arc<MockProbabilisticRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo.clone());
+    (state, probabilistic_repo)
 }
 
 /// Mock Sorted Set Repository for testing
@@ -3133,6 +3168,145 @@ impl BloomRepository for MockBloomRepository {
     async fn cf_loadchunk(&self, key: &str, _iterator: u64, _data: &[u8]) -> Result<CuckooLoadChunkResult, CacheError> {
         Ok(CuckooLoadChunkResult {
             key: key.to_string(),
+            success: true,
+        })
+    }
+}
+
+/// Mock Probabilistic Repository for testing
+pub struct MockProbabilisticRepository;
+
+impl MockProbabilisticRepository {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MockProbabilisticRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ProbabilisticRepository for MockProbabilisticRepository {
+    // Count-Min Sketch operations
+    async fn cms_init_by_dim(&self, key: &str, _width: u64, _depth: u64) -> Result<CmsInitResult, CacheError> {
+        Ok(CmsInitResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn cms_init_by_prob(&self, key: &str, _error: f64, _probability: f64) -> Result<CmsInitResult, CacheError> {
+        Ok(CmsInitResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn cms_incr_by(&self, key: &str, items: Vec<(String, u64)>) -> Result<CmsIncrByResult, CacheError> {
+        Ok(CmsIncrByResult {
+            key: key.to_string(),
+            counts: items.iter().map(|(_, count)| *count).collect(),
+        })
+    }
+
+    async fn cms_query(&self, key: &str, items: Vec<String>) -> Result<CmsQueryResult, CacheError> {
+        Ok(CmsQueryResult {
+            key: key.to_string(),
+            counts: vec![1; items.len()],
+        })
+    }
+
+    async fn cms_merge(&self, dest: &str, _sources: Vec<String>, _weights: Option<Vec<u64>>) -> Result<CmsMergeResult, CacheError> {
+        Ok(CmsMergeResult {
+            key: dest.to_string(),
+            success: true,
+        })
+    }
+
+    async fn cms_info(&self, _key: &str) -> Result<CmsInfo, CacheError> {
+        Ok(CmsInfo {
+            width: 2000,
+            depth: 5,
+            count: 100,
+        })
+    }
+
+    // Top-K operations
+    async fn topk_reserve(&self, key: &str, _k: u64, _width: Option<u64>, _depth: Option<u64>, _decay: Option<f64>) -> Result<TopKReserveResult, CacheError> {
+        Ok(TopKReserveResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn topk_add(&self, key: &str, items: Vec<String>) -> Result<TopKAddResult, CacheError> {
+        Ok(TopKAddResult {
+            key: key.to_string(),
+            dropped: vec![None; items.len()],
+        })
+    }
+
+    async fn topk_incr_by(&self, key: &str, items: Vec<(String, u64)>) -> Result<TopKIncrByResult, CacheError> {
+        Ok(TopKIncrByResult {
+            key: key.to_string(),
+            dropped: vec![None; items.len()],
+        })
+    }
+
+    async fn topk_query(&self, key: &str, items: Vec<String>) -> Result<TopKQueryResult, CacheError> {
+        Ok(TopKQueryResult {
+            key: key.to_string(),
+            results: vec![true; items.len()],
+        })
+    }
+
+    async fn topk_count(&self, key: &str, items: Vec<String>) -> Result<TopKCountResult, CacheError> {
+        Ok(TopKCountResult {
+            key: key.to_string(),
+            counts: vec![10; items.len()],
+        })
+    }
+
+    async fn topk_list(&self, key: &str, with_count: bool) -> Result<TopKListResult, CacheError> {
+        Ok(TopKListResult {
+            key: key.to_string(),
+            items: vec![
+                TopKItem { item: "item1".to_string(), count: if with_count { 100 } else { 0 } },
+                TopKItem { item: "item2".to_string(), count: if with_count { 50 } else { 0 } },
+            ],
+        })
+    }
+
+    async fn topk_info(&self, _key: &str) -> Result<TopKInfo, CacheError> {
+        Ok(TopKInfo {
+            k: 10,
+            width: 2000,
+            depth: 7,
+            decay: 0.9,
+        })
+    }
+
+    // HyperLogLog operations
+    async fn pf_add(&self, key: &str, _elements: Vec<String>) -> Result<PfAddResult, CacheError> {
+        Ok(PfAddResult {
+            key: key.to_string(),
+            changed: true,
+        })
+    }
+
+    async fn pf_count(&self, keys: Vec<String>) -> Result<PfCountResult, CacheError> {
+        Ok(PfCountResult {
+            keys,
+            count: 1000,
+        })
+    }
+
+    async fn pf_merge(&self, dest: &str, _sources: Vec<String>) -> Result<PfMergeResult, CacheError> {
+        Ok(PfMergeResult {
+            dest_key: dest.to_string(),
             success: true,
         })
     }

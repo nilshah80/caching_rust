@@ -1057,4 +1057,46 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn test_search_create_index_invalid_field_type() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/search/indices")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"index":"idx","schema":[{"name":"title","field_type":"INVALID"}]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_search_alter_index_invalid_field_type() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/search/indices/idx/fields")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"field":{"name":"title","field_type":"INVALID"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }

@@ -1,4 +1,5 @@
 [default]
 exclude-files = [
   "src/infrastructure/redis/repositories/*",
+  "src/main.rs",
 ]

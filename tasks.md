@@ -1368,37 +1368,56 @@ Go service does NOT support Stream operations.
 - ✅ CF.DEL - Delete items
 - ✅ CF.INSERT/CF.INSERTNX - Bulk insert with options
 
-### 4.4 Probabilistic Data Structures
-- [ ] **Task 4.4.1**: Implement Count-Min Sketch operations (gated by `capabilities.modules.bloom`)
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | CMS.INITBYDIM | `cms_init_by_dim` | High |
-  | CMS.INITBYPROB | `cms_init_by_prob` | High |
-  | CMS.INCRBY | `cms_incr_by` | High |
-  | CMS.QUERY | `cms_query` | High |
-  | CMS.MERGE | `cms_merge` | Medium |
-  | CMS.INFO | `cms_info` | High |
+### 4.4 Probabilistic Data Structures ✅
+- [x] **Task 4.4.1**: Implement Count-Min Sketch operations (gated by `capabilities.modules.bloom`) ✅
+  | Command | Method | Priority | Status |
+  |---------|--------|----------|--------|
+  | CMS.INITBYDIM | `cms_init_by_dim` | High | ✅ |
+  | CMS.INITBYPROB | `cms_init_by_prob` | High | ✅ |
+  | CMS.INCRBY | `cms_incr_by` | High | ✅ |
+  | CMS.QUERY | `cms_query` | High | ✅ |
+  | CMS.MERGE | `cms_merge` | Medium | ✅ |
+  | CMS.INFO | `cms_info` | High | ✅ |
 
-- [ ] **Task 4.4.2**: Implement Top-K operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | TOPK.RESERVE | `topk_reserve` | High |
-  | TOPK.ADD | `topk_add` | High |
-  | TOPK.INCRBY | `topk_incr_by` | Medium |
-  | TOPK.QUERY | `topk_query` | High |
-  | TOPK.COUNT | `topk_count` | Medium |
-  | TOPK.LIST | `topk_list` | High |
-  | TOPK.INFO | `topk_info` | High |
+- [x] **Task 4.4.2**: Implement Top-K operations ✅
+  | Command | Method | Priority | Status |
+  |---------|--------|----------|--------|
+  | TOPK.RESERVE | `topk_reserve` | High | ✅ |
+  | TOPK.ADD | `topk_add` | High | ✅ |
+  | TOPK.INCRBY | `topk_incr_by` | Medium | ✅ |
+  | TOPK.QUERY | `topk_query` | High | ✅ |
+  | TOPK.COUNT | `topk_count` | Medium | ✅ |
+  | TOPK.LIST | `topk_list` | High | ✅ |
+  | TOPK.INFO | `topk_info` | High | ✅ |
 
-- [ ] **Task 4.4.3**: Implement HyperLogLog operations (always available - core Redis)
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | PFADD | `pf_add` | High |
-  | PFCOUNT | `pf_count` | High |
-  | PFMERGE | `pf_merge` | Medium |
+- [x] **Task 4.4.3**: Implement HyperLogLog operations (always available - core Redis) ✅
+  | Command | Method | Priority | Status |
+  |---------|--------|----------|--------|
+  | PFADD | `pf_add` | High | ✅ |
+  | PFCOUNT | `pf_count` | High | ✅ |
+  | PFMERGE | `pf_merge` | Medium | ✅ |
 
-- [ ] **Task 4.4.4**: Create Probabilistic API routes
-- [ ] **Task 4.4.5**: Create Probabilistic request/response schemas
+- [x] **Task 4.4.4**: Create Probabilistic API routes ✅
+- [x] **Task 4.4.5**: Create Probabilistic request/response schemas ✅
+
+**Implementation Details:**
+- Domain entities: `src/domain/entities/probabilistic_value.rs`
+- Repository trait: `src/domain/repositories/probabilistic_repository.rs`
+- Redis implementation: `src/infrastructure/redis/repositories/probabilistic_repo.rs`
+- Service layer: `src/application/services/probabilistic_service.rs`
+- HTTP routes: `src/api/http/routes/probabilistic.rs`
+- Request/response schemas: `src/api/http/schemas/probabilistic.rs`
+- OpenAPI documentation: Added to `src/api/http/routes/openapi.rs`
+
+**API Endpoints:**
+- Count-Min Sketch: `/api/v1/cms/{key}/initbydim`, `/api/v1/cms/{key}/initbyprob`, `/api/v1/cms/{key}/incrby`, `/api/v1/cms/{key}/query`, `/api/v1/cms/{key}/merge`, `/api/v1/cms/{key}` (GET for info)
+- Top-K: `/api/v1/topk/{key}` (POST for reserve, GET for info), `/api/v1/topk/{key}/add`, `/api/v1/topk/{key}/incrby`, `/api/v1/topk/{key}/query`, `/api/v1/topk/{key}/count`, `/api/v1/topk/{key}/list`
+- HyperLogLog: `/api/v1/hll/{key}/add`, `/api/v1/hll/count`, `/api/v1/hll/{key}/merge`
+
+**Notes:**
+- TOPK.RESERVE validates that width/depth/decay must be provided together (all-or-nothing) per RedisBloom requirements
+- CMS and Top-K routes are conditionally enabled based on `capabilities.modules.bloom`
+- HyperLogLog routes are always enabled (core Redis feature)
 
 ---
 

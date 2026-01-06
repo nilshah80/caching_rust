@@ -291,10 +291,10 @@ async fn bf_loadchunk(
         .decode(&request.data)
         .map_err(|e| CacheError::InvalidInput(format!("Invalid base64 data: {}", e)))?;
 
-    let result = state
+    let future = state
         .bloom_service
-        .bf_loadchunk(&key, request.iterator, &data)
-        .await?;
+        .bf_loadchunk(&key, request.iterator, &data);
+    let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -634,10 +634,10 @@ async fn cf_loadchunk(
         .decode(&request.data)
         .map_err(|e| CacheError::InvalidInput(format!("Invalid base64 data: {}", e)))?;
 
-    let result = state
+    let future = state
         .bloom_service
-        .cf_loadchunk(&key, request.iterator, &data)
-        .await?;
+        .cf_loadchunk(&key, request.iterator, &data);
+    let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -708,6 +708,21 @@ mod tests {
                     .uri("/api/v1/bloom/myfilter/exists")
                     .header("Content-Type", "application/json")
                     .body(Body::from(r#"{"items":["item1"]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Test BF.MEXISTS branch with multiple items
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/bloom/myfilter/exists")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"items":["item1","item2"]}"#))
                     .unwrap(),
             )
             .await
@@ -817,6 +832,21 @@ mod tests {
                     .uri("/api/v1/cuckoo/myfilter/exists")
                     .header("Content-Type", "application/json")
                     .body(Body::from(r#"{"items":["item1","item2"]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Test CF.EXISTS single-item branch
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/cuckoo/myfilter/exists")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"items":["item1"]}"#))
                     .unwrap(),
             )
             .await

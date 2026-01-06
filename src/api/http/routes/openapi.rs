@@ -129,6 +129,14 @@ use crate::api::http::schemas::bloom::{
     CuckooLoadChunkRequest, CuckooLoadChunkResponse, CuckooReserveRequest, CuckooReserveResponse,
     CuckooScanDumpParams, CuckooScanDumpResponse,
 };
+use crate::api::http::schemas::probabilistic::{
+    CmsIncrByItem, CmsIncrByRequest, CmsIncrByResponse, CmsInfoResponse, CmsInitByDimRequest,
+    CmsInitByProbRequest, CmsInitResponse, CmsMergeRequest, CmsMergeResponse, CmsQueryRequest,
+    CmsQueryResponse, PfAddRequest, PfAddResponse, PfCountRequest, PfCountResponse, PfMergeRequest,
+    PfMergeResponse, TopKAddRequest, TopKAddResponse, TopKCountResponse, TopKIncrByItem,
+    TopKIncrByRequest, TopKIncrByResponse, TopKInfoResponse, TopKListItem, TopKListQuery,
+    TopKListResponse, TopKQueryRequest, TopKQueryResponse, TopKReserveRequest, TopKReserveResponse,
+};
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
     StreamEntry, StreamInfo, StreamReadResult, StringValue,
@@ -174,6 +182,9 @@ use crate::shared::app_state::AppState;
         (name = "Search", description = "RediSearch operations (FT.CREATE, FT.SEARCH, FT.AGGREGATE, FT.INFO, autocomplete, synonyms, spellcheck, etc.) - requires RediSearch module"),
         (name = "Bloom Filters", description = "RedisBloom Bloom filter operations (BF.RESERVE, BF.ADD, BF.EXISTS, BF.INFO, BF.SCANDUMP, BF.LOADCHUNK, etc.) - requires RedisBloom module"),
         (name = "Cuckoo Filters", description = "RedisBloom Cuckoo filter operations (CF.RESERVE, CF.ADD, CF.ADDNX, CF.EXISTS, CF.DEL, CF.INFO, CF.SCANDUMP, CF.LOADCHUNK, etc.) - requires RedisBloom module"),
+        (name = "Count-Min Sketch", description = "RedisBloom Count-Min Sketch operations for frequency estimation (CMS.INITBYDIM, CMS.INITBYPROB, CMS.INCRBY, CMS.QUERY, CMS.MERGE, CMS.INFO) - requires RedisBloom module"),
+        (name = "Top-K", description = "RedisBloom Top-K operations for tracking most frequent items (TOPK.RESERVE, TOPK.ADD, TOPK.INCRBY, TOPK.QUERY, TOPK.COUNT, TOPK.LIST, TOPK.INFO) - requires RedisBloom module"),
+        (name = "HyperLogLog", description = "Redis HyperLogLog operations for cardinality estimation (PFADD, PFCOUNT, PFMERGE) - core Redis feature"),
         (name = "Admin", description = "Administrative endpoints (pool stats, capabilities, server info, database ops, config, persistence, client management, monitoring, ACL)")
     ),
     paths(
@@ -396,6 +407,25 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::bloom::cf_count,
         crate::api::http::routes::bloom::cf_scandump,
         crate::api::http::routes::bloom::cf_loadchunk,
+        // Count-Min Sketch endpoints (RedisBloom module)
+        crate::api::http::routes::probabilistic::cms_init_by_dim,
+        crate::api::http::routes::probabilistic::cms_init_by_prob,
+        crate::api::http::routes::probabilistic::cms_incr_by,
+        crate::api::http::routes::probabilistic::cms_query,
+        crate::api::http::routes::probabilistic::cms_merge,
+        crate::api::http::routes::probabilistic::cms_info,
+        // Top-K endpoints (RedisBloom module)
+        crate::api::http::routes::probabilistic::topk_reserve,
+        crate::api::http::routes::probabilistic::topk_info,
+        crate::api::http::routes::probabilistic::topk_add,
+        crate::api::http::routes::probabilistic::topk_incr_by,
+        crate::api::http::routes::probabilistic::topk_query,
+        crate::api::http::routes::probabilistic::topk_count,
+        crate::api::http::routes::probabilistic::topk_list,
+        // HyperLogLog endpoints (core Redis)
+        crate::api::http::routes::probabilistic::pf_add,
+        crate::api::http::routes::probabilistic::pf_count,
+        crate::api::http::routes::probabilistic::pf_merge,
         // Admin - Public endpoints
         crate::api::http::routes::admin::get_pool_stats,
         crate::api::http::routes::admin::get_capabilities,
@@ -886,6 +916,40 @@ use crate::shared::app_state::AppState;
             CuckooScanDumpResponse,
             CuckooLoadChunkRequest,
             CuckooLoadChunkResponse,
+            // Count-Min Sketch schemas (RedisBloom module)
+            CmsInitByDimRequest,
+            CmsInitByProbRequest,
+            CmsInitResponse,
+            CmsIncrByItem,
+            CmsIncrByRequest,
+            CmsIncrByResponse,
+            CmsQueryRequest,
+            CmsQueryResponse,
+            CmsMergeRequest,
+            CmsMergeResponse,
+            CmsInfoResponse,
+            // Top-K schemas (RedisBloom module)
+            TopKReserveRequest,
+            TopKReserveResponse,
+            TopKAddRequest,
+            TopKAddResponse,
+            TopKIncrByItem,
+            TopKIncrByRequest,
+            TopKIncrByResponse,
+            TopKQueryRequest,
+            TopKQueryResponse,
+            TopKCountResponse,
+            TopKListQuery,
+            TopKListItem,
+            TopKListResponse,
+            TopKInfoResponse,
+            // HyperLogLog schemas (core Redis)
+            PfAddRequest,
+            PfAddResponse,
+            PfCountRequest,
+            PfCountResponse,
+            PfMergeRequest,
+            PfMergeResponse,
         )
     ),
     modifiers(&SecurityAddon)

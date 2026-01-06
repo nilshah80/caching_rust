@@ -1025,7 +1025,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, BloomService, HashService, JsonService, KeyService, ListService, SearchService, SetService,
+        AdminService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
     use crate::domain::entities::{
@@ -1038,7 +1038,7 @@ mod tests {
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
         MockAdminRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
-        MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository,
+        MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository,
         MockStringRepository,
     };
 
@@ -1347,6 +1347,8 @@ mod tests {
             Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
         let bloom_service =
             Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
+        let probabilistic_service =
+            Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
 
         AppState::new_with_services(
@@ -1365,6 +1367,7 @@ mod tests {
             json_service,
             search_service,
             bloom_service,
+            probabilistic_service,
         )
     }
 
@@ -2078,6 +2081,8 @@ mod tests {
             Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
         let bloom_service =
             Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
+        let probabilistic_service =
+            Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(max_sse));
 
         AppState::new_with_services(
@@ -2096,6 +2101,7 @@ mod tests {
             json_service,
             search_service,
             bloom_service,
+            probabilistic_service,
         )
     }
 

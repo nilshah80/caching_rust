@@ -10,6 +10,7 @@ mod json;
 mod keys;
 mod lists;
 mod openapi;
+mod probabilistic;
 mod search;
 mod sets;
 mod sorted_sets;
@@ -24,6 +25,7 @@ pub use json::json_routes;
 pub use keys::key_routes;
 pub use lists::list_routes;
 pub use openapi::openapi_routes;
+pub use probabilistic::{cms_routes, hyperloglog_routes, topk_routes};
 pub use search::search_routes;
 pub use sets::set_routes;
 pub use sorted_sets::sorted_set_routes;
@@ -76,8 +78,15 @@ pub fn build_router(state: AppState) -> Router {
 
     // Conditionally add Bloom routes (requires RedisBloom module)
     if capabilities.modules.bloom {
-        router = router.merge(bloom_routes());
+        router = router
+            .merge(bloom_routes())
+            // CMS and Top-K are part of RedisBloom module
+            .merge(cms_routes())
+            .merge(topk_routes());
     }
+
+    // HyperLogLog is always available (core Redis)
+    router = router.merge(hyperloglog_routes());
 
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:

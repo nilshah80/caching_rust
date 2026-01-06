@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -58,6 +58,9 @@ pub struct AppState {
 
     /// Bloom filter operations service (RedisBloom module)
     pub bloom_service: Arc<BloomService>,
+
+    /// Probabilistic data structures service (CMS, Top-K, HyperLogLog)
+    pub probabilistic_service: Arc<ProbabilisticService>,
 }
 
 impl AppState {
@@ -79,8 +82,9 @@ impl AppState {
         let json_service = Arc::new(JsonService::new(pool.clone()));
         let search_service = Arc::new(SearchService::new(pool.clone()));
         let bloom_service = Arc::new(BloomService::new(pool.clone()));
+        let probabilistic_service = Arc::new(ProbabilisticService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service)
+        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -101,6 +105,7 @@ impl AppState {
         json_service: Arc<JsonService>,
         search_service: Arc<SearchService>,
         bloom_service: Arc<BloomService>,
+        probabilistic_service: Arc<ProbabilisticService>,
     ) -> Self {
         Self {
             pool,
@@ -118,6 +123,7 @@ impl AppState {
             json_service,
             search_service,
             bloom_service,
+            probabilistic_service,
         }
     }
 }
@@ -125,7 +131,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MockAdminRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
+    use crate::test_support::{MockAdminRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
 
     #[test]
     fn test_new_with_services() {
@@ -144,6 +150,7 @@ mod tests {
         let json_service = Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
         let search_service = Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
         let bloom_service = Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
+        let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -161,6 +168,7 @@ mod tests {
             json_service.clone(),
             search_service.clone(),
             bloom_service.clone(),
+            probabilistic_service.clone(),
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);
