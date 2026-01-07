@@ -810,7 +810,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, BitMapService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService,
+        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
     use crate::api::http::schemas::json::JsonMSetItemRequest;
@@ -826,7 +826,7 @@ mod tests {
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
-        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
         MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository,
         MockStreamRepository, MockStringRepository, test_state_with_json_repo,
     };
@@ -1048,6 +1048,8 @@ mod tests {
             Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
         let probabilistic_service =
             Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
+        let geo_service =
+            Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
 
         AppState::new_with_services(
@@ -1068,6 +1070,7 @@ mod tests {
             search_service,
             bloom_service,
             probabilistic_service,
+            geo_service,
         )
     }
 

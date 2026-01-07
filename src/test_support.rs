@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, BitMapService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::domain::entities::{
     // Bloom entities
     BloomAddResult, BloomCardResult, BloomExistsResult, BloomInfo, BloomInsertOptions,
@@ -1446,7 +1446,8 @@ pub fn test_state_with_repos(
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo)
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1464,8 +1465,9 @@ pub fn test_state_with_all_repos(
     search_repo: Arc<MockSearchRepository>,
     bloom_repo: Arc<MockBloomRepository>,
     probabilistic_repo: Arc<MockProbabilisticRepository>,
+    geo_repo: Arc<MockGeoRepository>,
 ) -> AppState {
-    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, Settings::default())
+    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo, Settings::default())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1483,6 +1485,7 @@ pub fn test_state_with_all_repos_and_config(
     search_repo: Arc<MockSearchRepository>,
     bloom_repo: Arc<MockBloomRepository>,
     probabilistic_repo: Arc<MockProbabilisticRepository>,
+    geo_repo: Arc<MockGeoRepository>,
     config: Settings,
 ) -> AppState {
     let pool = Arc::new(InstrumentedPool::new_for_tests());
@@ -1502,8 +1505,9 @@ pub fn test_state_with_all_repos_and_config(
     let search_service = Arc::new(SearchService::new_with_repository(search_repo));
     let bloom_service = Arc::new(BloomService::new_with_repository(bloom_repo));
     let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(probabilistic_repo));
+    let geo_service = Arc::new(GeoService::new_with_repository(geo_repo));
 
-    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service)
+    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service)
 }
 
 /// Create test state with custom config
@@ -1521,7 +1525,8 @@ pub fn test_state_with_config(config: Settings) -> (AppState, Arc<MockStringRepo
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, config);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo, config);
     (state, string_repo, key_repo, admin_repo)
 }
 
@@ -1547,7 +1552,8 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
     (state, hash_repo)
 }
 
@@ -1565,7 +1571,8 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
     (state, list_repo)
 }
 
@@ -1583,7 +1590,8 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
     (state, set_repo)
 }
 
@@ -1601,7 +1609,8 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
     (state, sorted_set_repo)
 }
 
@@ -1619,7 +1628,8 @@ pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
     (state, stream_repo)
 }
 
@@ -1637,7 +1647,8 @@ pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo, probabilistic_repo, geo_repo);
     (state, json_repo)
 }
 
@@ -1655,7 +1666,8 @@ pub fn test_state_with_search_repo() -> (AppState, Arc<MockSearchRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo, probabilistic_repo, geo_repo);
     (state, search_repo)
 }
 
@@ -1673,7 +1685,8 @@ pub fn test_state_with_bloom_repo() -> (AppState, Arc<MockBloomRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone(), probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone(), probabilistic_repo, geo_repo);
     (state, bloom_repo)
 }
 
@@ -1691,7 +1704,8 @@ pub fn test_state_with_probabilistic_repo() -> (AppState, Arc<MockProbabilisticR
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo.clone());
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo.clone(), geo_repo);
     (state, probabilistic_repo)
 }
 
@@ -1709,8 +1723,28 @@ pub fn test_state_with_bitmap_repo() -> (AppState, Arc<MockBitMapRepository>) {
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
     (state, bitmap_repo)
+}
+
+pub fn test_state_with_geo_repo() -> (AppState, Arc<MockGeoRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let geo_repo = Arc::new(MockGeoRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo.clone());
+    (state, geo_repo)
 }
 
 /// Mock Sorted Set Repository for testing
@@ -3587,5 +3621,322 @@ impl BitMapRepository for MockBitMapRepository {
             .collect();
 
         Ok(BitfieldResult { values: results })
+    }
+}
+
+// ========== MockGeoRepository ==========
+
+use crate::domain::repositories::{
+    GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,
+    GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoUnit,
+};
+
+#[derive(Default)]
+pub struct MockGeoRepository {
+    store: Mutex<HashMap<String, Vec<GeoMember>>>,
+}
+
+impl MockGeoRepository {
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Calculate distance between two points using Haversine formula
+    fn haversine_distance(pos1: &GeoPosition, pos2: &GeoPosition) -> f64 {
+        let r = 6371000.0; // Earth's radius in meters
+        let lat1 = pos1.latitude.to_radians();
+        let lat2 = pos2.latitude.to_radians();
+        let delta_lat = (pos2.latitude - pos1.latitude).to_radians();
+        let delta_lon = (pos2.longitude - pos1.longitude).to_radians();
+
+        let a = (delta_lat / 2.0).sin().powi(2)
+            + lat1.cos() * lat2.cos() * (delta_lon / 2.0).sin().powi(2);
+        let c = 2.0 * a.sqrt().asin();
+        r * c
+    }
+
+    /// Convert distance to specified unit
+    fn convert_distance(meters: f64, unit: &GeoUnit) -> f64 {
+        match unit {
+            GeoUnit::Meters => meters,
+            GeoUnit::Kilometers => meters / 1000.0,
+            GeoUnit::Miles => meters / 1609.344,
+            GeoUnit::Feet => meters * 3.28084,
+        }
+    }
+}
+
+#[async_trait]
+impl GeoRepository for MockGeoRepository {
+    async fn geo_add(
+        &self,
+        key: &str,
+        members: &[GeoMember],
+        _options: GeoAddOptions,
+    ) -> Result<GeoAddResult, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_insert_with(Vec::new);
+        let mut added = 0i64;
+
+        for member in members {
+            // Check if member already exists
+            let existing = entry.iter().position(|m| m.member == member.member);
+            if let Some(idx) = existing {
+                // Update existing member's position
+                entry[idx] = member.clone();
+            } else {
+                // Add new member
+                entry.push(member.clone());
+                added += 1;
+            }
+        }
+
+        Ok(GeoAddResult {
+            added,
+            changed: None,
+        })
+    }
+
+    async fn geo_pos(
+        &self,
+        key: &str,
+        members: &[String],
+    ) -> Result<Vec<Option<GeoPosition>>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let geo_members = store.get(key);
+
+        let positions: Vec<Option<GeoPosition>> = members
+            .iter()
+            .map(|name| {
+                geo_members.and_then(|gm| {
+                    gm.iter()
+                        .find(|m| &m.member == name)
+                        .map(|m| m.position.clone())
+                })
+            })
+            .collect();
+
+        Ok(positions)
+    }
+
+    async fn geo_dist(
+        &self,
+        key: &str,
+        member1: &str,
+        member2: &str,
+        unit: GeoUnit,
+    ) -> Result<Option<f64>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let geo_members = match store.get(key) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+
+        let pos1 = geo_members.iter().find(|m| m.member == member1);
+        let pos2 = geo_members.iter().find(|m| m.member == member2);
+
+        match (pos1, pos2) {
+            (Some(m1), Some(m2)) => {
+                let meters = Self::haversine_distance(&m1.position, &m2.position);
+                Ok(Some(Self::convert_distance(meters, &unit)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    async fn geo_hash(
+        &self,
+        key: &str,
+        members: &[String],
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let geo_members = store.get(key);
+
+        let hashes: Vec<Option<String>> = members
+            .iter()
+            .map(|name| {
+                geo_members.and_then(|gm| {
+                    gm.iter()
+                        .find(|m| &m.member == name)
+                        .map(|_| "sn1h35gkzb0".to_string()) // Simplified mock geohash
+                })
+            })
+            .collect();
+
+        Ok(hashes)
+    }
+
+    async fn geo_search(
+        &self,
+        key: &str,
+        center: GeoSearchCenter,
+        shape: GeoSearchShape,
+        options: GeoSearchOptions,
+    ) -> Result<Vec<GeoSearchResult>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let geo_members = match store.get(key) {
+            Some(m) => m,
+            None => return Ok(Vec::new()),
+        };
+
+        // Get center position
+        let center_pos = match &center {
+            GeoSearchCenter::FromLonLat(pos) => pos.clone(),
+            GeoSearchCenter::FromMember(member_name) => {
+                match geo_members.iter().find(|m| &m.member == member_name) {
+                    Some(m) => m.position.clone(),
+                    None => return Ok(Vec::new()),
+                }
+            }
+        };
+
+        // Filter members based on shape
+        let radius_meters = match &shape {
+            GeoSearchShape::ByRadius { radius, unit } => {
+                match unit {
+                    GeoUnit::Meters => *radius,
+                    GeoUnit::Kilometers => radius * 1000.0,
+                    GeoUnit::Miles => radius * 1609.344,
+                    GeoUnit::Feet => radius / 3.28084,
+                }
+            }
+            GeoSearchShape::ByBox { width, height, unit } => {
+                // Approximate: use half the diagonal as radius
+                let w = match unit {
+                    GeoUnit::Meters => *width,
+                    GeoUnit::Kilometers => width * 1000.0,
+                    GeoUnit::Miles => width * 1609.344,
+                    GeoUnit::Feet => width / 3.28084,
+                };
+                let h = match unit {
+                    GeoUnit::Meters => *height,
+                    GeoUnit::Kilometers => height * 1000.0,
+                    GeoUnit::Miles => height * 1609.344,
+                    GeoUnit::Feet => height / 3.28084,
+                };
+                ((w / 2.0).powi(2) + (h / 2.0).powi(2)).sqrt()
+            }
+        };
+
+        let mut results: Vec<GeoSearchResult> = geo_members
+            .iter()
+            .filter_map(|m| {
+                let dist = Self::haversine_distance(&center_pos, &m.position);
+                if dist <= radius_meters {
+                    Some(GeoSearchResult {
+                        member: m.member.clone(),
+                        distance: if options.with_dist {
+                            Some(dist)
+                        } else {
+                            None
+                        },
+                        position: if options.with_coord {
+                            Some(m.position.clone())
+                        } else {
+                            None
+                        },
+                        geohash: if options.with_hash {
+                            Some(0) // Simplified mock
+                        } else {
+                            None
+                        },
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by distance if requested
+        if let Some(sort) = &options.sort {
+            use crate::domain::repositories::GeoSortOrder;
+            match sort {
+                GeoSortOrder::Asc => {
+                    results.sort_by(|a, b| {
+                        let da = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == a.member).unwrap().position);
+                        let db = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == b.member).unwrap().position);
+                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+                GeoSortOrder::Desc => {
+                    results.sort_by(|a, b| {
+                        let da = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == a.member).unwrap().position);
+                        let db = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == b.member).unwrap().position);
+                        db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+            }
+        }
+
+        // Apply count limit
+        if let Some(count) = options.count {
+            results.truncate(count);
+        }
+
+        Ok(results)
+    }
+
+    async fn geo_search_store(
+        &self,
+        dest_key: &str,
+        source_key: &str,
+        center: GeoSearchCenter,
+        shape: GeoSearchShape,
+        options: GeoSearchOptions,
+        _store_dist: bool,
+    ) -> Result<GeoSearchStoreResult, CacheError> {
+        // Search for results
+        let search_results = self
+            .geo_search(source_key, center, shape, options)
+            .await?;
+
+        // Store results in destination key
+        let mut store = self.store.lock().expect("store lock");
+        let source_members = store.get(source_key).cloned().unwrap_or_default();
+        let dest_members: Vec<GeoMember> = search_results
+            .iter()
+            .filter_map(|r| source_members.iter().find(|m| m.member == r.member).cloned())
+            .collect();
+
+        let stored = dest_members.len() as i64;
+        store.insert(dest_key.to_string(), dest_members);
+
+        Ok(GeoSearchStoreResult { stored })
+    }
+
+    async fn geo_radius(
+        &self,
+        key: &str,
+        position: GeoPosition,
+        radius: f64,
+        unit: GeoUnit,
+        options: GeoSearchOptions,
+    ) -> Result<Vec<GeoSearchResult>, CacheError> {
+        self.geo_search(
+            key,
+            GeoSearchCenter::FromLonLat(position),
+            GeoSearchShape::ByRadius { radius, unit },
+            options,
+        )
+        .await
+    }
+
+    async fn geo_radius_by_member(
+        &self,
+        key: &str,
+        member: &str,
+        radius: f64,
+        unit: GeoUnit,
+        options: GeoSearchOptions,
+    ) -> Result<Vec<GeoSearchResult>, CacheError> {
+        self.geo_search(
+            key,
+            GeoSearchCenter::FromMember(member.to_string()),
+            GeoSearchShape::ByRadius { radius, unit },
+            options,
+        )
+        .await
     }
 }

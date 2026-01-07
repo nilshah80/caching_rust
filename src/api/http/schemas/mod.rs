@@ -5,6 +5,7 @@
 pub mod bitmaps;
 pub mod bloom;
 pub mod common;
+pub mod geo;
 pub mod hashes;
 pub mod json;
 pub mod keys;
@@ -19,6 +20,7 @@ pub mod strings;
 pub use bitmaps::*;
 pub use bloom::*;
 pub use common::*;
+pub use geo::*;
 pub use hashes::*;
 pub use json::*;
 pub use keys::*;

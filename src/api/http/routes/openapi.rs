@@ -142,6 +142,13 @@ use crate::api::http::schemas::bitmaps::{
     BitfieldOverflowSchema, BitfieldRequest, BitfieldResponse, BitGetResponse, BitOpRequest,
     BitOpResponse, BitOpType, BitPosQuery, BitPosResponse, BitSetRequest, BitSetResponse,
 };
+use crate::api::http::schemas::geo::{
+    GeoAddRequest, GeoAddResponse, GeoDistQuery, GeoDistResponse, GeoHashRequest, GeoHashResponse,
+    GeoMemberSchema, GeoPosRequest, GeoPosResponse, GeoPositionSchema, GeoRadiusByMemberQuery,
+    GeoRadiusQuery, GeoSearchCenterSchema, GeoSearchOptionsSchema, GeoSearchRequest,
+    GeoSearchResponse, GeoSearchResultItem, GeoSearchShapeSchema, GeoSearchStoreRequest,
+    GeoSearchStoreResponse, GeoSortOrderSchema, GeoUnitSchema,
+};
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
     StreamEntry, StreamInfo, StreamReadResult, StringValue,
@@ -191,6 +198,7 @@ use crate::shared::app_state::AppState;
         (name = "Count-Min Sketch", description = "RedisBloom Count-Min Sketch operations for frequency estimation (CMS.INITBYDIM, CMS.INITBYPROB, CMS.INCRBY, CMS.QUERY, CMS.MERGE, CMS.INFO) - requires RedisBloom module"),
         (name = "Top-K", description = "RedisBloom Top-K operations for tracking most frequent items (TOPK.RESERVE, TOPK.ADD, TOPK.INCRBY, TOPK.QUERY, TOPK.COUNT, TOPK.LIST, TOPK.INFO) - requires RedisBloom module"),
         (name = "HyperLogLog", description = "Redis HyperLogLog operations for cardinality estimation (PFADD, PFCOUNT, PFMERGE) - core Redis feature"),
+        (name = "Geo", description = "Redis geospatial operations (GEOADD, GEODIST, GEOHASH, GEOPOS, GEOSEARCH, GEOSEARCHSTORE, GEORADIUS, GEORADIUSBYMEMBER) - core Redis feature since 3.2"),
         (name = "Admin", description = "Administrative endpoints (pool stats, capabilities, server info, database ops, config, persistence, client management, monitoring, ACL)")
     ),
     paths(
@@ -440,6 +448,15 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::probabilistic::pf_add,
         crate::api::http::routes::probabilistic::pf_count,
         crate::api::http::routes::probabilistic::pf_merge,
+        // Geo endpoints (core Redis)
+        crate::api::http::routes::geo::geo_add,
+        crate::api::http::routes::geo::geo_pos,
+        crate::api::http::routes::geo::geo_dist,
+        crate::api::http::routes::geo::geo_hash,
+        crate::api::http::routes::geo::geo_search,
+        crate::api::http::routes::geo::geo_search_store,
+        crate::api::http::routes::geo::geo_radius,
+        crate::api::http::routes::geo::geo_radius_by_member,
         // Admin - Public endpoints
         crate::api::http::routes::admin::get_pool_stats,
         crate::api::http::routes::admin::get_capabilities,
@@ -980,6 +997,29 @@ use crate::shared::app_state::AppState;
             PfCountResponse,
             PfMergeRequest,
             PfMergeResponse,
+            // Geo schemas (core Redis)
+            GeoUnitSchema,
+            GeoSortOrderSchema,
+            GeoPositionSchema,
+            GeoMemberSchema,
+            GeoAddRequest,
+            GeoAddResponse,
+            GeoPosRequest,
+            GeoPosResponse,
+            GeoDistQuery,
+            GeoDistResponse,
+            GeoHashRequest,
+            GeoHashResponse,
+            GeoSearchCenterSchema,
+            GeoSearchShapeSchema,
+            GeoSearchOptionsSchema,
+            GeoSearchRequest,
+            GeoSearchResponse,
+            GeoSearchResultItem,
+            GeoSearchStoreRequest,
+            GeoSearchStoreResponse,
+            GeoRadiusQuery,
+            GeoRadiusByMemberQuery,
         )
     ),
     modifiers(&SecurityAddon)

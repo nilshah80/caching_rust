@@ -5,6 +5,7 @@
 mod admin_repo;
 mod bitmap_repo;
 mod bloom_repo;
+mod geo_repo;
 mod hash_repo;
 mod json_repo;
 mod key_repo;
@@ -19,6 +20,7 @@ mod string_repo;
 pub use admin_repo::RedisAdminRepository;
 pub use bitmap_repo::RedisBitMapRepository;
 pub use bloom_repo::RedisBloomRepository;
+pub use geo_repo::RedisGeoRepository;
 pub use hash_repo::RedisHashRepository;
 pub use json_repo::RedisJsonRepository;
 pub use key_repo::RedisKeyRepository;

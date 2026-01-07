@@ -1457,69 +1457,63 @@ Go service does NOT support Stream operations.
   - Response types: `BitSetResponse`, `BitGetResponse`, `BitCountResponse`, `BitPosResponse`, `BitOpResponse`, `BitfieldResponse`
   - Schema types: `BitOpType`, `BitfieldEncodingSchema`, `BitfieldOverflowSchema`, `BitfieldCommandSchema`
 
-### 5.2 Geospatial Operations (NEW)
-- [ ] **Task 5.2.1**: Implement Geo repository trait
-- [ ] **Task 5.2.2**: Implement Geo operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | GEOADD | `geo_add` | High |
-  | GEODIST | `geo_dist` | High |
-  | GEOHASH | `geo_hash` | High |
-  | GEOPOS | `geo_pos` | High |
-  | GEORADIUS | `geo_radius` (deprecated but supported) | Medium |
-  | GEORADIUSBYMEMBER | `geo_radius_by_member` | Medium |
-  | GEOSEARCH | `geo_search` | High |
-  | GEOSEARCHSTORE | `geo_search_store` | Medium |
+### 5.2 Geospatial Operations ✅ COMPLETED
+- [x] **Task 5.2.1**: Implement Geo repository trait ✅
+  - Created `domain/repositories/geo_repository.rs` with `GeoRepository` trait
+  - Defined domain types: `GeoPosition`, `GeoMember`, `GeoUnit`, `GeoSearchCenter`, `GeoSearchShape`, `GeoSearchOptions`, `GeoSortOrder`, `GeoSearchResult`, `GeoAddOptions`, `GeoAddResult`, `GeoSearchStoreResult`
+  - Coordinate validation: longitude -180 to 180, latitude -85.05112878 to 85.05112878
 
-- [ ] **Task 5.2.3**: Create Geo API routes
-  - `POST /api/v1/geo/:key/add`
-  - `GET /api/v1/geo/:key/distance`
-  - `GET /api/v1/geo/:key/hash`
-  - `GET /api/v1/geo/:key/pos`
-  - `POST /api/v1/geo/:key/search`
-  - `POST /api/v1/geo/:key/search/store`
+- [x] **Task 5.2.2**: Implement Geo operations ✅
+  - Created `infrastructure/redis/repositories/geo_repo.rs` with `RedisGeoRepository`
+  - Implemented all 8 geo commands:
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | GEOADD | `geo_add` | ✅ Done |
+  | GEODIST | `geo_dist` | ✅ Done |
+  | GEOHASH | `geo_hash` | ✅ Done |
+  | GEOPOS | `geo_pos` | ✅ Done |
+  | GEORADIUS | `geo_radius` (deprecated but supported) | ✅ Done |
+  | GEORADIUSBYMEMBER | `geo_radius_by_member` | ✅ Done |
+  | GEOSEARCH | `geo_search` | ✅ Done |
+  | GEOSEARCHSTORE | `geo_search_store` | ✅ Done |
 
-- [ ] **Task 5.2.4**: Create Geo request/response schemas with proper types
-  ```rust
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  pub struct GeoPosition {
-      pub longitude: f64,
-      pub latitude: f64,
-  }
+- [x] **Task 5.2.3**: Create Geo API routes ✅
+  - Created `api/http/routes/geo.rs` with 8 endpoints:
+  - `POST /api/v1/geo/:key` - GEOADD
+  - `POST /api/v1/geo/:key/pos` - GEOPOS
+  - `GET /api/v1/geo/:key/dist/:member1/:member2` - GEODIST
+  - `POST /api/v1/geo/:key/hash` - GEOHASH
+  - `POST /api/v1/geo/:key/search` - GEOSEARCH
+  - `POST /api/v1/geo/:dest_key/searchstore` - GEOSEARCHSTORE
+  - `GET /api/v1/geo/:key/radius` - GEORADIUS (legacy)
+  - `GET /api/v1/geo/:key/radius/:member` - GEORADIUSBYMEMBER (legacy)
 
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  pub struct GeoMember {
-      pub member: String,
-      pub position: GeoPosition,
-  }
+- [x] **Task 5.2.4**: Create Geo request/response schemas with proper types ✅
+  - Created `api/http/schemas/geo.rs` with comprehensive types
+  - Request types: `GeoAddRequest`, `GeoPosRequest`, `GeoDistQuery`, `GeoHashRequest`, `GeoSearchRequest`, `GeoSearchStoreRequest`, `GeoRadiusQuery`, `GeoRadiusByMemberQuery`
+  - Response types: `GeoAddResponse`, `GeoPosResponse`, `GeoDistResponse`, `GeoHashResponse`, `GeoSearchResponse`, `GeoSearchStoreResponse`, `GeoSearchResultItem`
+  - Schema types: `GeoUnitSchema`, `GeoSortOrderSchema`, `GeoPositionSchema`, `GeoMemberSchema`, `GeoSearchCenterSchema`, `GeoSearchShapeSchema`, `GeoSearchOptionsSchema`
+  - Tagged union for search center: `FROMMEMBER` or `FROMLONLAT`
+  - Tagged union for search shape: `BYRADIUS` or `BYBOX`
 
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  #[serde(rename_all = "lowercase")]
-  pub enum GeoUnit {
-      Meters,
-      Kilometers,
-      Miles,
-      Feet,
-  }
+- [x] **Task 5.2.5**: Create Geo service with validation ✅
+  - Created `application/services/geo_service.rs` with `GeoService`
+  - Input validation for coordinate bounds
+  - Validation for NX/XX mutual exclusivity
+  - Validation for positive radius/dimensions
+  - Validation for shape parameters
 
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  pub struct GeoSearchRequest {
-      #[serde(flatten)]
-      pub center: GeoSearchCenter,
-      pub radius: f64,
-      pub unit: GeoUnit,
-      #[serde(skip_serializing_if = "Option::is_none")]
-      pub count: Option<u32>,
-      #[serde(default)]
-      pub asc: bool,
-      #[serde(default)]
-      pub with_coord: bool,
-      #[serde(default)]
-      pub with_dist: bool,
-      #[serde(default)]
-      pub with_hash: bool,
-  }
-  ```
+- [x] **Task 5.2.6**: Update OpenAPI documentation ✅
+  - Added "Geo" tag to OpenAPI spec
+  - Registered all 8 geo endpoints in paths
+  - Added all geo schemas to components
+
+**Implementation Notes**:
+- Core Redis feature since 3.2 (no module required)
+- Uses geospatial indexing via sorted sets internally
+- GEORADIUS and GEORADIUSBYMEMBER marked as deprecated but still functional
+- Modern GEOSEARCH supports both BYRADIUS and BYBOX shapes
+- Full test coverage with MockGeoRepository using Haversine distance formula
 
 ### 5.3 Pub/Sub Operations (NEW) - Dedicated Connection Architecture
 - [ ] **Task 5.3.1**: Implement Pub/Sub service (using PubSubManager)

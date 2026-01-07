@@ -5,6 +5,7 @@
 mod admin_repository;
 mod bitmap_repository;
 mod bloom_repository;
+mod geo_repository;
 mod hash_repository;
 mod json_repository;
 mod key_repository;
@@ -22,6 +23,11 @@ pub use bitmap_repository::{
     BitfieldResult,
 };
 pub use bloom_repository::BloomRepository;
+pub use geo_repository::{
+    GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,
+    GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder,
+    GeoUnit,
+};
 pub use hash_repository::HashRepository;
 pub use json_repository::JsonRepository;
 pub use key_repository::KeyRepository;

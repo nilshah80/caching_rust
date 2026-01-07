@@ -5,6 +5,7 @@
 mod admin;
 mod bitmaps;
 mod bloom;
+mod geo;
 mod hashes;
 mod health;
 mod json;
@@ -21,6 +22,7 @@ mod strings;
 pub use admin::admin_routes;
 pub use bitmaps::bitmap_routes;
 pub use bloom::bloom_routes;
+pub use geo::geo_routes;
 pub use hashes::hash_routes;
 pub use health::health_routes;
 pub use json::json_routes;
@@ -56,6 +58,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(sorted_set_routes())
         // Bitmap operations (core Redis)
         .merge(bitmap_routes())
+        // Geo operations (core Redis)
+        .merge(geo_routes())
         // Key management operations
         .merge(key_routes())
         // Admin endpoints
