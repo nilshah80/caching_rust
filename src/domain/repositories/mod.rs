@@ -3,6 +3,7 @@
 //! Abstract interfaces for data access.
 
 mod admin_repository;
+mod bitmap_repository;
 mod bloom_repository;
 mod hash_repository;
 mod json_repository;
@@ -16,6 +17,10 @@ mod stream_repository;
 mod string_repository;
 
 pub use admin_repository::AdminRepository;
+pub use bitmap_repository::{
+    BitMapRepository, BitOperation, BitfieldCommand, BitfieldEncoding, BitfieldOverflow,
+    BitfieldResult,
+};
 pub use bloom_repository::BloomRepository;
 pub use hash_repository::HashRepository;
 pub use json_repository::JsonRepository;

@@ -2,6 +2,7 @@
 //!
 //! DTOs for API requests and responses.
 
+pub mod bitmaps;
 pub mod bloom;
 pub mod common;
 pub mod hashes;
@@ -15,6 +16,7 @@ pub mod sorted_sets;
 pub mod streams;
 pub mod strings;
 
+pub use bitmaps::*;
 pub use bloom::*;
 pub use common::*;
 pub use hashes::*;

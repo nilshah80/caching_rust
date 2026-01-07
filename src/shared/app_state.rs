@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BitMapService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -40,6 +40,9 @@ pub struct AppState {
 
     /// Sorted Set operations service
     pub sorted_set_service: Arc<SortedSetService>,
+
+    /// Bitmap operations service
+    pub bitmap_service: Arc<BitMapService>,
 
     /// Key management service
     pub key_service: Arc<KeyService>,
@@ -76,6 +79,7 @@ impl AppState {
         let list_service = Arc::new(ListService::new(pool.clone()));
         let set_service = Arc::new(SetService::new(pool.clone()));
         let sorted_set_service = Arc::new(SortedSetService::new(pool.clone()));
+        let bitmap_service = Arc::new(BitMapService::new(pool.clone()));
         let key_service = Arc::new(KeyService::new(pool.clone()));
         let admin_service = Arc::new(AdminService::new(pool.clone()));
         let stream_service = Arc::new(StreamService::new(pool.clone()));
@@ -84,7 +88,7 @@ impl AppState {
         let bloom_service = Arc::new(BloomService::new(pool.clone()));
         let probabilistic_service = Arc::new(ProbabilisticService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service)
+        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -99,6 +103,7 @@ impl AppState {
         list_service: Arc<ListService>,
         set_service: Arc<SetService>,
         sorted_set_service: Arc<SortedSetService>,
+        bitmap_service: Arc<BitMapService>,
         key_service: Arc<KeyService>,
         admin_service: Arc<AdminService>,
         stream_service: Arc<StreamService>,
@@ -117,6 +122,7 @@ impl AppState {
             list_service,
             set_service,
             sorted_set_service,
+            bitmap_service,
             key_service,
             admin_service,
             stream_service,
@@ -131,7 +137,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MockAdminRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
+    use crate::test_support::{MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
 
     #[test]
     fn test_new_with_services() {
@@ -144,6 +150,7 @@ mod tests {
         let list_service = Arc::new(ListService::new_with_repository(Arc::new(MockListRepository::new())));
         let set_service = Arc::new(SetService::new_with_repository(Arc::new(MockSetRepository::new())));
         let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(MockSortedSetRepository::new())));
+        let bitmap_service = Arc::new(BitMapService::new_with_repository(Arc::new(MockBitMapRepository::new())));
         let key_service = Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
         let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
         let stream_service = Arc::new(StreamService::new_with_repository(Arc::new(MockStreamRepository::new())));
@@ -162,6 +169,7 @@ mod tests {
             list_service.clone(),
             set_service.clone(),
             sorted_set_service.clone(),
+            bitmap_service.clone(),
             key_service.clone(),
             admin_service.clone(),
             stream_service.clone(),

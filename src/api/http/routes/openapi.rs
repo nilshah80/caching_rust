@@ -137,6 +137,11 @@ use crate::api::http::schemas::probabilistic::{
     TopKIncrByRequest, TopKIncrByResponse, TopKInfoResponse, TopKListItem, TopKListQuery,
     TopKListResponse, TopKQueryRequest, TopKQueryResponse, TopKReserveRequest, TopKReserveResponse,
 };
+use crate::api::http::schemas::bitmaps::{
+    BitCountQuery, BitCountResponse, BitfieldCommandSchema, BitfieldEncodingSchema,
+    BitfieldOverflowSchema, BitfieldRequest, BitfieldResponse, BitGetResponse, BitOpRequest,
+    BitOpResponse, BitOpType, BitPosQuery, BitPosResponse, BitSetRequest, BitSetResponse,
+};
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
     StreamEntry, StreamInfo, StreamReadResult, StringValue,
@@ -176,6 +181,7 @@ use crate::shared::app_state::AppState;
         (name = "Lists", description = "Redis list operations (LPUSH, RPUSH, LPOP, RPOP, LRANGE, LLEN, LINDEX, LINSERT, BLPOP, BRPOP, etc.)"),
         (name = "Sets", description = "Redis set operations (SADD, SREM, SMEMBERS, SISMEMBER, SCARD, SINTER, SUNION, SDIFF, SPOP, SRANDMEMBER, etc.)"),
         (name = "Sorted Sets", description = "Redis sorted set operations (ZADD, ZREM, ZSCORE, ZRANK, ZRANGE, ZCOUNT, ZPOPMIN, ZPOPMAX, BZPOPMIN, BZPOPMAX, ZUNION, ZINTER, ZDIFF, ZSCAN, etc.)"),
+        (name = "Bitmaps", description = "Redis bitmap operations (SETBIT, GETBIT, BITCOUNT, BITPOS, BITOP, BITFIELD, BITFIELD_RO) - core Redis feature"),
         (name = "Streams", description = "Redis stream operations (XADD, XREAD, XRANGE, XLEN, XTRIM, consumer groups, etc.)"),
         (name = "Streams (Admin)", description = "Redis stream admin operations (XGROUP CREATE/DESTROY, XSETID, consumer management)"),
         (name = "JSON", description = "RedisJSON operations (JSON.SET, JSON.GET, JSON.DEL, JSON.MGET, array operations, object operations, numeric operations, etc.) - requires RedisJSON module"),
@@ -312,6 +318,14 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::sorted_sets::zdiff,
         crate::api::http::routes::sorted_sets::zdiffstore,
         crate::api::http::routes::sorted_sets::zscan,
+        // Bitmap endpoints (core Redis)
+        crate::api::http::routes::bitmaps::getbit,
+        crate::api::http::routes::bitmaps::setbit,
+        crate::api::http::routes::bitmaps::bitcount,
+        crate::api::http::routes::bitmaps::bitpos,
+        crate::api::http::routes::bitmaps::bitop,
+        crate::api::http::routes::bitmaps::bitfield,
+        crate::api::http::routes::bitmaps::bitfield_ro,
         // Stream endpoints
         crate::api::http::routes::streams::xadd,
         crate::api::http::routes::streams::xlen,
@@ -645,6 +659,22 @@ use crate::shared::app_state::AppState;
             ZDiffStoreRequest,
             ZScanQuery,
             ZScanResponse,
+            // Bitmap schemas (core Redis)
+            BitSetRequest,
+            BitSetResponse,
+            BitGetResponse,
+            BitCountQuery,
+            BitCountResponse,
+            BitPosQuery,
+            BitPosResponse,
+            BitOpType,
+            BitOpRequest,
+            BitOpResponse,
+            BitfieldEncodingSchema,
+            BitfieldOverflowSchema,
+            BitfieldCommandSchema,
+            BitfieldRequest,
+            BitfieldResponse,
             // Stream schemas
             StreamEntry,
             StreamInfo,

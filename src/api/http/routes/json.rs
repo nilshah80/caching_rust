@@ -810,7 +810,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService,
+        AdminService, BitMapService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
     use crate::api::http::schemas::json::JsonMSetItemRequest;
@@ -826,7 +826,7 @@ mod tests {
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
-        MockAdminRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
         MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository,
         MockStreamRepository, MockStringRepository, test_state_with_json_repo,
     };
@@ -1033,6 +1033,8 @@ mod tests {
         let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(
             MockSortedSetRepository::new(),
         )));
+        let bitmap_service =
+            Arc::new(BitMapService::new_with_repository(Arc::new(MockBitMapRepository::new())));
         let key_service =
             Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
         let admin_service =
@@ -1058,6 +1060,7 @@ mod tests {
             list_service,
             set_service,
             sorted_set_service,
+            bitmap_service,
             key_service,
             admin_service,
             stream_service,

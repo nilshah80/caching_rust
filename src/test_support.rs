@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BitMapService, BloomService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::domain::entities::{
     // Bloom entities
     BloomAddResult, BloomCardResult, BloomExistsResult, BloomInfo, BloomInsertOptions,
@@ -42,7 +42,8 @@ use crate::domain::entities::{
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    AdminRepository, BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository, KeyRepository,
+    AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
+    BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository, KeyRepository,
     LexRange, ListDirection, ListRepository, LPosOptions, ProbabilisticRepository, ScoreRange, ScoredMember,
     SearchRepository, SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
     ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
@@ -1439,12 +1440,13 @@ pub fn test_state_with_repos(
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo)
+    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1454,6 +1456,7 @@ pub fn test_state_with_all_repos(
     list_repo: Arc<MockListRepository>,
     set_repo: Arc<MockSetRepository>,
     sorted_set_repo: Arc<MockSortedSetRepository>,
+    bitmap_repo: Arc<MockBitMapRepository>,
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
     stream_repo: Arc<MockStreamRepository>,
@@ -1462,7 +1465,7 @@ pub fn test_state_with_all_repos(
     bloom_repo: Arc<MockBloomRepository>,
     probabilistic_repo: Arc<MockProbabilisticRepository>,
 ) -> AppState {
-    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, Settings::default())
+    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, Settings::default())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1472,6 +1475,7 @@ pub fn test_state_with_all_repos_and_config(
     list_repo: Arc<MockListRepository>,
     set_repo: Arc<MockSetRepository>,
     sorted_set_repo: Arc<MockSortedSetRepository>,
+    bitmap_repo: Arc<MockBitMapRepository>,
     key_repo: Arc<MockKeyRepository>,
     admin_repo: Arc<MockAdminRepository>,
     stream_repo: Arc<MockStreamRepository>,
@@ -1490,6 +1494,7 @@ pub fn test_state_with_all_repos_and_config(
     let list_service = Arc::new(ListService::new_with_repository(list_repo));
     let set_service = Arc::new(SetService::new_with_repository(set_repo));
     let sorted_set_service = Arc::new(SortedSetService::new_with_repository(sorted_set_repo));
+    let bitmap_service = Arc::new(BitMapService::new_with_repository(bitmap_repo));
     let key_service = Arc::new(KeyService::new_with_repository(key_repo));
     let admin_service = Arc::new(AdminService::new_with_repository(admin_repo));
     let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
@@ -1498,7 +1503,7 @@ pub fn test_state_with_all_repos_and_config(
     let bloom_service = Arc::new(BloomService::new_with_repository(bloom_repo));
     let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(probabilistic_repo));
 
-    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service)
+    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service)
 }
 
 /// Create test state with custom config
@@ -1510,12 +1515,13 @@ pub fn test_state_with_config(config: Settings) -> (AppState, Arc<MockStringRepo
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, config);
+    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, config);
     (state, string_repo, key_repo, admin_repo)
 }
 
@@ -1535,12 +1541,13 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, hash_repo)
 }
 
@@ -1552,12 +1559,13 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, list_repo)
 }
 
@@ -1569,12 +1577,13 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, set_repo)
 }
 
@@ -1586,12 +1595,13 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, sorted_set_repo)
 }
 
@@ -1603,12 +1613,13 @@ pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo, probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo, probabilistic_repo);
     (state, stream_repo)
 }
 
@@ -1620,12 +1631,13 @@ pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo, probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo, probabilistic_repo);
     (state, json_repo)
 }
 
@@ -1637,12 +1649,13 @@ pub fn test_state_with_search_repo() -> (AppState, Arc<MockSearchRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo, probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo, probabilistic_repo);
     (state, search_repo)
 }
 
@@ -1654,12 +1667,13 @@ pub fn test_state_with_bloom_repo() -> (AppState, Arc<MockBloomRepository>) {
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone(), probabilistic_repo);
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone(), probabilistic_repo);
     (state, bloom_repo)
 }
 
@@ -1671,13 +1685,32 @@ pub fn test_state_with_probabilistic_repo() -> (AppState, Arc<MockProbabilisticR
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
     let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
     let stream_repo = Arc::new(MockStreamRepository::new());
     let json_repo = Arc::new(MockJsonRepository::new());
     let search_repo = Arc::new(MockSearchRepository::new());
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo.clone());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo.clone());
     (state, probabilistic_repo)
+}
+
+pub fn test_state_with_bitmap_repo() -> (AppState, Arc<MockBitMapRepository>) {
+    let string_repo = Arc::new(MockStringRepository::new());
+    let key_repo = Arc::new(MockKeyRepository::new());
+    let admin_repo = Arc::new(MockAdminRepository::default());
+    let hash_repo = Arc::new(MockHashRepository::new());
+    let list_repo = Arc::new(MockListRepository::new());
+    let set_repo = Arc::new(MockSetRepository::new());
+    let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
+    let bitmap_repo = Arc::new(MockBitMapRepository::new());
+    let stream_repo = Arc::new(MockStreamRepository::new());
+    let json_repo = Arc::new(MockJsonRepository::new());
+    let search_repo = Arc::new(MockSearchRepository::new());
+    let bloom_repo = Arc::new(MockBloomRepository::new());
+    let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
+    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo);
+    (state, bitmap_repo)
 }
 
 /// Mock Sorted Set Repository for testing
@@ -3309,5 +3342,250 @@ impl ProbabilisticRepository for MockProbabilisticRepository {
             dest_key: dest.to_string(),
             success: true,
         })
+    }
+}
+
+// ========== MockBitMapRepository ==========
+
+#[derive(Default)]
+pub struct MockBitMapRepository {
+    // Store bitmaps as HashMap<key, Vec<u8>> - each byte represents 8 bits
+    store: Mutex<HashMap<String, Vec<u8>>>,
+}
+
+impl MockBitMapRepository {
+    pub fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get_bit(&self, bytes: &[u8], offset: u64) -> i64 {
+        let byte_index = (offset / 8) as usize;
+        let bit_index = 7 - (offset % 8) as u8;
+        if byte_index < bytes.len() {
+            ((bytes[byte_index] >> bit_index) & 1) as i64
+        } else {
+            0
+        }
+    }
+
+    fn set_bit(&self, bytes: &mut Vec<u8>, offset: u64, value: bool) -> i64 {
+        let byte_index = (offset / 8) as usize;
+        let bit_index = 7 - (offset % 8) as u8;
+
+        // Extend if needed
+        while bytes.len() <= byte_index {
+            bytes.push(0);
+        }
+
+        let old_bit = ((bytes[byte_index] >> bit_index) & 1) as i64;
+        if value {
+            bytes[byte_index] |= 1 << bit_index;
+        } else {
+            bytes[byte_index] &= !(1 << bit_index);
+        }
+        old_bit
+    }
+}
+
+#[async_trait]
+impl BitMapRepository for MockBitMapRepository {
+    async fn setbit(&self, key: &str, offset: u64, value: bool) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let bytes = store.entry(key.to_string()).or_insert_with(Vec::new);
+        let old_value = self.set_bit(bytes, offset, value);
+        Ok(old_value)
+    }
+
+    async fn getbit(&self, key: &str, offset: u64) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let bytes = store.get(key).map(|v| v.as_slice()).unwrap_or(&[]);
+        Ok(self.get_bit(bytes, offset))
+    }
+
+    async fn bitcount(
+        &self,
+        key: &str,
+        start: Option<i64>,
+        end: Option<i64>,
+        _use_bit_index: bool,
+    ) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let bytes = store.get(key).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+
+        let (start_idx, end_idx) = match (start, end) {
+            (Some(s), Some(e)) => {
+                let len = bytes.len() as i64;
+                let s = if s < 0 { (len + s).max(0) } else { s.min(len) } as usize;
+                let e = if e < 0 { (len + e).max(0) } else { e.min(len.saturating_sub(1)) } as usize;
+                (s, e)
+            }
+            _ => (0, bytes.len().saturating_sub(1)),
+        };
+
+        if start_idx > end_idx {
+            return Ok(0);
+        }
+
+        let count: i64 = bytes
+            .iter()
+            .skip(start_idx)
+            .take(end_idx - start_idx + 1)
+            .map(|b| b.count_ones() as i64)
+            .sum();
+
+        Ok(count)
+    }
+
+    async fn bitpos(
+        &self,
+        key: &str,
+        bit: bool,
+        start: Option<i64>,
+        _end: Option<i64>,
+        _use_bit_index: bool,
+    ) -> Result<i64, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let bytes = store.get(key).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        if bytes.is_empty() {
+            return Ok(if bit { -1 } else { 0 });
+        }
+
+        let start_byte = start.unwrap_or(0).max(0) as usize;
+        let target = if bit { 1u8 } else { 0u8 };
+
+        for (byte_idx, &byte) in bytes.iter().enumerate().skip(start_byte) {
+            for bit_idx in 0..8 {
+                let actual_bit = (byte >> (7 - bit_idx)) & 1;
+                if actual_bit == target {
+                    return Ok((byte_idx * 8 + bit_idx) as i64);
+                }
+            }
+        }
+
+        Ok(-1)
+    }
+
+    async fn bitop(
+        &self,
+        operation: BitOperation,
+        dest_key: &str,
+        keys: &[String],
+    ) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+
+        // Get all source bitmaps
+        let sources: Vec<Vec<u8>> = keys
+            .iter()
+            .map(|k| store.get(k).cloned().unwrap_or_default())
+            .collect();
+
+        if sources.is_empty() {
+            return Ok(0);
+        }
+
+        let max_len = sources.iter().map(|s| s.len()).max().unwrap_or(0);
+        let mut result = vec![0u8; max_len];
+
+        match operation {
+            BitOperation::And => {
+                for i in 0..max_len {
+                    result[i] = sources
+                        .iter()
+                        .map(|s| *s.get(i).unwrap_or(&0xff))
+                        .fold(0xff, |acc, b| acc & b);
+                }
+            }
+            BitOperation::Or => {
+                for i in 0..max_len {
+                    result[i] = sources
+                        .iter()
+                        .map(|s| *s.get(i).unwrap_or(&0))
+                        .fold(0, |acc, b| acc | b);
+                }
+            }
+            BitOperation::Xor => {
+                for i in 0..max_len {
+                    result[i] = sources
+                        .iter()
+                        .map(|s| *s.get(i).unwrap_or(&0))
+                        .fold(0, |acc, b| acc ^ b);
+                }
+            }
+            BitOperation::Not => {
+                if let Some(source) = sources.first() {
+                    for (i, &b) in source.iter().enumerate() {
+                        result[i] = !b;
+                    }
+                }
+            }
+        }
+
+        let len = result.len() as i64;
+        store.insert(dest_key.to_string(), result);
+        Ok(len)
+    }
+
+    async fn bitfield(
+        &self,
+        key: &str,
+        commands: &[BitfieldCommand],
+    ) -> Result<BitfieldResult, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let bytes = store.entry(key.to_string()).or_insert_with(Vec::new);
+
+        let mut results = Vec::new();
+
+        for cmd in commands {
+            match cmd {
+                BitfieldCommand::Get { .. } => {
+                    // Simplified: return 0 for GET operations
+                    results.push(Some(0));
+                }
+                BitfieldCommand::Set { value, .. } => {
+                    // Simplified: return previous value (0) and store the new value
+                    results.push(Some(0));
+                    // Extend bytes if needed
+                    while bytes.len() < 8 {
+                        bytes.push(0);
+                    }
+                    // Store first byte of value
+                    bytes[0] = *value as u8;
+                }
+                BitfieldCommand::IncrBy { increment, .. } => {
+                    results.push(Some(*increment));
+                }
+                BitfieldCommand::Overflow(_) => {
+                    // OVERFLOW doesn't return a value
+                }
+            }
+        }
+
+        Ok(BitfieldResult { values: results })
+    }
+
+    async fn bitfield_ro(
+        &self,
+        _key: &str,
+        commands: &[BitfieldCommand],
+    ) -> Result<BitfieldResult, CacheError> {
+        let results: Vec<Option<i64>> = commands
+            .iter()
+            .filter_map(|cmd| {
+                if let BitfieldCommand::Get { .. } = cmd {
+                    Some(Some(0))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(BitfieldResult { values: results })
     }
 }

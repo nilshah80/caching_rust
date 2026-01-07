@@ -1423,28 +1423,39 @@ Go service does NOT support Stream operations.
 
 ## Phase 5: NEW Features (Not in Go/Node)
 
-### 5.1 Bitmap Operations (NEW)
-- [ ] **Task 5.1.1**: Implement Bitmap repository trait
-- [ ] **Task 5.1.2**: Implement Bitmap operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | SETBIT | `setbit` | High |
-  | GETBIT | `getbit` | High |
-  | BITCOUNT | `bitcount` | High |
-  | BITPOS | `bitpos` | High |
-  | BITOP | `bitop` (AND, OR, XOR, NOT) | High |
-  | BITFIELD | `bitfield` | Medium |
-  | BITFIELD_RO | `bitfield_ro` | Medium |
+### 5.1 Bitmap Operations (NEW) ✅ COMPLETE
+- [x] **Task 5.1.1**: Implement Bitmap repository trait
+  - Created `BitMapRepository` trait in `domain/repositories/bitmap_repository.rs`
+  - Defined `BitOperation`, `BitfieldOverflow`, `BitfieldEncoding`, `BitfieldCommand`, `BitfieldResult` types
+- [x] **Task 5.1.2**: Implement Bitmap operations
+  | Command | Method | Priority | Status |
+  |---------|--------|----------|--------|
+  | SETBIT | `setbit` | High | ✅ |
+  | GETBIT | `getbit` | High | ✅ |
+  | BITCOUNT | `bitcount` | High | ✅ |
+  | BITPOS | `bitpos` | High | ✅ |
+  | BITOP | `bitop` (AND, OR, XOR, NOT) | High | ✅ |
+  | BITFIELD | `bitfield` | Medium | ✅ |
+  | BITFIELD_RO | `bitfield_ro` | Medium | ✅ |
+  - Implemented `RedisBitMapRepository` in `infrastructure/redis/repositories/bitmap_repo.rs`
+  - Created `BitMapService` in `application/services/bitmap_service.rs` with validation
 
-- [ ] **Task 5.1.3**: Create Bitmap API routes
-  - `GET /api/v1/bitmaps/:key/bit/:offset`
-  - `PUT /api/v1/bitmaps/:key/bit/:offset`
-  - `GET /api/v1/bitmaps/:key/count`
-  - `GET /api/v1/bitmaps/:key/pos`
-  - `POST /api/v1/bitmaps/operations`
-  - `POST /api/v1/bitmaps/:key/bitfield`
+- [x] **Task 5.1.3**: Create Bitmap API routes
+  - `GET /api/v1/bitmaps/{key}/bit/{offset}` - GETBIT ✅
+  - `PUT /api/v1/bitmaps/{key}/bit/{offset}` - SETBIT ✅
+  - `GET /api/v1/bitmaps/{key}/count` - BITCOUNT ✅
+  - `GET /api/v1/bitmaps/{key}/pos` - BITPOS ✅
+  - `POST /api/v1/bitmaps/operations` - BITOP ✅
+  - `POST /api/v1/bitmaps/{key}/bitfield` - BITFIELD ✅
+  - `POST /api/v1/bitmaps/{key}/bitfield/ro` - BITFIELD_RO ✅
+  - Routes implemented in `api/http/routes/bitmaps.rs`
+  - OpenAPI documentation added
 
-- [ ] **Task 5.1.4**: Create Bitmap request/response schemas
+- [x] **Task 5.1.4**: Create Bitmap request/response schemas
+  - Created schemas in `api/http/schemas/bitmaps.rs`
+  - Request types: `BitSetRequest`, `BitCountQuery`, `BitPosQuery`, `BitOpRequest`, `BitfieldRequest`
+  - Response types: `BitSetResponse`, `BitGetResponse`, `BitCountResponse`, `BitPosResponse`, `BitOpResponse`, `BitfieldResponse`
+  - Schema types: `BitOpType`, `BitfieldEncodingSchema`, `BitfieldOverflowSchema`, `BitfieldCommandSchema`
 
 ### 5.2 Geospatial Operations (NEW)
 - [ ] **Task 5.2.1**: Implement Geo repository trait
@@ -2025,6 +2036,227 @@ Go service does NOT support Stream operations.
       Twa,
   }
   ```
+
+### 5.8 Redis 7.0+ List Operations (MISSING)
+- [ ] **Task 5.8.1**: Implement LMPOP/BLMPOP operations
+  | Command | Method | Priority | Redis Version |
+  |---------|--------|----------|---------------|
+  | LMPOP | `lmpop` | High | 7.0+ |
+  | BLMPOP | `blmpop` | High | 7.0+ |
+
+- [ ] **Task 5.8.2**: Create LMPOP/BLMPOP API routes
+  ```
+  POST   /api/v1/lists/mpop           # Atomic multi-key pop
+  POST   /api/v1/lists/blmpop         # Blocking multi-key pop (SSE)
+  ```
+
+- [ ] **Task 5.8.3**: Create LMPOP/BLMPOP request/response schemas
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct LMPopRequest {
+      /// Keys to pop from (in order of priority)
+      pub keys: Vec<String>,
+      /// Direction: LEFT or RIGHT
+      pub direction: ListDirection,
+      /// Number of elements to pop (optional, default 1)
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub count: Option<u32>,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct BLMPopRequest {
+      /// Keys to pop from (in order of priority)
+      pub keys: Vec<String>,
+      /// Direction: LEFT or RIGHT
+      pub direction: ListDirection,
+      /// Timeout in seconds (0 = block indefinitely)
+      pub timeout: f64,
+      /// Number of elements to pop (optional, default 1)
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub count: Option<u32>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct LMPopResponse {
+      /// The key from which elements were popped (None if timeout)
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub key: Option<String>,
+      /// The popped elements
+      pub elements: Vec<String>,
+  }
+  ```
+
+### 5.9 Redis 7.0+ Command Introspection (MISSING)
+- [ ] **Task 5.9.1**: Implement Command Introspection operations (gated by `capabilities.features.command_docs`)
+  | Command | Method | Priority | Redis Version |
+  |---------|--------|----------|---------------|
+  | COMMAND DOCS | `command_docs` | Medium | 7.0+ |
+  | COMMAND GETKEYS | `command_getkeys` | Low | 7.0+ |
+  | COMMAND LIST | `command_list` | Medium | 7.0+ |
+  | COMMAND INFO | `command_info` | Medium | 2.8.13+ |
+  | COMMAND COUNT | `command_count` | Low | 2.8.13+ |
+
+- [ ] **Task 5.9.2**: Create Command Introspection API routes
+  ```
+  GET    /api/v1/admin/commands                  # List all commands
+  GET    /api/v1/admin/commands/:name/docs       # Get command documentation
+  GET    /api/v1/admin/commands/:name/info       # Get command info
+  POST   /api/v1/admin/commands/getkeys          # Extract keys from command
+  GET    /api/v1/admin/commands/count            # Get command count
+  ```
+
+- [ ] **Task 5.9.3**: Create Command Introspection request/response schemas
+  ```rust
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct CommandListResponse {
+      pub commands: Vec<String>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct CommandDocsResponse {
+      pub name: String,
+      pub summary: String,
+      pub since: String,
+      pub group: String,
+      pub complexity: Option<String>,
+      pub arguments: Vec<CommandArgument>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct CommandArgument {
+      pub name: String,
+      pub arg_type: String,
+      pub optional: bool,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct CommandGetKeysRequest {
+      pub command: Vec<String>,  // Full command as array ["SET", "key", "value"]
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct CommandGetKeysResponse {
+      pub keys: Vec<String>,
+  }
+  ```
+
+### 5.10 Redis 7.0+ SORT_RO Operation (MISSING)
+- [ ] **Task 5.10.1**: Implement SORT_RO operation
+  | Command | Method | Priority | Redis Version |
+  |---------|--------|----------|---------------|
+  | SORT_RO | `sort_ro` | Medium | 7.0+ |
+
+- [ ] **Task 5.10.2**: Create SORT_RO API route
+  ```
+  POST   /api/v1/keys/:key/sort/readonly   # Read-only SORT (safe for replicas)
+  ```
+
+- [ ] **Task 5.10.3**: Update existing SORT implementation to add SORT_RO
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct SortRequest {
+      /// Optional BY pattern
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub by: Option<String>,
+      /// GET patterns
+      #[serde(default)]
+      pub get: Vec<String>,
+      /// Limit offset and count
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub limit: Option<SortLimit>,
+      /// Sort order (ASC or DESC)
+      #[serde(default)]
+      pub order: SortOrder,
+      /// Alpha sort (for string values)
+      #[serde(default)]
+      pub alpha: bool,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct SortResponse {
+      pub values: Vec<String>,
+  }
+  ```
+
+### 5.11 Redis 7.0+ ACL Enhancements (MISSING)
+- [ ] **Task 5.11.1**: Implement ACL DRYRUN operation
+  | Command | Method | Priority | Redis Version |
+  |---------|--------|----------|---------------|
+  | ACL DRYRUN | `acl_dryrun` | Low | 7.0+ |
+
+- [ ] **Task 5.11.2**: Create ACL DRYRUN API route
+  ```
+  POST   /api/v1/admin/acl/dryrun   # Test ACL without executing
+  ```
+
+- [ ] **Task 5.11.3**: Create ACL DRYRUN request/response schemas
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct AclDryrunRequest {
+      /// Username to test
+      pub username: String,
+      /// Command to test (as array)
+      pub command: Vec<String>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct AclDryrunResponse {
+      /// Whether the command would be allowed
+      pub allowed: bool,
+      /// Error message if not allowed
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub reason: Option<String>,
+  }
+  ```
+
+---
+
+## Phase 5 Summary: Redis 7.0+ Coverage Status
+
+### ✅ Implemented Redis 7.0+ Features
+| Feature | Status | Notes |
+|---------|--------|-------|
+| ZMPOP/BZMPOP | ✅ Implemented | Sorted set multi-pop |
+| SINTERCARD | ✅ Implemented | Set intersection cardinality |
+| ZINTERCARD | ✅ Implemented | Sorted set intersection cardinality |
+| GETEX | ✅ Implemented | Get with expiry update |
+| GETDEL | ✅ Implemented | Get and delete |
+| COPY | ✅ Implemented | Key copy command |
+| CLIENT NO-EVICT | ✅ Implemented | Client memory protection |
+| OBJECT ENCODING | ✅ Implemented | Key encoding info |
+| OBJECT FREQ | ✅ Implemented | LFU frequency |
+| OBJECT IDLETIME | ✅ Implemented | Key idle time |
+| OBJECT REFCOUNT | ✅ Implemented | Reference count |
+| WAITAOF | ✅ Implemented | Wait for AOF sync |
+
+### ❌ Missing Redis 7.0+ Features (Priority Order)
+
+#### High Priority (Essential for advanced operations)
+| Feature | Task | Notes |
+|---------|------|-------|
+| LMPOP | 5.8 | Atomic multi-key list pop |
+| BLMPOP | 5.8 | Blocking multi-key list pop |
+| Redis Functions | 5.6 | Full function library system (FCALL, FUNCTION LOAD, etc.) |
+
+#### Medium Priority (Good for API discoverability/safety)
+| Feature | Task | Notes |
+|---------|------|-------|
+| COMMAND DOCS | 5.9 | Command documentation |
+| COMMAND LIST | 5.9 | List all commands |
+| SORT_RO | 5.10 | Read-only SORT (replica safe) |
+
+#### Low Priority (Nice to have)
+| Feature | Task | Notes |
+|---------|------|-------|
+| ACL DRYRUN | 5.11 | ACL testing without execution |
+| COMMAND GETKEYS | 5.9 | Extract keys from command |
+
+### ❌ Not Planned (Cluster-specific or Easter Eggs)
+| Feature | Reason |
+|---------|--------|
+| CLUSTER SHARDS | Cluster mode only |
+| CLUSTER LINKS | Cluster mode only |
+| LOLWUT | Easter egg command |
 
 ---
 
