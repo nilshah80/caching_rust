@@ -13,6 +13,7 @@ mod keys;
 mod lists;
 mod openapi;
 mod probabilistic;
+mod pubsub;
 mod search;
 mod sets;
 mod sorted_sets;
@@ -33,6 +34,7 @@ pub use probabilistic::{cms_routes, hyperloglog_routes, topk_routes};
 pub use search::search_routes;
 pub use sets::set_routes;
 pub use sorted_sets::sorted_set_routes;
+pub use pubsub::pubsub_routes;
 pub use streams::{stream_admin_routes, stream_routes};
 pub use strings::string_routes;
 
@@ -95,6 +97,9 @@ pub fn build_router(state: AppState) -> Router {
 
     // HyperLogLog is always available (core Redis)
     router = router.merge(hyperloglog_routes());
+
+    // Pub/Sub is always available (core Redis)
+    router = router.merge(pubsub_routes());
 
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:

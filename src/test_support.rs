@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::infrastructure::redis::pubsub_manager::PubSubManager;
 use crate::domain::entities::{
     // Bloom entities
     BloomAddResult, BloomCardResult, BloomExistsResult, BloomInfo, BloomInsertOptions,
@@ -44,7 +45,8 @@ use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
     BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository, KeyRepository,
-    LexRange, ListDirection, ListRepository, LPosOptions, ProbabilisticRepository, ScoreRange, ScoredMember,
+    LexRange, ListDirection, ListRepository, LPosOptions, ProbabilisticRepository, PubSubRepository,
+    NumSubResult, PublishResult, ScoreRange, ScoredMember,
     SearchRepository, SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
     ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
     ZSetAlgebraOptions,
@@ -1507,7 +1509,14 @@ pub fn test_state_with_all_repos_and_config(
     let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(probabilistic_repo));
     let geo_service = Arc::new(GeoService::new_with_repository(geo_repo));
 
-    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service)
+    // Create PubSubManager and PubSubService for tests (uses localhost which may not be available)
+    let pubsub_manager = Arc::new(
+        PubSubManager::new(&config.redis.url, config.pubsub.clone())
+            .expect("Failed to create PubSubManager for tests")
+    );
+    let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
+
+    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service)
 }
 
 /// Create test state with custom config
@@ -3938,5 +3947,69 @@ impl GeoRepository for MockGeoRepository {
             options,
         )
         .await
+    }
+}
+
+// ========== Mock Pub/Sub Repository ==========
+
+#[derive(Default)]
+pub struct MockPubSubRepository {
+    channels: Mutex<HashMap<String, i64>>,
+    patterns: Mutex<i64>,
+}
+
+impl MockPubSubRepository {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl PubSubRepository for MockPubSubRepository {
+    async fn publish(&self, channel: &str, _message: &str) -> Result<PublishResult, CacheError> {
+        let channels = self.channels.lock().expect("channels lock");
+        let receivers = channels.get(channel).copied().unwrap_or(0);
+        Ok(PublishResult {
+            channel: channel.to_string(),
+            receivers,
+        })
+    }
+
+    async fn spublish(&self, channel: &str, _message: &str) -> Result<PublishResult, CacheError> {
+        let channels = self.channels.lock().expect("channels lock");
+        let receivers = channels.get(channel).copied().unwrap_or(0);
+        Ok(PublishResult {
+            channel: channel.to_string(),
+            receivers,
+        })
+    }
+
+    async fn pubsub_channels(&self, _pattern: Option<&str>) -> Result<Vec<String>, CacheError> {
+        let channels = self.channels.lock().expect("channels lock");
+        Ok(channels.keys().cloned().collect())
+    }
+
+    async fn pubsub_numsub(&self, channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+        let store = self.channels.lock().expect("channels lock");
+        Ok(channels
+            .iter()
+            .map(|ch| NumSubResult {
+                channel: ch.clone(),
+                subscribers: store.get(ch).copied().unwrap_or(0),
+            })
+            .collect())
+    }
+
+    async fn pubsub_numpat(&self) -> Result<i64, CacheError> {
+        Ok(*self.patterns.lock().expect("patterns lock"))
+    }
+
+    async fn pubsub_shardchannels(&self, _pattern: Option<&str>) -> Result<Vec<String>, CacheError> {
+        let channels = self.channels.lock().expect("channels lock");
+        Ok(channels.keys().cloned().collect())
+    }
+
+    async fn pubsub_shardnumsub(&self, channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+        self.pubsub_numsub(channels).await
     }
 }

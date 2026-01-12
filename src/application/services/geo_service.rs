@@ -360,6 +360,178 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_geo_hash_validation() {
+        let repo = Arc::new(MockGeoRepository::new());
+        let service = GeoService::new_with_repository(repo);
+
+        let err = service.geo_hash("", vec!["member".to_string()]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.geo_hash("locations", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_geo_search_invalid_center() {
+        let repo = Arc::new(MockGeoRepository::new());
+        let service = GeoService::new_with_repository(repo);
+
+        let err = service
+            .geo_search(
+                "locations",
+                GeoSearchCenter::FromLonLat(GeoPosition::new(200.0, 0.0)),
+                GeoSearchShape::ByRadius {
+                    radius: 10.0,
+                    unit: GeoUnit::Meters,
+                },
+                GeoSearchOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_geo_search_invalid_shape() {
+        let repo = Arc::new(MockGeoRepository::new());
+        let service = GeoService::new_with_repository(repo);
+
+        let err = service
+            .geo_search(
+                "locations",
+                GeoSearchCenter::FromMember("Berlin".to_string()),
+                GeoSearchShape::ByRadius {
+                    radius: 0.0,
+                    unit: GeoUnit::Meters,
+                },
+                GeoSearchOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_geo_search_store_validation() {
+        let repo = Arc::new(MockGeoRepository::new());
+        let service = GeoService::new_with_repository(repo);
+
+        let err = service
+            .geo_search_store(
+                "",
+                "source",
+                GeoSearchCenter::FromMember("Berlin".to_string()),
+                GeoSearchShape::ByRadius {
+                    radius: 10.0,
+                    unit: GeoUnit::Meters,
+                },
+                GeoSearchOptions::default(),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .geo_search_store(
+                "dest",
+                "",
+                GeoSearchCenter::FromMember("Berlin".to_string()),
+                GeoSearchShape::ByRadius {
+                    radius: 10.0,
+                    unit: GeoUnit::Meters,
+                },
+                GeoSearchOptions::default(),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_geo_search_store_invalid_center() {
+        let repo = Arc::new(MockGeoRepository::new());
+        let service = GeoService::new_with_repository(repo);
+
+        let err = service
+            .geo_search_store(
+                "dest",
+                "source",
+                GeoSearchCenter::FromLonLat(GeoPosition::new(200.0, 0.0)),
+                GeoSearchShape::ByRadius {
+                    radius: 10.0,
+                    unit: GeoUnit::Meters,
+                },
+                GeoSearchOptions::default(),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_geo_radius_invalid_position() {
+        let repo = Arc::new(MockGeoRepository::new());
+        let service = GeoService::new_with_repository(repo);
+
+        let err = service
+            .geo_radius(
+                "locations",
+                GeoPosition::new(-200.0, 0.0),
+                10.0,
+                GeoUnit::Meters,
+                GeoSearchOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_geo_radius_by_member_validation() {
+        let repo = Arc::new(MockGeoRepository::new());
+        let service = GeoService::new_with_repository(repo);
+
+        let err = service
+            .geo_radius_by_member(
+                "",
+                "Berlin",
+                10.0,
+                GeoUnit::Meters,
+                GeoSearchOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .geo_radius_by_member(
+                "locations",
+                "",
+                10.0,
+                GeoUnit::Meters,
+                GeoSearchOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .geo_radius_by_member(
+                "locations",
+                "Berlin",
+                0.0,
+                GeoUnit::Meters,
+                GeoSearchOptions::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
     async fn test_geo_dist_empty_key() {
         let repo = Arc::new(MockGeoRepository::new());
         let service = GeoService::new_with_repository(repo);

@@ -408,4 +408,69 @@ mod tests {
         assert_eq!(response.values[1], None);
         assert_eq!(response.values[2], Some(-1));
     }
+
+    #[test]
+    fn test_bitfield_encoding_conversion() {
+        let signed = BitfieldEncoding::from(BitfieldEncodingSchema::Signed(8));
+        assert!(matches!(signed, BitfieldEncoding::Signed(8)));
+
+        let unsigned = BitfieldEncoding::from(BitfieldEncodingSchema::Unsigned(16));
+        assert!(matches!(unsigned, BitfieldEncoding::Unsigned(16)));
+    }
+
+    #[test]
+    fn test_bitfield_overflow_conversion() {
+        let wrap = BitfieldOverflow::from(BitfieldOverflowSchema::Wrap);
+        assert!(matches!(wrap, BitfieldOverflow::Wrap));
+
+        let sat = BitfieldOverflow::from(BitfieldOverflowSchema::Sat);
+        assert!(matches!(sat, BitfieldOverflow::Sat));
+
+        let fail = BitfieldOverflow::from(BitfieldOverflowSchema::Fail);
+        assert!(matches!(fail, BitfieldOverflow::Fail));
+    }
+
+    #[test]
+    fn test_bitfield_command_conversion() {
+        let get_cmd = BitfieldCommandSchema::Get {
+            encoding: BitfieldEncodingSchema::Unsigned(8),
+            offset: 1,
+        };
+        let get_domain: crate::domain::repositories::BitfieldCommand = get_cmd.into();
+        assert!(matches!(
+            get_domain,
+            crate::domain::repositories::BitfieldCommand::Get { offset: 1, .. }
+        ));
+
+        let set_cmd = BitfieldCommandSchema::Set {
+            encoding: BitfieldEncodingSchema::Signed(16),
+            offset: 2,
+            value: 42,
+        };
+        let set_domain: crate::domain::repositories::BitfieldCommand = set_cmd.into();
+        assert!(matches!(
+            set_domain,
+            crate::domain::repositories::BitfieldCommand::Set { value: 42, .. }
+        ));
+
+        let incr_cmd = BitfieldCommandSchema::IncrBy {
+            encoding: BitfieldEncodingSchema::Unsigned(4),
+            offset: 3,
+            increment: 5,
+        };
+        let incr_domain: crate::domain::repositories::BitfieldCommand = incr_cmd.into();
+        assert!(matches!(
+            incr_domain,
+            crate::domain::repositories::BitfieldCommand::IncrBy { increment: 5, .. }
+        ));
+
+        let overflow_cmd = BitfieldCommandSchema::Overflow {
+            mode: BitfieldOverflowSchema::Sat,
+        };
+        let overflow_domain: crate::domain::repositories::BitfieldCommand = overflow_cmd.into();
+        assert!(matches!(
+            overflow_domain,
+            crate::domain::repositories::BitfieldCommand::Overflow(BitfieldOverflow::Sat)
+        ));
+    }
 }

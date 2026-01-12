@@ -287,9 +287,10 @@ pub async fn geo_radius_by_member(
 mod tests {
     use super::*;
     use crate::test_support::test_state_with_geo_repo;
-    use axum::body::Body;
+    use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
+    use crate::domain::repositories::{GeoAddOptions, GeoMember};
 
     #[test]
     fn test_geo_routes_structure() {
@@ -470,5 +471,108 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_geo_search_results_mapping() {
+        let (state, _) = test_state_with_geo_repo();
+        state
+            .geo_service
+            .geo_add(
+                "locations",
+                vec![
+                    GeoMember::new("Berlin", 13.361389, 52.519444),
+                    GeoMember::new("Paris", 2.349014, 48.864716),
+                ],
+                GeoAddOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let app = geo_routes().with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/geo/locations/search")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "center": {"type": "FROMLONLAT", "longitude": 13.361389, "latitude": 52.519444},
+                            "shape": {"type": "BYRADIUS", "radius": 500.0, "unit": "km"},
+                            "options": {"with_dist": true}
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["data"]["results"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_geo_radius_results_mapping() {
+        let (state, _) = test_state_with_geo_repo();
+        state
+            .geo_service
+            .geo_add(
+                "locations",
+                vec![GeoMember::new("Berlin", 13.361389, 52.519444)],
+                GeoAddOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let app = geo_routes().with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/geo/locations/radius?longitude=13.361389&latitude=52.519444&radius=500&unit=km")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["data"]["results"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_geo_radius_by_member_results_mapping() {
+        let (state, _) = test_state_with_geo_repo();
+        state
+            .geo_service
+            .geo_add(
+                "locations",
+                vec![GeoMember::new("Berlin", 13.361389, 52.519444)],
+                GeoAddOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let app = geo_routes().with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/geo/locations/radius/Berlin?radius=500&unit=km")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["data"]["results"].is_array());
     }
 }

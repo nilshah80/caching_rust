@@ -149,6 +149,11 @@ use crate::api::http::schemas::geo::{
     GeoSearchResponse, GeoSearchResultItem, GeoSearchShapeSchema, GeoSearchStoreRequest,
     GeoSearchStoreResponse, GeoSortOrderSchema, GeoUnitSchema,
 };
+use crate::api::http::schemas::pubsub::{
+    ChannelsResponse, NumPatResponse, NumSubItem, NumSubRequest, NumSubResponse,
+    PubSubMessage, PubSubStatsResponse, PublishRequest, PublishResponse,
+    SubscriptionConfirmation, WebSocketError,
+};
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
     StreamEntry, StreamInfo, StreamReadResult, StringValue,
@@ -199,6 +204,7 @@ use crate::shared::app_state::AppState;
         (name = "Top-K", description = "RedisBloom Top-K operations for tracking most frequent items (TOPK.RESERVE, TOPK.ADD, TOPK.INCRBY, TOPK.QUERY, TOPK.COUNT, TOPK.LIST, TOPK.INFO) - requires RedisBloom module"),
         (name = "HyperLogLog", description = "Redis HyperLogLog operations for cardinality estimation (PFADD, PFCOUNT, PFMERGE) - core Redis feature"),
         (name = "Geo", description = "Redis geospatial operations (GEOADD, GEODIST, GEOHASH, GEOPOS, GEOSEARCH, GEOSEARCHSTORE, GEORADIUS, GEORADIUSBYMEMBER) - core Redis feature since 3.2"),
+        (name = "Pub/Sub", description = "Redis Pub/Sub operations (PUBLISH, SUBSCRIBE, PSUBSCRIBE, PUBSUB CHANNELS/NUMSUB/NUMPAT). HTTP endpoints for publish and info commands, WebSocket endpoints for subscriptions - core Redis feature"),
         (name = "Admin", description = "Administrative endpoints (pool stats, capabilities, server info, database ops, config, persistence, client management, monitoring, ACL)")
     ),
     paths(
@@ -457,6 +463,19 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::geo::geo_search_store,
         crate::api::http::routes::geo::geo_radius,
         crate::api::http::routes::geo::geo_radius_by_member,
+        // Pub/Sub endpoints (core Redis)
+        crate::api::http::routes::pubsub::publish,
+        crate::api::http::routes::pubsub::channels,
+        crate::api::http::routes::pubsub::numsub,
+        crate::api::http::routes::pubsub::numpat,
+        crate::api::http::routes::pubsub::stats,
+        crate::api::http::routes::pubsub::ws_subscribe,
+        crate::api::http::routes::pubsub::ws_psubscribe,
+        // Sharded Pub/Sub endpoints (Redis 7.0+ cluster)
+        crate::api::http::routes::pubsub::spublish,
+        crate::api::http::routes::pubsub::shardchannels,
+        crate::api::http::routes::pubsub::shardnumsub,
+        crate::api::http::routes::pubsub::ws_ssubscribe,
         // Admin - Public endpoints
         crate::api::http::routes::admin::get_pool_stats,
         crate::api::http::routes::admin::get_capabilities,
@@ -1020,6 +1039,18 @@ use crate::shared::app_state::AppState;
             GeoSearchStoreResponse,
             GeoRadiusQuery,
             GeoRadiusByMemberQuery,
+            // Pub/Sub schemas (core Redis)
+            PublishRequest,
+            PublishResponse,
+            ChannelsResponse,
+            NumSubRequest,
+            NumSubItem,
+            NumSubResponse,
+            NumPatResponse,
+            PubSubStatsResponse,
+            PubSubMessage,
+            WebSocketError,
+            SubscriptionConfirmation,
         )
     ),
     modifiers(&SecurityAddon)

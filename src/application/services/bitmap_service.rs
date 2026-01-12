@@ -208,6 +208,7 @@ impl BitMapService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::repositories::BitfieldOverflow;
     use crate::test_support::MockBitMapRepository;
 
     #[tokio::test]
@@ -351,6 +352,23 @@ mod tests {
         let repo = Arc::new(MockBitMapRepository::new());
         let service = BitMapService::new_with_repository(repo);
 
+        // Empty key
+        let err = service
+            .bitfield_ro(
+                "",
+                vec![BitfieldCommand::Get {
+                    encoding: BitfieldEncoding::Unsigned(8),
+                    offset: 0,
+                }],
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        // Empty commands
+        let err = service.bitfield_ro("key", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
         // Non-GET command
         let err = service
             .bitfield_ro(
@@ -364,6 +382,38 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_bitfield_incrby_valid_encoding() {
+        let repo = Arc::new(MockBitMapRepository::new());
+        let service = BitMapService::new_with_repository(repo);
+
+        let result = service
+            .bitfield(
+                "key",
+                vec![BitfieldCommand::IncrBy {
+                    encoding: BitfieldEncoding::Unsigned(8),
+                    offset: 0,
+                    increment: 1,
+                }],
+            )
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_bitfield_overflow_command() {
+        let repo = Arc::new(MockBitMapRepository::new());
+        let service = BitMapService::new_with_repository(repo);
+
+        let result = service
+            .bitfield(
+                "key",
+                vec![BitfieldCommand::Overflow(BitfieldOverflow::Wrap)],
+            )
+            .await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

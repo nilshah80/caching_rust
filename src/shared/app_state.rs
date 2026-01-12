@@ -5,10 +5,11 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService, StreamService, StringService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
+use crate::infrastructure::redis::pubsub_manager::PubSubManager;
 
 /// Application state shared across all handlers
 #[derive(Clone)]
@@ -67,10 +68,17 @@ pub struct AppState {
 
     /// Geospatial operations service
     pub geo_service: Arc<GeoService>,
+
+    /// Pub/Sub operations service
+    pub pubsub_service: Arc<PubSubService>,
 }
 
 impl AppState {
     /// Create new application state
+    ///
+    /// Note: This creates a PubSubManager using the redis URL from config.
+    /// If PubSubManager creation fails, this will panic. For production use,
+    /// consider using `try_new` or `new_with_services`.
     pub fn new(
         pool: Arc<InstrumentedPool>,
         config: Arc<Settings>,
@@ -92,7 +100,14 @@ impl AppState {
         let probabilistic_service = Arc::new(ProbabilisticService::new(pool.clone()));
         let geo_service = Arc::new(GeoService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service)
+        // Create PubSubManager for dedicated subscription connections
+        let pubsub_manager = Arc::new(
+            PubSubManager::new(&config.redis.url, config.pubsub.clone())
+                .expect("Failed to create PubSubManager")
+        );
+        let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
+
+        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -116,6 +131,7 @@ impl AppState {
         bloom_service: Arc<BloomService>,
         probabilistic_service: Arc<ProbabilisticService>,
         geo_service: Arc<GeoService>,
+        pubsub_service: Arc<PubSubService>,
     ) -> Self {
         Self {
             pool,
@@ -136,6 +152,7 @@ impl AppState {
             bloom_service,
             probabilistic_service,
             geo_service,
+            pubsub_service,
         }
     }
 }
@@ -165,6 +182,11 @@ mod tests {
         let bloom_service = Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
         let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
         let geo_service = Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
+        let pubsub_manager = Arc::new(
+            PubSubManager::new(&config.redis.url, config.pubsub.clone())
+                .expect("Failed to create PubSubManager for tests")
+        );
+        let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -185,6 +207,7 @@ mod tests {
             bloom_service.clone(),
             probabilistic_service.clone(),
             geo_service.clone(),
+            pubsub_service.clone(),
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);

@@ -1515,8 +1515,8 @@ Go service does NOT support Stream operations.
 - Modern GEOSEARCH supports both BYRADIUS and BYBOX shapes
 - Full test coverage with MockGeoRepository using Haversine distance formula
 
-### 5.3 Pub/Sub Operations (NEW) - Dedicated Connection Architecture
-- [ ] **Task 5.3.1**: Implement Pub/Sub service (using PubSubManager)
+### 5.3 Pub/Sub Operations (NEW) - Dedicated Connection Architecture ✅ COMPLETED
+- [x] **Task 5.3.1**: Implement Pub/Sub service (using PubSubManager)
   ```rust
   pub struct PubSubService {
       command_pool: Arc<InstrumentedPool>,  // For PUBLISH and info commands
@@ -1553,7 +1553,7 @@ Go service does NOT support Stream operations.
   }
   ```
 
-- [ ] **Task 5.3.2**: Implement Pub/Sub operations
+- [x] **Task 5.3.2**: Implement Pub/Sub operations
   | Command | Method | Priority | Connection |
   |---------|--------|----------|------------|
   | PUBLISH | `publish` | High | Command Pool |
@@ -1564,11 +1564,11 @@ Go service does NOT support Stream operations.
   | PUBSUB CHANNELS | `channels` | Medium | Command Pool |
   | PUBSUB NUMSUB | `numsub` | Medium | Command Pool |
   | PUBSUB NUMPAT | `numpat` | Medium | Command Pool |
-  | SSUBSCRIBE | `ssubscribe` (sharded) | Low | Dedicated |
+  | SSUBSCRIBE | `ssubscribe` (sharded) | Low | **Not implemented (501)** |
   | SUNSUBSCRIBE | (handled by WS close) | Low | - |
   | SPUBLISH | `spublish` | Low | Command Pool |
 
-- [ ] **Task 5.3.3**: Implement WebSocket subscription handler
+- [x] **Task 5.3.3**: Implement WebSocket subscription handler
   ```rust
   pub async fn ws_subscribe(
       ws: WebSocketUpgrade,
@@ -1645,21 +1645,27 @@ Go service does NOT support Stream operations.
   }
   ```
 
-- [ ] **Task 5.3.4**: Create Pub/Sub API routes
+- [x] **Task 5.3.4**: Create Pub/Sub API routes
   ```
   # HTTP endpoints (use command pool)
   POST   /api/v1/pubsub/publish
   GET    /api/v1/pubsub/channels
-  GET    /api/v1/pubsub/numsub
+  POST   /api/v1/pubsub/numsub             # POST with channels array in body
   GET    /api/v1/pubsub/numpat
   GET    /api/v1/pubsub/stats              # Subscription stats
+
+  # Sharded Pub/Sub HTTP endpoints (Redis 7.0+ cluster)
+  POST   /api/v1/pubsub/spublish
+  GET    /api/v1/pubsub/shardchannels
+  POST   /api/v1/pubsub/shardnumsub
 
   # WebSocket endpoints (use dedicated connections)
   WS     /api/v1/pubsub/subscribe?channels=ch1,ch2
   WS     /api/v1/pubsub/psubscribe?patterns=user:*,order:*
+  WS     /api/v1/pubsub/ssubscribe?channels=ch1    # Returns 501 Not Implemented
   ```
 
-- [ ] **Task 5.3.5**: Create Pub/Sub request/response schemas
+- [x] **Task 5.3.5**: Create Pub/Sub request/response schemas
   ```rust
   #[derive(Debug, Serialize, Deserialize, ToSchema)]
   pub struct PublishRequest {
@@ -1689,6 +1695,27 @@ Go service does NOT support Stream operations.
       pub errors: u64,
   }
   ```
+
+**Implementation Notes (Task 5.3 Completed):**
+- PubSubManager creates dedicated connections for subscriptions (not from command pool)
+- PubSubRepository handles PUBLISH and PUBSUB info commands via command pool
+- WebSocket handlers for SUBSCRIBE/PSUBSCRIBE with automatic cleanup on disconnect
+- Hard subscription limit (default 100) with 503 when exceeded
+- All endpoints documented in OpenAPI with Pub/Sub tag
+- Sharded Pub/Sub HTTP endpoints added for Redis 7.0+ cluster mode:
+  - POST /api/v1/pubsub/spublish
+  - GET /api/v1/pubsub/shardchannels
+  - POST /api/v1/pubsub/shardnumsub
+- **SSUBSCRIBE (WS /api/v1/pubsub/ssubscribe) returns 501 Not Implemented** - the redis crate doesn't natively support SSUBSCRIBE and proper implementation requires cluster-aware connection handling
+- Channel/pattern validation with length limits (max 1024 chars, max 100 per request)
+- Non-UTF-8 payloads are base64-encoded with "base64:" prefix
+- Subscription slot reserved before WebSocket upgrade to prevent race conditions
+- Confirmation messages use incremental count (Redis semantics)
+
+**Test Coverage Notes:**
+- Unit tests cover route construction and schema parsing
+- WebSocket integration tests not included (would require mocking WebSocket connections)
+- Validation logic tested indirectly through service layer tests
 
 ### 5.4 Transaction Operations (NEW) - Single-Request Model
 - [ ] **Task 5.4.1**: Implement Transaction service (single-request bundled model)

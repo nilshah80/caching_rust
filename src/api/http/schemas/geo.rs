@@ -460,6 +460,7 @@ pub struct GeoSearchStoreResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::repositories::GeoSearchResult;
 
     #[test]
     fn test_geo_unit_schema() {
@@ -636,5 +637,142 @@ mod tests {
 
         let domain_order: GeoSortOrder = GeoSortOrderSchema::Desc.into();
         assert!(matches!(domain_order, GeoSortOrder::Desc));
+    }
+
+    #[test]
+    fn test_geo_unit_schema_from_domain() {
+        let schema_unit = GeoUnitSchema::from(GeoUnit::Meters);
+        assert!(matches!(schema_unit, GeoUnitSchema::Meters));
+
+        let schema_unit = GeoUnitSchema::from(GeoUnit::Kilometers);
+        assert!(matches!(schema_unit, GeoUnitSchema::Kilometers));
+
+        let schema_unit = GeoUnitSchema::from(GeoUnit::Miles);
+        assert!(matches!(schema_unit, GeoUnitSchema::Miles));
+
+        let schema_unit = GeoUnitSchema::from(GeoUnit::Feet);
+        assert!(matches!(schema_unit, GeoUnitSchema::Feet));
+    }
+
+    #[test]
+    fn test_geo_position_conversion() {
+        let schema = GeoPositionSchema {
+            longitude: 13.361389,
+            latitude: 52.519444,
+        };
+        let domain: GeoPosition = schema.clone().into();
+        assert!((domain.longitude - 13.361389).abs() < 0.0001);
+        assert!((domain.latitude - 52.519444).abs() < 0.0001);
+
+        let roundtrip = GeoPositionSchema::from(domain);
+        assert!((roundtrip.longitude - schema.longitude).abs() < 0.0001);
+        assert!((roundtrip.latitude - schema.latitude).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_geo_search_shape_conversion() {
+        let by_box = GeoSearchShapeSchema::ByBox {
+            width: 10.0,
+            height: 5.0,
+            unit: GeoUnitSchema::Miles,
+        };
+        let domain_box: GeoSearchShape = by_box.into();
+        assert!(matches!(
+            domain_box,
+            GeoSearchShape::ByBox {
+                width,
+                height,
+                unit: GeoUnit::Miles
+            } if (width - 10.0).abs() < 0.0001 && (height - 5.0).abs() < 0.0001
+        ));
+
+        let by_radius = GeoSearchShapeSchema::ByRadius {
+            radius: 25.0,
+            unit: GeoUnitSchema::Kilometers,
+        };
+        let domain_radius: GeoSearchShape = by_radius.into();
+        assert!(matches!(
+            domain_radius,
+            GeoSearchShape::ByRadius {
+                radius,
+                unit: GeoUnit::Kilometers
+            } if (radius - 25.0).abs() < 0.0001
+        ));
+    }
+
+    #[test]
+    fn test_geo_search_options_conversion() {
+        let schema = GeoSearchOptionsSchema {
+            with_dist: true,
+            with_coord: false,
+            with_hash: true,
+            sort: Some(GeoSortOrderSchema::Desc),
+            count: Some(5),
+            count_any: true,
+        };
+        let domain: GeoSearchOptions = schema.into();
+        assert!(domain.with_dist);
+        assert!(!domain.with_coord);
+        assert!(domain.with_hash);
+        assert!(matches!(domain.sort, Some(GeoSortOrder::Desc)));
+        assert_eq!(domain.count, Some(5));
+        assert!(domain.count_any);
+    }
+
+    #[test]
+    fn test_geo_radius_query_options() {
+        let query = GeoRadiusQuery {
+            longitude: 1.0,
+            latitude: 2.0,
+            radius: 3.0,
+            unit: GeoUnitSchema::Feet,
+            with_dist: true,
+            with_coord: true,
+            with_hash: false,
+            sort: Some(GeoSortOrderSchema::Asc),
+            count: Some(10),
+        };
+        let options = query.to_options();
+        assert!(options.with_dist);
+        assert!(options.with_coord);
+        assert!(!options.with_hash);
+        assert!(matches!(options.sort, Some(GeoSortOrder::Asc)));
+        assert_eq!(options.count, Some(10));
+        assert!(!options.count_any);
+    }
+
+    #[test]
+    fn test_geo_radius_by_member_query_options() {
+        let query = GeoRadiusByMemberQuery {
+            radius: 5.0,
+            unit: GeoUnitSchema::Meters,
+            with_dist: false,
+            with_coord: true,
+            with_hash: true,
+            sort: None,
+            count: None,
+        };
+        let options = query.to_options();
+        assert!(!options.with_dist);
+        assert!(options.with_coord);
+        assert!(options.with_hash);
+        assert!(options.sort.is_none());
+        assert!(options.count.is_none());
+        assert!(!options.count_any);
+    }
+
+    #[test]
+    fn test_geo_search_result_item_from_domain() {
+        let domain = GeoSearchResult {
+            member: "Berlin".to_string(),
+            distance: Some(1.5),
+            position: Some(GeoPosition::new(13.361389, 52.519444)),
+            geohash: Some(1234),
+        };
+        let item = GeoSearchResultItem::from(domain);
+        assert_eq!(item.member, "Berlin");
+        assert_eq!(item.distance, Some(1.5));
+        assert!(item.position.is_some());
+        assert_eq!(item.geohash, Some(1234));
     }
 }

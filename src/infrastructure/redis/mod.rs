@@ -4,4 +4,5 @@
 
 pub mod capabilities;
 pub mod connection;
+pub mod pubsub_manager;
 pub mod repositories;

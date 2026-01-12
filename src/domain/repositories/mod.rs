@@ -11,6 +11,7 @@ mod json_repository;
 mod key_repository;
 mod list_repository;
 mod probabilistic_repository;
+mod pubsub_repository;
 mod search_repository;
 mod set_repository;
 mod sorted_set_repository;
@@ -42,5 +43,6 @@ pub use sorted_set_repository::{
     ZAggregate, ZPopDirection, ZPopResult, ZRangeOptions, ZRangeType, ZScanResult,
     ZSetAlgebraOptions,
 };
+pub use pubsub_repository::{NumSubResult, PubSubRepository, PublishResult};
 pub use stream_repository::StreamRepository;
 pub use string_repository::StringRepository;

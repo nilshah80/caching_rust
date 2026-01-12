@@ -1025,7 +1025,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, SearchService, SetService,
+        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
     use crate::domain::entities::{
@@ -1353,6 +1353,11 @@ mod tests {
             Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
         let geo_service =
             Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
+        let pubsub_manager = Arc::new(
+            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(&config.redis.url, config.pubsub.clone())
+                .expect("Failed to create PubSubManager for tests")
+        );
+        let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
 
         AppState::new_with_services(
@@ -1374,6 +1379,7 @@ mod tests {
             bloom_service,
             probabilistic_service,
             geo_service,
+            pubsub_service,
         )
     }
 
@@ -2093,6 +2099,11 @@ mod tests {
             Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
         let geo_service =
             Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
+        let pubsub_manager = Arc::new(
+            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(&config.redis.url, config.pubsub.clone())
+                .expect("Failed to create PubSubManager for tests")
+        );
+        let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(max_sse));
 
         AppState::new_with_services(
@@ -2114,6 +2125,7 @@ mod tests {
             bloom_service,
             probabilistic_service,
             geo_service,
+            pubsub_service,
         )
     }
 
