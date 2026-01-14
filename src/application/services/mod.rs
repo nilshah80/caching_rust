@@ -17,6 +17,7 @@ mod set_service;
 mod sorted_set_service;
 mod stream_service;
 mod string_service;
+mod transaction_service;
 
 pub use admin_service::AdminService;
 pub use bitmap_service::BitMapService;
@@ -33,3 +34,4 @@ pub use sorted_set_service::SortedSetService;
 pub use pubsub_service::PubSubService;
 pub use stream_service::StreamService;
 pub use string_service::StringService;
+pub use transaction_service::TransactionService;

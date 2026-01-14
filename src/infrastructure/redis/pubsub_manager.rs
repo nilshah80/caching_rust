@@ -263,6 +263,13 @@ impl PubSubConnection {
     }
 }
 
+#[cfg(test)]
+impl PubSubConnection {
+    pub(crate) fn new_for_tests(inner: Option<PubSub>, stats: Arc<PubSubStats>) -> Self {
+        Self { inner, stats }
+    }
+}
+
 impl Drop for PubSubConnection {
     fn drop(&mut self) {
         // Only decrement if inner is still present (not consumed by into_on_message)

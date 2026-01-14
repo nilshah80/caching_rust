@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService, StreamService, StringService};
+use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService, StreamService, StringService, TransactionService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -71,6 +71,9 @@ pub struct AppState {
 
     /// Pub/Sub operations service
     pub pubsub_service: Arc<PubSubService>,
+
+    /// Transaction operations service
+    pub transaction_service: Arc<TransactionService>,
 }
 
 impl AppState {
@@ -106,8 +109,9 @@ impl AppState {
                 .expect("Failed to create PubSubManager")
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
+        let transaction_service = Arc::new(TransactionService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service)
+        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service, transaction_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -132,6 +136,7 @@ impl AppState {
         probabilistic_service: Arc<ProbabilisticService>,
         geo_service: Arc<GeoService>,
         pubsub_service: Arc<PubSubService>,
+        transaction_service: Arc<TransactionService>,
     ) -> Self {
         Self {
             pool,
@@ -153,6 +158,7 @@ impl AppState {
             probabilistic_service,
             geo_service,
             pubsub_service,
+            transaction_service,
         }
     }
 }
@@ -187,6 +193,7 @@ mod tests {
                 .expect("Failed to create PubSubManager for tests")
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
+        let transaction_service = Arc::new(TransactionService::new(pool.clone()));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -208,6 +215,7 @@ mod tests {
             probabilistic_service.clone(),
             geo_service.clone(),
             pubsub_service.clone(),
+            transaction_service.clone(),
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);

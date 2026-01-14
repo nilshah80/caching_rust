@@ -6,11 +6,15 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 #[cfg(not(test))]
 use std::time::Instant;
+#[cfg(test)]
+use std::time::Instant;
 
 use deadpool_redis::{Config, Pool, Runtime, Connection};
 use serde::Serialize;
 #[cfg(not(test))]
 use tracing::{debug, info, warn};
+#[cfg(test)]
+use tracing::{debug, warn};
 use utoipa::ToSchema;
 
 use crate::domain::errors::CacheError;
@@ -73,6 +77,8 @@ pub struct InstrumentedPool {
     inner: Pool,
     metrics: Arc<PoolMetrics>,
     max_size: usize,
+    #[cfg(test)]
+    allow_get: bool,
 }
 
 impl InstrumentedPool {
@@ -126,6 +132,8 @@ impl InstrumentedPool {
             inner: pool,
             metrics: Arc::new(PoolMetrics::default()),
             max_size: pool_config.max_size as usize,
+            #[cfg(test)]
+            allow_get: true,
         })
     }
 
@@ -152,7 +160,27 @@ impl InstrumentedPool {
             inner: pool,
             metrics: Arc::new(PoolMetrics::default()),
             max_size: 1,
+            allow_get: false,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_tests_with_url(redis_url: &str) -> Result<Self, CacheError> {
+        let cfg = Config::from_url(redis_url);
+        let pool = cfg
+            .builder()
+            .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?
+            .max_size(4)
+            .runtime(Runtime::Tokio1)
+            .build()
+            .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?;
+
+        Ok(Self {
+            inner: pool,
+            metrics: Arc::new(PoolMetrics::default()),
+            max_size: 4,
+            allow_get: true,
+        })
     }
 
     /// Build the Redis connection URL with TLS support
@@ -282,8 +310,33 @@ impl InstrumentedPool {
 
     #[cfg(test)]
     pub async fn get(&self) -> Result<Connection, CacheError> {
-        let _ = self;
-        Err(CacheError::PoolError("pool get disabled in tests".to_string()))
+        if !self.allow_get {
+            return Err(CacheError::PoolError(
+                "pool get disabled in tests".to_string(),
+            ));
+        }
+
+        self.metrics.current_waiting.fetch_add(1, Ordering::Relaxed);
+        self.metrics.total_wait_count.fetch_add(1, Ordering::Relaxed);
+
+        let start = Instant::now();
+        let result = self.inner.get().await;
+        let wait_ms = start.elapsed().as_millis() as u64;
+
+        self.metrics.total_wait_duration_ms.fetch_add(wait_ms, Ordering::Relaxed);
+        self.metrics.current_waiting.fetch_sub(1, Ordering::Relaxed);
+
+        match result {
+            Ok(conn) => {
+                debug!(wait_ms, "Connection acquired from pool");
+                Ok(conn)
+            }
+            Err(e) => {
+                self.metrics.failed_checkouts.fetch_add(1, Ordering::Relaxed);
+                warn!(error = %e, wait_ms, "Failed to get connection from pool");
+                Err(CacheError::PoolError(e.to_string()))
+            }
+        }
     }
 
     /// Get pool statistics

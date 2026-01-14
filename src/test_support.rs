@@ -1515,8 +1515,9 @@ pub fn test_state_with_all_repos_and_config(
             .expect("Failed to create PubSubManager for tests")
     );
     let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
+    let transaction_service = Arc::new(crate::application::services::TransactionService::new(pool.clone()));
 
-    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service)
+    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service, transaction_service)
 }
 
 /// Create test state with custom config

@@ -14,6 +14,8 @@ use axum::{
     Json, Router,
 };
 use futures::StreamExt;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::api::http::schemas::pubsub::*;
 use crate::domain::errors::CacheError;
@@ -400,6 +402,40 @@ pub async fn ws_ssubscribe(
 
 use crate::infrastructure::redis::pubsub_manager::PubSubConnection;
 
+#[cfg(test)]
+static WS_SEND_FAILURES: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn set_ws_send_failures(count: usize) {
+    WS_SEND_FAILURES.store(count, Ordering::Relaxed);
+}
+
+async fn send_ws(socket: &mut WebSocket, message: Message) -> Result<(), axum::Error> {
+    #[cfg(test)]
+    {
+        let mut remaining = WS_SEND_FAILURES.load(Ordering::Relaxed);
+        while remaining > 0 {
+            if WS_SEND_FAILURES
+                .compare_exchange_weak(
+                    remaining,
+                    remaining - 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return Err(axum::Error::new(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "forced send failure",
+                )));
+            }
+            remaining = WS_SEND_FAILURES.load(Ordering::Relaxed);
+        }
+    }
+
+    socket.send(message).await
+}
+
 /// Extract message payload, handling both UTF-8 and binary data.
 /// Binary data is base64-encoded with a "base64:" prefix.
 fn extract_payload(msg: &redis::Msg) -> String {
@@ -432,9 +468,11 @@ async fn handle_subscribe(
                 error: "subscribe_failed".to_string(),
                 message: format!("Failed to subscribe to {}: {}", channel, e),
             };
-            let _ = socket
-                .send(Message::Text(serde_json::to_string(&error).unwrap_or_default().into()))
-                .await;
+            let _ = send_ws(
+                &mut socket,
+                Message::Text(serde_json::to_string(&error).unwrap_or_default().into()),
+            )
+            .await;
             state.pubsub_service.record_error();
             return;
         }
@@ -447,10 +485,12 @@ async fn handle_subscribe(
             target: channel.clone(),
             count: subscribed_count,
         };
-        if socket
-            .send(Message::Text(serde_json::to_string(&confirmation).unwrap_or_default().into()))
-            .await
-            .is_err()
+        if send_ws(
+            &mut socket,
+            Message::Text(serde_json::to_string(&confirmation).unwrap_or_default().into()),
+        )
+        .await
+        .is_err()
         {
             return; // Client disconnected
         }
@@ -462,9 +502,11 @@ async fn handle_subscribe(
             error: "stream_failed".to_string(),
             message: "Failed to create message stream".to_string(),
         };
-        let _ = socket
-            .send(Message::Text(serde_json::to_string(&error).unwrap_or_default().into()))
-            .await;
+        let _ = send_ws(
+            &mut socket,
+            Message::Text(serde_json::to_string(&error).unwrap_or_default().into()),
+        )
+        .await;
         return;
     };
 
@@ -481,7 +523,7 @@ async fn handle_subscribe(
                             extract_payload(&m),
                         );
                         let json = serde_json::to_string(&payload).unwrap_or_default();
-                        if socket.send(Message::Text(json.into())).await.is_err() {
+                        if send_ws(&mut socket, Message::Text(json.into())).await.is_err() {
                             break; // Client disconnected
                         }
                     }
@@ -493,7 +535,7 @@ async fn handle_subscribe(
                 match client_msg {
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(Message::Ping(data))) => {
-                        if socket.send(Message::Pong(data)).await.is_err() {
+                        if send_ws(&mut socket, Message::Pong(data)).await.is_err() {
                             break;
                         }
                     }
@@ -518,9 +560,11 @@ async fn handle_psubscribe(
                 error: "psubscribe_failed".to_string(),
                 message: format!("Failed to subscribe to pattern {}: {}", pattern, e),
             };
-            let _ = socket
-                .send(Message::Text(serde_json::to_string(&error).unwrap_or_default().into()))
-                .await;
+            let _ = send_ws(
+                &mut socket,
+                Message::Text(serde_json::to_string(&error).unwrap_or_default().into()),
+            )
+            .await;
             state.pubsub_service.record_error();
             return;
         }
@@ -533,10 +577,12 @@ async fn handle_psubscribe(
             target: pattern.clone(),
             count: subscribed_count,
         };
-        if socket
-            .send(Message::Text(serde_json::to_string(&confirmation).unwrap_or_default().into()))
-            .await
-            .is_err()
+        if send_ws(
+            &mut socket,
+            Message::Text(serde_json::to_string(&confirmation).unwrap_or_default().into()),
+        )
+        .await
+        .is_err()
         {
             return; // Client disconnected
         }
@@ -548,9 +594,11 @@ async fn handle_psubscribe(
             error: "stream_failed".to_string(),
             message: "Failed to create message stream".to_string(),
         };
-        let _ = socket
-            .send(Message::Text(serde_json::to_string(&error).unwrap_or_default().into()))
-            .await;
+        let _ = send_ws(
+            &mut socket,
+            Message::Text(serde_json::to_string(&error).unwrap_or_default().into()),
+        )
+        .await;
         return;
     };
 
@@ -568,7 +616,7 @@ async fn handle_psubscribe(
                             extract_payload(&m),
                         );
                         let json = serde_json::to_string(&payload).unwrap_or_default();
-                        if socket.send(Message::Text(json.into())).await.is_err() {
+                        if send_ws(&mut socket, Message::Text(json.into())).await.is_err() {
                             break; // Client disconnected
                         }
                     }
@@ -580,7 +628,7 @@ async fn handle_psubscribe(
                 match client_msg {
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(Message::Ping(data))) => {
-                        if socket.send(Message::Pong(data)).await.is_err() {
+                        if send_ws(&mut socket, Message::Pong(data)).await.is_err() {
                             break;
                         }
                     }
@@ -605,7 +653,7 @@ mod tests {
     use testcontainers::runners::AsyncRunner;
     use testcontainers_modules::redis::{Redis, REDIS_PORT};
     use tokio::net::TcpListener;
-    use tokio::sync::oneshot;
+    use tokio::sync::{oneshot, Mutex};
     use tokio::time::{timeout, Duration};
     use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tower::ServiceExt;
@@ -613,7 +661,7 @@ mod tests {
     use crate::application::services::PubSubService;
     use crate::domain::repositories::{NumSubResult, PubSubRepository, PublishResult};
     use crate::infrastructure::config::Settings;
-    use crate::infrastructure::redis::pubsub_manager::PubSubManager;
+    use crate::infrastructure::redis::pubsub_manager::{PubSubConnection, PubSubManager, PubSubStats};
     use crate::test_support::{
         test_state_with_all_repos_and_config, MockAdminRepository, MockBitMapRepository,
         MockBloomRepository, MockGeoRepository, MockHashRepository, MockJsonRepository,
@@ -675,6 +723,23 @@ mod tests {
 
         tokio::spawn(async move {
             axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        (addr, shutdown_tx)
+    }
+
+    async fn spawn_router(router: Router) -> (SocketAddr, oneshot::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            axum::serve(listener, router)
                 .with_graceful_shutdown(async {
                     let _ = shutdown_rx.await;
                 })
@@ -996,6 +1061,18 @@ mod tests {
         // Note: redis's get_payload::<String>() may use lossy UTF-8 conversion,
         // so we just verify we get a non-empty result
         assert!(!payload.is_empty());
+
+        // Test fallback to empty string when payload cannot be decoded
+        let invalid_value = redis::Value::Array(vec![
+            redis::Value::BulkString(b"message".to_vec()),
+            redis::Value::BulkString(b"news".to_vec()),
+            redis::Value::Attribute {
+                data: Box::new(redis::Value::Array(vec![redis::Value::Int(1)])),
+                attributes: Vec::new(),
+            },
+        ]);
+        let invalid_msg = redis::Msg::from_owned_value(invalid_value).unwrap();
+        assert_eq!(extract_payload(&invalid_msg), "");
     }
 
     #[tokio::test]
@@ -1027,6 +1104,7 @@ mod tests {
         assert_eq!(confirmation["type"], "subscribed");
         assert_eq!(confirmation["target"], "news");
 
+        socket.send(WsMessage::Text("noop".into())).await.unwrap();
         socket.send(WsMessage::Ping(vec![1, 2, 3].into())).await.unwrap();
         let pong = timeout(Duration::from_secs(3), socket.next())
             .await
@@ -1087,6 +1165,7 @@ mod tests {
         assert_eq!(confirmation["type"], "psubscribed");
         assert_eq!(confirmation["target"], "user:*");
 
+        socket.send(WsMessage::Text("noop".into())).await.unwrap();
         socket.send(WsMessage::Ping(vec![9, 9, 9].into())).await.unwrap();
         let pong = timeout(Duration::from_secs(3), socket.next())
             .await
@@ -1116,6 +1195,566 @@ mod tests {
         assert_eq!(payload["message"], "hi");
 
         let _ = socket.send(WsMessage::Close(None)).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_subscribe_rejects_empty_channels() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/subscribe?channels=");
+        let err = tokio_tungstenite::connect_async(ws_url).await.unwrap_err();
+        let response = match err {
+            tokio_tungstenite::tungstenite::Error::Http(response) => response,
+            other => panic!("unexpected error: {other:?}"),
+        };
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_subscribe_rejects_long_channel() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let channel = "x".repeat(MAX_CHANNEL_NAME_LENGTH + 1);
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/subscribe?channels={channel}");
+        let err = tokio_tungstenite::connect_async(ws_url).await.unwrap_err();
+        let response = match err {
+            tokio_tungstenite::tungstenite::Error::Http(response) => response,
+            other => panic!("unexpected error: {other:?}"),
+        };
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_psubscribe_rejects_empty_patterns() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/psubscribe?patterns=");
+        let err = tokio_tungstenite::connect_async(ws_url).await.unwrap_err();
+        let response = match err {
+            tokio_tungstenite::tungstenite::Error::Http(response) => response,
+            other => panic!("unexpected error: {other:?}"),
+        };
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_psubscribe_rejects_long_pattern() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let pattern = "x".repeat(MAX_CHANNEL_NAME_LENGTH + 1);
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/psubscribe?patterns={pattern}");
+        let err = tokio_tungstenite::connect_async(ws_url).await.unwrap_err();
+        let response = match err {
+            tokio_tungstenite::tungstenite::Error::Http(response) => response,
+            other => panic!("unexpected error: {other:?}"),
+        };
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_ssubscribe_not_implemented() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/ssubscribe?channels=news");
+        let err = tokio_tungstenite::connect_async(ws_url).await.unwrap_err();
+        let response = match err {
+            tokio_tungstenite::tungstenite::Error::Http(response) => response,
+            other => panic!("unexpected error: {other:?}"),
+        };
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_handle_subscribe_subscribe_error() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let pubsub = PubSubConnection::new_for_tests(None, stats);
+        let connection = Arc::new(Mutex::new(Some(pubsub)));
+        let channels = Arc::new(vec!["news".to_string()]);
+
+        let router = Router::new().route(
+            "/ws",
+            get({
+                let connection = connection.clone();
+                let channels = channels.clone();
+                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                    let connection = connection.clone();
+                    let channels = channels.clone();
+                    async move {
+                        let pubsub = connection.lock().await.take().expect("pubsub");
+                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                            handle_subscribe(socket, state, channels.as_ref().clone(), pubsub)
+                        }))
+                    }
+                }
+            }),
+        ).with_state(state);
+
+        let (addr, shutdown_tx) = spawn_router(router).await;
+        let ws_url = format!("ws://{addr}/ws");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let msg = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let payload: Value = serde_json::from_str(&msg.into_text().unwrap()).unwrap();
+        assert_eq!(payload["error"], "subscribe_failed");
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_handle_subscribe_stream_failed() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let pubsub = PubSubConnection::new_for_tests(None, stats);
+        let connection = Arc::new(Mutex::new(Some(pubsub)));
+        let channels = Arc::new(Vec::new());
+
+        let router = Router::new().route(
+            "/ws",
+            get({
+                let connection = connection.clone();
+                let channels = channels.clone();
+                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                    let connection = connection.clone();
+                    let channels = channels.clone();
+                    async move {
+                        let pubsub = connection.lock().await.take().expect("pubsub");
+                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                            handle_subscribe(socket, state, channels.as_ref().clone(), pubsub)
+                        }))
+                    }
+                }
+            }),
+        ).with_state(state);
+
+        let (addr, shutdown_tx) = spawn_router(router).await;
+        let ws_url = format!("ws://{addr}/ws");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let msg = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let payload: Value = serde_json::from_str(&msg.into_text().unwrap()).unwrap();
+        assert_eq!(payload["error"], "stream_failed");
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_handle_psubscribe_subscribe_error() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let pubsub = PubSubConnection::new_for_tests(None, stats);
+        let connection = Arc::new(Mutex::new(Some(pubsub)));
+        let patterns = Arc::new(vec!["user:*".to_string()]);
+
+        let router = Router::new().route(
+            "/ws",
+            get({
+                let connection = connection.clone();
+                let patterns = patterns.clone();
+                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                    let connection = connection.clone();
+                    let patterns = patterns.clone();
+                    async move {
+                        let pubsub = connection.lock().await.take().expect("pubsub");
+                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                            handle_psubscribe(socket, state, patterns.as_ref().clone(), pubsub)
+                        }))
+                    }
+                }
+            }),
+        ).with_state(state);
+
+        let (addr, shutdown_tx) = spawn_router(router).await;
+        let ws_url = format!("ws://{addr}/ws");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let msg = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let payload: Value = serde_json::from_str(&msg.into_text().unwrap()).unwrap();
+        assert_eq!(payload["error"], "psubscribe_failed");
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_handle_psubscribe_stream_failed() {
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let state = build_state(repo);
+        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let pubsub = PubSubConnection::new_for_tests(None, stats);
+        let connection = Arc::new(Mutex::new(Some(pubsub)));
+        let patterns = Arc::new(Vec::new());
+
+        let router = Router::new().route(
+            "/ws",
+            get({
+                let connection = connection.clone();
+                let patterns = patterns.clone();
+                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                    let connection = connection.clone();
+                    let patterns = patterns.clone();
+                    async move {
+                        let pubsub = connection.lock().await.take().expect("pubsub");
+                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                            handle_psubscribe(socket, state, patterns.as_ref().clone(), pubsub)
+                        }))
+                    }
+                }
+            }),
+        ).with_state(state);
+
+        let (addr, shutdown_tx) = spawn_router(router).await;
+        let ws_url = format!("ws://{addr}/ws");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let msg = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let payload: Value = serde_json::from_str(&msg.into_text().unwrap()).unwrap();
+        assert_eq!(payload["error"], "stream_failed");
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_subscribe_confirmation_send_failure() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url;
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        set_ws_send_failures(1);
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/subscribe?channels=news");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(1), socket.next()).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_subscribe_pong_send_failure() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url;
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/subscribe?channels=news");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        set_ws_send_failures(1);
+        socket.send(WsMessage::Ping(vec![1].into())).await.unwrap();
+        let _ = timeout(Duration::from_secs(1), socket.next()).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_subscribe_message_send_failure() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url.clone();
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/subscribe?channels=news");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        set_ws_send_failures(1);
+        let client = redis::Client::open(redis_url.as_str()).unwrap();
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let _: i64 = redis::cmd("PUBLISH")
+            .arg("news")
+            .arg("hello")
+            .query_async(&mut conn)
+            .await
+            .unwrap();
+        let _ = timeout(Duration::from_secs(1), socket.next()).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_subscribe_redis_disconnect() {
+        let (container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url;
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/subscribe?channels=news");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        drop(container);
+        let _ = timeout(Duration::from_secs(2), socket.next()).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_psubscribe_confirmation_send_failure() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url;
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        set_ws_send_failures(1);
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/psubscribe?patterns=user:*");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(1), socket.next()).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_psubscribe_pong_send_failure() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url;
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/psubscribe?patterns=user:*");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        set_ws_send_failures(1);
+        socket.send(WsMessage::Ping(vec![2].into())).await.unwrap();
+        let _ = timeout(Duration::from_secs(1), socket.next()).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_psubscribe_message_send_failure() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url.clone();
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/psubscribe?patterns=user:*");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        set_ws_send_failures(1);
+        let client = redis::Client::open(redis_url.as_str()).unwrap();
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let _: i64 = redis::cmd("PUBLISH")
+            .arg("user:123")
+            .arg("hi")
+            .query_async(&mut conn)
+            .await
+            .unwrap();
+        let _ = timeout(Duration::from_secs(1), socket.next()).await;
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_psubscribe_redis_disconnect() {
+        let (container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url;
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/psubscribe?patterns=user:*");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        drop(container);
+        let _ = timeout(Duration::from_secs(2), socket.next()).await;
         let _ = shutdown_tx.send(());
     }
 

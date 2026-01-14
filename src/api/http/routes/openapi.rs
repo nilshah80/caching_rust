@@ -154,6 +154,11 @@ use crate::api::http::schemas::pubsub::{
     PubSubMessage, PubSubStatsResponse, PublishRequest, PublishResponse,
     SubscriptionConfirmation, WebSocketError,
 };
+use crate::api::http::schemas::transactions::{
+    CommandResult, CompareAndSetRequest, CompareAndSetResponse, FieldValue,
+    HCompareAndSetRequest, KeyValue, RedisCommand, ScoredMember as TransactionScoredMember,
+    TransactionRequest, TransactionResponse,
+};
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
     StreamEntry, StreamInfo, StreamReadResult, StringValue,
@@ -205,6 +210,7 @@ use crate::shared::app_state::AppState;
         (name = "HyperLogLog", description = "Redis HyperLogLog operations for cardinality estimation (PFADD, PFCOUNT, PFMERGE) - core Redis feature"),
         (name = "Geo", description = "Redis geospatial operations (GEOADD, GEODIST, GEOHASH, GEOPOS, GEOSEARCH, GEOSEARCHSTORE, GEORADIUS, GEORADIUSBYMEMBER) - core Redis feature since 3.2"),
         (name = "Pub/Sub", description = "Redis Pub/Sub operations (PUBLISH, SUBSCRIBE, PSUBSCRIBE, PUBSUB CHANNELS/NUMSUB/NUMPAT). HTTP endpoints for publish and info commands, WebSocket endpoints for subscriptions - core Redis feature"),
+        (name = "Transactions", description = "Redis transaction operations (MULTI/EXEC bundled in single request, compare-and-set operations using Lua scripts). Supports WATCH for optimistic locking - core Redis feature"),
         (name = "Admin", description = "Administrative endpoints (pool stats, capabilities, server info, database ops, config, persistence, client management, monitoring, ACL)")
     ),
     paths(
@@ -476,6 +482,10 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::pubsub::shardchannels,
         crate::api::http::routes::pubsub::shardnumsub,
         crate::api::http::routes::pubsub::ws_ssubscribe,
+        // Transaction endpoints (core Redis)
+        crate::api::http::routes::transactions::execute,
+        crate::api::http::routes::transactions::compare_and_set,
+        crate::api::http::routes::transactions::hcompare_and_set,
         // Admin - Public endpoints
         crate::api::http::routes::admin::get_pool_stats,
         crate::api::http::routes::admin::get_capabilities,
@@ -1051,6 +1061,17 @@ use crate::shared::app_state::AppState;
             PubSubMessage,
             WebSocketError,
             SubscriptionConfirmation,
+            // Transaction schemas
+            TransactionRequest,
+            TransactionResponse,
+            RedisCommand,
+            CommandResult,
+            CompareAndSetRequest,
+            CompareAndSetResponse,
+            HCompareAndSetRequest,
+            KeyValue,
+            FieldValue,
+            TransactionScoredMember,
         )
     ),
     modifiers(&SecurityAddon)

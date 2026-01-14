@@ -43,6 +43,9 @@ pub enum CacheError {
     #[error("Transaction failed: {0}")]
     TransactionFailed(String),
 
+    #[error("Transaction aborted: watched key was modified by another client")]
+    TransactionAborted,
+
     #[error("Script error: {0}")]
     ScriptError(String),
 
@@ -73,7 +76,8 @@ impl CacheError {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::TypeMismatch { .. } => StatusCode::CONFLICT,
             Self::ConnectionFailed(_) | Self::PoolError(_) => StatusCode::SERVICE_UNAVAILABLE,
-            Self::TransactionFailed(_) => StatusCode::CONFLICT,
+            Self::TransactionFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::TransactionAborted => StatusCode::CONFLICT,
             Self::ScriptError(_) => StatusCode::BAD_REQUEST,
             Self::RedisError(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -92,6 +96,7 @@ impl CacheError {
             Self::SubscriptionLimitReached => "SUBSCRIPTION_LIMIT_REACHED",
             Self::BlockingTimeout => "BLOCKING_TIMEOUT",
             Self::TransactionFailed(_) => "TRANSACTION_FAILED",
+            Self::TransactionAborted => "TRANSACTION_ABORTED",
             Self::ScriptError(_) => "SCRIPT_ERROR",
             Self::Unauthorized => "UNAUTHORIZED",
             Self::TypeMismatch { .. } => "TYPE_MISMATCH",
@@ -243,6 +248,10 @@ mod tests {
         );
         assert_eq!(
             CacheError::TransactionFailed("x".into()).status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            CacheError::TransactionAborted.status_code(),
             StatusCode::CONFLICT
         );
         assert_eq!(

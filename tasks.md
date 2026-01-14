@@ -1717,177 +1717,52 @@ Go service does NOT support Stream operations.
 - WebSocket integration tests not included (would require mocking WebSocket connections)
 - Validation logic tested indirectly through service layer tests
 
-### 5.4 Transaction Operations (NEW) - Single-Request Model
-- [ ] **Task 5.4.1**: Implement Transaction service (single-request bundled model)
-  ```rust
-  pub struct TransactionService {
-      pool: Arc<InstrumentedPool>,
-  }
+### 5.4 Transaction Operations (COMPLETED) - Single-Request Model ✅
+- [x] **Task 5.4.1**: Implement Transaction service (single-request bundled model)
+- [x] **Task 5.4.2**: Define transaction command types (60+ Redis commands supported)
+- [x] **Task 5.4.3**: Create Transaction API routes
+- [x] **Task 5.4.4**: Create Transaction request/response schemas
+- [x] **Task 5.4.5**: Add OpenAPI documentation
 
-  impl TransactionService {
-      /// Execute multiple commands atomically in a single request
-      pub async fn execute(&self, request: TransactionRequest) -> Result<TransactionResponse, CacheError> {
-          let mut conn = self.pool.get().await?;
+**Implementation Details:**
+- **Location**: `src/application/services/transaction_service.rs`
+- **Routes**: `src/api/http/routes/transactions.rs`
+- **Schemas**: `src/api/http/schemas/transactions.rs`
 
-          // Optional WATCH for optimistic locking within this single request
-          if let Some(keys) = &request.watch_keys {
-              if !keys.is_empty() {
-                  redis::cmd("WATCH")
-                      .arg(keys)
-                      .query_async::<()>(&mut *conn)
-                      .await
-                      .map_err(|e| CacheError::TransactionFailed(e.to_string()))?;
-              }
-          }
+**API Endpoints:**
+```
+POST   /api/v1/transactions/execute     # Execute bundled commands atomically
+POST   /api/v1/transactions/cas         # Compare-and-set (string) via Lua script
+POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua script
+```
 
-          // Build pipeline with MULTI/EXEC
-          let mut pipe = redis::pipe();
-          pipe.atomic(); // Wraps in MULTI/EXEC
+**Features Implemented:**
+1. **Atomic Transactions**: All commands wrapped in MULTI/EXEC via `pipe.atomic()`
+2. **WATCH Support**: Optional optimistic locking with `watch_keys` parameter
+3. **60+ Command Types**: Strings, Hashes, Lists, Sets, Sorted Sets, Keys operations
+4. **Compare-and-Set**: Atomic CAS operations using Lua scripts (avoids WATCH race conditions)
+5. **Validation**: Command limit (100), watch key limit (20), empty key validation
+6. **Timeout**: 30-second deadline-based timeout (doesn't cancel in-flight operations)
+7. **WATCH Abort Detection**: Returns HTTP 409 when watched key modified by another client
 
-          for cmd in &request.commands {
-              self.add_command_to_pipe(&mut pipe, cmd)?;
-          }
+**Error Handling:**
+- 400 Bad Request: Invalid input (empty commands, limits exceeded, invalid format)
+- 409 Conflict: Transaction aborted (WATCH key modified) - `TRANSACTION_ABORTED`
+- 500 Internal Server Error: Redis errors during execution
+- 504 Gateway Timeout: Execution exceeded 30 second timeout
 
-          // Execute atomically
-          let results: Vec<redis::Value> = pipe.query_async(&mut *conn).await
-              .map_err(|e| CacheError::TransactionFailed(e.to_string()))?;
+**Supported Command Types (RedisCommand enum):**
+- **Strings**: GET, SET, INCR, INCR_BY, DECR, DECR_BY, APPEND, SET_NX, GET_SET, M_GET, M_SET
+- **Hashes**: H_GET, H_SET, H_M_SET, H_M_GET, H_INCR_BY, H_INCR_BY_FLOAT, H_DEL, H_EXISTS, H_GET_ALL, H_KEYS, H_VALS, H_LEN, H_SET_NX
+- **Lists**: L_PUSH, R_PUSH, L_POP, R_POP, L_LEN, L_INDEX, L_RANGE, L_SET, L_TRIM, L_REM
+- **Sets**: S_ADD, S_REM, S_IS_MEMBER, S_MEMBERS, S_CARD, S_POP, S_MOVE
+- **Sorted Sets**: Z_ADD, Z_REM, Z_INCR_BY, Z_SCORE, Z_RANK, Z_REV_RANK, Z_CARD, Z_COUNT, Z_RANGE, Z_REV_RANGE
+- **Keys**: DEL, EXISTS, EXPIRE, P_EXPIRE, TTL, P_TTL, PERSIST, RENAME, RENAME_NX, TYPE
 
-          // Parse results
-          let parsed_results = self.parse_results(&request.commands, results)?;
-
-          Ok(TransactionResponse {
-              success: true,
-              results: parsed_results,
-          })
-      }
-
-      /// Optimistic update using Lua script (replaces WATCH pattern)
-      pub async fn compare_and_set(&self, request: CompareAndSetRequest) -> Result<bool, CacheError> {
-          let mut conn = self.pool.get().await?;
-
-          let script = redis::Script::new(r#"
-              local current = redis.call('GET', KEYS[1])
-              if current == ARGV[1] then
-                  redis.call('SET', KEYS[1], ARGV[2])
-                  return 1
-              else
-                  return 0
-              end
-          "#);
-
-          let result: i32 = script
-              .key(&request.key)
-              .arg(&request.expected_value)
-              .arg(&request.new_value)
-              .invoke_async(&mut *conn)
-              .await?;
-
-          Ok(result == 1)
-      }
-
-      /// Hash compare-and-set
-      pub async fn hcompare_and_set(&self, request: HCompareAndSetRequest) -> Result<bool, CacheError> {
-          let mut conn = self.pool.get().await?;
-
-          let script = redis::Script::new(r#"
-              local current = redis.call('HGET', KEYS[1], ARGV[1])
-              if current == ARGV[2] then
-                  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
-                  return 1
-              else
-                  return 0
-              end
-          "#);
-
-          let result: i32 = script
-              .key(&request.key)
-              .arg(&request.field)
-              .arg(&request.expected_value)
-              .arg(&request.new_value)
-              .invoke_async(&mut *conn)
-              .await?;
-
-          Ok(result == 1)
-      }
-  }
-  ```
-
-- [ ] **Task 5.4.2**: Define transaction command types
-  ```rust
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-  pub enum RedisCommand {
-      // Strings
-      Get { key: String },
-      Set { key: String, value: String, ttl_seconds: Option<u64> },
-      Incr { key: String },
-      IncrBy { key: String, delta: i64 },
-
-      // Hashes
-      HGet { key: String, field: String },
-      HSet { key: String, field: String, value: String },
-      HIncrBy { key: String, field: String, delta: i64 },
-      HDel { key: String, fields: Vec<String> },
-
-      // Lists
-      LPush { key: String, values: Vec<String> },
-      RPush { key: String, values: Vec<String> },
-      LPop { key: String, count: Option<u32> },
-      RPop { key: String, count: Option<u32> },
-
-      // Sets
-      SAdd { key: String, members: Vec<String> },
-      SRem { key: String, members: Vec<String> },
-
-      // Sorted Sets
-      ZAdd { key: String, members: Vec<(f64, String)> },
-      ZRem { key: String, members: Vec<String> },
-      ZIncrBy { key: String, delta: f64, member: String },
-
-      // Keys
-      Del { keys: Vec<String> },
-      Expire { key: String, seconds: u64 },
-  }
-
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  pub struct TransactionRequest {
-      /// Commands to execute atomically (wrapped in MULTI/EXEC)
-      pub watch_keys: Option<Vec<String>>,
-      pub commands: Vec<RedisCommand>,
-  }
-
-  #[derive(Debug, Clone, Serialize, ToSchema)]
-  pub struct TransactionResponse {
-      pub success: bool,
-      pub results: Vec<CommandResult>,
-  }
-
-  #[derive(Debug, Clone, Serialize, ToSchema)]
-  pub struct CommandResult {
-      pub index: usize,
-      pub success: bool,
-      #[serde(skip_serializing_if = "Option::is_none")]
-      pub value: Option<serde_json::Value>,
-      #[serde(skip_serializing_if = "Option::is_none")]
-      pub error: Option<String>,
-  }
-
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  pub struct CompareAndSetRequest {
-      pub key: String,
-      pub expected_value: String,
-      pub new_value: String,
-  }
-  ```
-
-- [ ] **Task 5.4.3**: Create Transaction API routes
-  ```
-  POST   /api/v1/transactions/execute     # Execute bundled commands
-  POST   /api/v1/transactions/cas         # Compare-and-set (string)
-  POST   /api/v1/transactions/hcas        # Compare-and-set (hash field)
-  ```
-
-- [ ] **Task 5.4.4**: Create Transaction request/response schemas
+**Test Coverage:**
+- 23 transaction-specific unit tests
+- Integration tested via Docker with Redis 8.0
+- All validation paths tested
 
 ### 5.5 Lua Scripting Operations (NEW)
 - [ ] **Task 5.5.1**: Implement Scripting repository trait
@@ -2281,6 +2156,510 @@ Go service does NOT support Stream operations.
 
 ---
 
+### 5.12 Redis 7.4+ Hash Field Expiration (NEW - Critical)
+
+> **Note**: Redis 7.4 introduced field-level expiration for hashes. This is a critical feature for session management, caching patterns, and data lifecycle management where different fields need different TTLs.
+
+- [ ] **Task 5.12.1**: Implement Hash Field Expiration repository methods
+  ```rust
+  #[async_trait]
+  pub trait HashFieldExpirationRepository: Send + Sync {
+      /// Set field expiration in seconds
+      async fn hexpire(&self, key: &str, seconds: i64, fields: &[String], condition: Option<ExpireCondition>) -> Result<Vec<i64>, CacheError>;
+      /// Set field expiration in milliseconds
+      async fn hpexpire(&self, key: &str, milliseconds: i64, fields: &[String], condition: Option<ExpireCondition>) -> Result<Vec<i64>, CacheError>;
+      /// Set field expiration at Unix timestamp (seconds)
+      async fn hexpire_at(&self, key: &str, unix_time: i64, fields: &[String], condition: Option<ExpireCondition>) -> Result<Vec<i64>, CacheError>;
+      /// Set field expiration at Unix timestamp (milliseconds)
+      async fn hpexpire_at(&self, key: &str, unix_time_ms: i64, fields: &[String], condition: Option<ExpireCondition>) -> Result<Vec<i64>, CacheError>;
+      /// Get field expiration time (seconds)
+      async fn hexpire_time(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+      /// Get field expiration time (milliseconds)
+      async fn hpexpire_time(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+      /// Get field TTL (seconds)
+      async fn httl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+      /// Get field TTL (milliseconds)
+      async fn hpttl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+      /// Remove field expiration
+      async fn hpersist(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize)]
+  pub enum ExpireCondition {
+      NX,  // Only set expiration if field has no expiration
+      XX,  // Only set expiration if field has existing expiration
+      GT,  // Only set expiration if new expiration > current
+      LT,  // Only set expiration if new expiration < current
+  }
+  ```
+
+- [ ] **Task 5.12.2**: Implement Hash Field Expiration operations
+  | Command | Method | Priority | Redis Version |
+  |---------|--------|----------|---------------|
+  | HEXPIRE | `hexpire` | High | 7.4+ |
+  | HPEXPIRE | `hpexpire` | High | 7.4+ |
+  | HEXPIREAT | `hexpire_at` | High | 7.4+ |
+  | HPEXPIREAT | `hpexpire_at` | Medium | 7.4+ |
+  | HEXPIRETIME | `hexpire_time` | Medium | 7.4+ |
+  | HPEXPIRETIME | `hpexpire_time` | Low | 7.4+ |
+  | HTTL | `httl` | High | 7.4+ |
+  | HPTTL | `hpttl` | Medium | 7.4+ |
+  | HPERSIST | `hpersist` | Medium | 7.4+ |
+
+- [ ] **Task 5.12.3**: Create Hash Field Expiration API routes
+  ```
+  POST   /api/v1/hashes/{key}/fields/expire        # HEXPIRE
+  POST   /api/v1/hashes/{key}/fields/pexpire       # HPEXPIRE
+  POST   /api/v1/hashes/{key}/fields/expireat      # HEXPIREAT
+  POST   /api/v1/hashes/{key}/fields/pexpireat     # HPEXPIREAT
+  POST   /api/v1/hashes/{key}/fields/expiretime    # HEXPIRETIME
+  POST   /api/v1/hashes/{key}/fields/pexpiretime   # HPEXPIRETIME
+  POST   /api/v1/hashes/{key}/fields/ttl           # HTTL
+  POST   /api/v1/hashes/{key}/fields/pttl          # HPTTL
+  POST   /api/v1/hashes/{key}/fields/persist       # HPERSIST
+  ```
+
+- [ ] **Task 5.12.4**: Create Hash Field Expiration request/response schemas
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct HExpireRequest {
+      /// Fields to set expiration on
+      pub fields: Vec<String>,
+      /// Expiration time in seconds
+      pub seconds: i64,
+      /// Optional condition: NX, XX, GT, LT
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub condition: Option<ExpireConditionSchema>,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct HTtlRequest {
+      /// Fields to get TTL for
+      pub fields: Vec<String>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct HExpireResponse {
+      /// Results per field: -2 (no field), 0 (condition not met), 1 (success), 2 (deleted)
+      pub results: Vec<HExpireFieldResult>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct HExpireFieldResult {
+      pub field: String,
+      pub result: i64,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  #[serde(rename_all = "UPPERCASE")]
+  pub enum ExpireConditionSchema {
+      NX,
+      XX,
+      GT,
+      LT,
+  }
+  ```
+
+- [ ] **Task 5.12.5**: Add version gating for Redis 7.4+
+  - Update `RedisCapabilities` to detect Redis 7.4+
+  - Conditionally enable hash field expiration routes
+  - Return 501 Not Implemented for older Redis versions
+
+---
+
+### 5.13 Redis 8.0+ Hash Commands (NEW - High Priority)
+
+> **Note**: Redis 8.0 introduces atomic hash operations that combine get/set with expiration or deletion in a single command.
+
+- [ ] **Task 5.13.1**: Implement Redis 8.0 Hash operations
+  | Command | Method | Priority | Redis Version |
+  |---------|--------|----------|---------------|
+  | HGETEX | `hgetex` | High | 8.0+ |
+  | HSETEX | `hsetex` | High | 8.0+ |
+  | HGETDEL | `hgetdel` | High | 8.0+ |
+
+- [ ] **Task 5.13.2**: Create Redis 8.0 Hash API routes
+  ```
+  POST   /api/v1/hashes/{key}/getex     # HGETEX - Get fields and optionally set expiration
+  POST   /api/v1/hashes/{key}/setex     # HSETEX - Set fields with optional expiration
+  POST   /api/v1/hashes/{key}/getdel    # HGETDEL - Get and delete fields
+  ```
+
+- [ ] **Task 5.13.3**: Create Redis 8.0 Hash request/response schemas
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct HGetExRequest {
+      /// Fields to get
+      pub fields: Vec<String>,
+      /// Optional expiration options (mutually exclusive)
+      #[serde(flatten)]
+      pub expiration: Option<HGetExExpiration>,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  #[serde(rename_all = "lowercase")]
+  pub enum HGetExExpiration {
+      /// Set expiration in seconds
+      Ex(i64),
+      /// Set expiration in milliseconds
+      Px(i64),
+      /// Set expiration at Unix timestamp (seconds)
+      Exat(i64),
+      /// Set expiration at Unix timestamp (milliseconds)
+      Pxat(i64),
+      /// Remove expiration
+      Persist,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct HSetExRequest {
+      /// Field-value pairs to set
+      pub fields: HashMap<String, String>,
+      /// Optional condition: FNX (set if none exist), FXX (set if all exist)
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub condition: Option<HSetExCondition>,
+      /// Optional expiration options
+      #[serde(flatten)]
+      pub expiration: Option<HSetExExpiration>,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  #[serde(rename_all = "UPPERCASE")]
+  pub enum HSetExCondition {
+      FNX,  // Only set if none of the fields exist
+      FXX,  // Only set if all fields exist
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  #[serde(rename_all = "lowercase")]
+  pub enum HSetExExpiration {
+      Ex(i64),
+      Px(i64),
+      Exat(i64),
+      Pxat(i64),
+      Keepttl,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct HGetDelRequest {
+      /// Fields to get and delete
+      pub fields: Vec<String>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct HGetDelResponse {
+      /// Deleted field values (nil for non-existent fields)
+      pub values: Vec<Option<String>>,
+  }
+  ```
+
+- [ ] **Task 5.13.4**: Add version gating for Redis 8.0+
+  - Update `RedisCapabilities` to detect Redis 8.0+
+  - Conditionally enable Redis 8.0 hash routes
+  - Return 501 Not Implemented for older Redis versions
+
+---
+
+### 5.14 LCS - Longest Common Subsequence (NEW - Medium Priority)
+
+> **Note**: The LCS command finds the longest common subsequence between two strings. Useful for text diff, DNA sequence comparison, and version comparison.
+
+- [ ] **Task 5.14.1**: Implement LCS repository method
+  ```rust
+  #[async_trait]
+  pub trait LcsRepository: Send + Sync {
+      /// Find longest common subsequence between two string keys
+      async fn lcs(
+          &self,
+          key1: &str,
+          key2: &str,
+          options: LcsOptions,
+      ) -> Result<LcsResult, CacheError>;
+  }
+
+  #[derive(Debug, Clone, Default)]
+  pub struct LcsOptions {
+      /// Return only the length
+      pub len: bool,
+      /// Return match positions
+      pub idx: bool,
+      /// Minimum match length for IDX mode
+      pub min_match_len: Option<u64>,
+      /// Include match lengths in IDX mode
+      pub with_match_len: bool,
+  }
+
+  #[derive(Debug, Clone, Serialize)]
+  pub enum LcsResult {
+      /// The LCS string
+      String(String),
+      /// The LCS length
+      Length(i64),
+      /// Match positions with optional lengths
+      Matches(LcsMatchResult),
+  }
+
+  #[derive(Debug, Clone, Serialize)]
+  pub struct LcsMatchResult {
+      pub matches: Vec<LcsMatch>,
+      pub len: i64,
+  }
+
+  #[derive(Debug, Clone, Serialize)]
+  pub struct LcsMatch {
+      pub key1_range: (i64, i64),
+      pub key2_range: (i64, i64),
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub match_len: Option<i64>,
+  }
+  ```
+
+- [ ] **Task 5.14.2**: Create LCS API route
+  ```
+  POST   /api/v1/strings/lcs   # LCS key1 key2 [LEN] [IDX] [MINMATCHLEN] [WITHMATCHLEN]
+  ```
+
+- [ ] **Task 5.14.3**: Create LCS request/response schemas
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct LcsRequest {
+      /// First key containing string
+      pub key1: String,
+      /// Second key containing string
+      pub key2: String,
+      /// Return only the length of LCS
+      #[serde(default)]
+      pub len: bool,
+      /// Return match positions
+      #[serde(default)]
+      pub idx: bool,
+      /// Minimum match length (only with idx)
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub min_match_len: Option<u64>,
+      /// Include match lengths (only with idx)
+      #[serde(default)]
+      pub with_match_len: bool,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  #[serde(untagged)]
+  pub enum LcsResponse {
+      String { lcs: String },
+      Length { length: i64 },
+      Matches { matches: Vec<LcsMatchSchema>, len: i64 },
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct LcsMatchSchema {
+      pub key1_start: i64,
+      pub key1_end: i64,
+      pub key2_start: i64,
+      pub key2_end: i64,
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub match_len: Option<i64>,
+  }
+  ```
+
+- [ ] **Task 5.14.4**: Add version gating for Redis 7.0+
+  - LCS command requires Redis 7.0+
+  - Return 501 Not Implemented for older versions
+
+---
+
+### 5.15 SORT / SORT_RO Operations (NEW - Low Priority)
+
+> **Note**: SORT allows sorting lists, sets, and sorted sets with optional external key lookups. SORT_RO is the read-only variant safe for replicas (Redis 7.0+).
+
+- [ ] **Task 5.15.1**: Implement SORT repository methods
+  ```rust
+  #[async_trait]
+  pub trait SortRepository: Send + Sync {
+      /// Sort elements of a list, set, or sorted set
+      async fn sort(&self, key: &str, options: SortOptions) -> Result<Vec<String>, CacheError>;
+      /// Sort and store result in destination key
+      async fn sort_store(&self, key: &str, destination: &str, options: SortOptions) -> Result<i64, CacheError>;
+      /// Read-only SORT (Redis 7.0+, safe for replicas)
+      async fn sort_ro(&self, key: &str, options: SortOptions) -> Result<Vec<String>, CacheError>;
+  }
+
+  #[derive(Debug, Clone, Default)]
+  pub struct SortOptions {
+      /// Sort by external key pattern
+      pub by: Option<String>,
+      /// Get external key values
+      pub get: Vec<String>,
+      /// Limit results (offset, count)
+      pub limit: Option<(i64, i64)>,
+      /// Sort order
+      pub order: SortOrder,
+      /// Sort alphabetically (for strings)
+      pub alpha: bool,
+  }
+
+  #[derive(Debug, Clone, Default)]
+  pub enum SortOrder {
+      #[default]
+      Asc,
+      Desc,
+  }
+  ```
+
+- [ ] **Task 5.15.2**: Implement SORT operations
+  | Command | Method | Priority | Redis Version |
+  |---------|--------|----------|---------------|
+  | SORT | `sort` | Medium | Always |
+  | SORT ... STORE | `sort_store` | Low | Always |
+  | SORT_RO | `sort_ro` | Medium | 7.0+ |
+
+- [ ] **Task 5.15.3**: Create SORT API routes
+  ```
+  POST   /api/v1/keys/{key}/sort           # SORT with options
+  POST   /api/v1/keys/{key}/sort/store     # SORT ... STORE destination
+  POST   /api/v1/keys/{key}/sort/readonly  # SORT_RO (Redis 7.0+)
+  ```
+
+- [ ] **Task 5.15.4**: Create SORT request/response schemas
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct SortRequest {
+      /// Sort by external key pattern (e.g., "weight_*")
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub by: Option<String>,
+      /// Get external key values (e.g., ["object_*->name", "#"])
+      #[serde(default)]
+      pub get: Vec<String>,
+      /// Limit offset
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub offset: Option<i64>,
+      /// Limit count
+      #[serde(skip_serializing_if = "Option::is_none")]
+      pub count: Option<i64>,
+      /// Sort order: ASC or DESC
+      #[serde(default)]
+      pub order: SortOrderSchema,
+      /// Sort alphabetically (for string values)
+      #[serde(default)]
+      pub alpha: bool,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+  #[serde(rename_all = "UPPERCASE")]
+  pub enum SortOrderSchema {
+      #[default]
+      Asc,
+      Desc,
+  }
+
+  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+  pub struct SortStoreRequest {
+      /// Destination key to store sorted result
+      pub destination: String,
+      /// Sort options
+      #[serde(flatten)]
+      pub options: SortRequest,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct SortResponse {
+      pub values: Vec<Option<String>>,
+  }
+
+  #[derive(Debug, Clone, Serialize, ToSchema)]
+  pub struct SortStoreResponse {
+      /// Number of elements stored
+      pub count: i64,
+  }
+  ```
+
+---
+
+### 5.16 Blocking Command Policy Enforcement (PARTIAL - Needs Completion)
+
+> **Note**: Task 2.4.1a defines the blocking command policy but was marked as pending. This task completes the implementation.
+
+- [ ] **Task 5.16.1**: Implement blocking timeout enforcement middleware
+  ```rust
+  /// Middleware to enforce maximum blocking timeout for all blocking endpoints
+  pub struct BlockingTimeoutEnforcer {
+      max_timeout: Duration,
+  }
+
+  impl BlockingTimeoutEnforcer {
+      pub fn new(max_timeout_seconds: u32) -> Self {
+          Self {
+              max_timeout: Duration::from_secs(max_timeout_seconds as u64),
+          }
+      }
+
+      /// Clamp timeout to maximum allowed value
+      pub fn enforce(&self, requested: Duration) -> Duration {
+          requested.min(self.max_timeout)
+      }
+  }
+  ```
+
+- [ ] **Task 5.16.2**: Standardize blocking endpoint response codes
+  | Status Code | Meaning |
+  |-------------|---------|
+  | 200 OK | Data returned successfully |
+  | 204 No Content | Timeout reached, no data available |
+  | 504 Gateway Timeout | Internal timeout (unexpected) |
+
+- [ ] **Task 5.16.3**: Add SSE endpoints for streaming blocking operations
+  ```
+  GET    /api/v1/lists/{key}/blpop/stream     # SSE stream for BLPOP
+  GET    /api/v1/lists/{key}/brpop/stream     # SSE stream for BRPOP
+  GET    /api/v1/lists/blmpop/stream          # SSE stream for BLMPOP
+  GET    /api/v1/sortedsets/bzpopmin/stream   # SSE stream for BZPOPMIN
+  GET    /api/v1/sortedsets/bzpopmax/stream   # SSE stream for BZPOPMAX
+  ```
+
+---
+
+## Phase 5 Summary: Complete Redis Feature Coverage Status
+
+### ✅ Implemented Features
+| Feature | Task | Status |
+|---------|------|--------|
+| Bitmap Operations | 5.1 | ✅ Complete |
+| Geospatial Operations | 5.2 | ✅ Complete |
+| Pub/Sub Operations | 5.3 | ✅ Complete |
+
+### 🔴 Critical Missing (NEW - Not Previously in tasks.md)
+| Feature | Task | Priority | Redis Version |
+|---------|------|----------|---------------|
+| Hash Field Expiration | 5.12 | Critical | 7.4+ |
+| Redis 8.0 Hash Commands | 5.13 | High | 8.0+ |
+| LCS Command | 5.14 | Medium | 7.0+ |
+| SORT / SORT_RO | 5.15 | Low | Always / 7.0+ |
+
+### 🟢 Recently Completed
+| Feature | Task | Status |
+|---------|------|--------|
+| Transaction Operations | 5.4 | ✅ Completed |
+
+### 🟡 Pending Implementation (Already in tasks.md)
+| Feature | Task | Priority |
+|---------|------|----------|
+| Lua Scripting | 5.5 | High |
+| Redis Functions | 5.6 | High |
+| RedisTimeSeries | 5.7 | High |
+| LMPOP/BLMPOP | 5.8 | High |
+| Command Introspection | 5.9 | Medium |
+| SORT_RO (merged into 5.15) | 5.10 | Medium |
+| ACL DRYRUN | 5.11 | Low |
+| Blocking Policy | 5.16 | Medium |
+
+### ❌ Not Planned
+| Feature | Reason |
+|---------|--------|
+| CLUSTER SHARDS | Cluster mode only |
+| CLUSTER LINKS | Cluster mode only |
+| LOLWUT | Easter egg command |
+| SSUBSCRIBE (WebSocket) | redis crate limitation |
+
+---
+
 ## Phase 6: Admin & Server Operations
 
 ### 6.1 Database Operations
@@ -2618,7 +2997,7 @@ LOG_FORMAT=json
 - Bitmaps: 7 commands
 - Geospatial: 8 commands
 - Pub/Sub: 11 commands (WebSocket-based subscriptions)
-- Transactions: Bundled model + CAS helpers
+- Transactions: 3 endpoints (execute with 60+ command types, CAS, HCAS) ✅
 - Lua Scripting: 9 commands
 - Redis Functions: 10 commands
 - RedisTimeSeries: 17 commands
