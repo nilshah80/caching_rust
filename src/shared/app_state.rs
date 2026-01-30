@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService, StreamService, StringService, TransactionService};
+use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, ScriptingService, SearchService, SetService, SortedSetService, StreamService, StringService, TransactionService};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -74,6 +74,9 @@ pub struct AppState {
 
     /// Transaction operations service
     pub transaction_service: Arc<TransactionService>,
+
+    /// Lua scripting operations service
+    pub scripting_service: Arc<ScriptingService>,
 }
 
 impl AppState {
@@ -110,8 +113,9 @@ impl AppState {
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(TransactionService::new(pool.clone()));
+        let scripting_service = Arc::new(ScriptingService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service, transaction_service)
+        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service, transaction_service, scripting_service)
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -137,6 +141,7 @@ impl AppState {
         geo_service: Arc<GeoService>,
         pubsub_service: Arc<PubSubService>,
         transaction_service: Arc<TransactionService>,
+        scripting_service: Arc<ScriptingService>,
     ) -> Self {
         Self {
             pool,
@@ -159,6 +164,7 @@ impl AppState {
             geo_service,
             pubsub_service,
             transaction_service,
+            scripting_service,
         }
     }
 }
@@ -194,6 +200,7 @@ mod tests {
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(TransactionService::new(pool.clone()));
+        let scripting_service = Arc::new(ScriptingService::new(pool.clone()));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -216,6 +223,7 @@ mod tests {
             geo_service.clone(),
             pubsub_service.clone(),
             transaction_service.clone(),
+            scripting_service.clone(),
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);

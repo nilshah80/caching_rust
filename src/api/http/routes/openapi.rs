@@ -159,6 +159,12 @@ use crate::api::http::schemas::transactions::{
     HCompareAndSetRequest, KeyValue, RedisCommand, ScoredMember as TransactionScoredMember,
     TransactionRequest, TransactionResponse,
 };
+use crate::api::http::schemas::scripting::{
+    EvalRequest, EvalResponse, EvalShaRequest, FlushMode, ScriptDebugMode, ScriptDebugRequest,
+    ScriptDebugResponse, ScriptExistsRequest, ScriptExistsResponse, ScriptExistsResult,
+    ScriptFlushRequest, ScriptFlushResponse, ScriptKillResponse, ScriptLoadRequest,
+    ScriptLoadResponse,
+};
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
     StreamEntry, StreamInfo, StreamReadResult, StringValue,
@@ -211,6 +217,7 @@ use crate::shared::app_state::AppState;
         (name = "Geo", description = "Redis geospatial operations (GEOADD, GEODIST, GEOHASH, GEOPOS, GEOSEARCH, GEOSEARCHSTORE, GEORADIUS, GEORADIUSBYMEMBER) - core Redis feature since 3.2"),
         (name = "Pub/Sub", description = "Redis Pub/Sub operations (PUBLISH, SUBSCRIBE, PSUBSCRIBE, PUBSUB CHANNELS/NUMSUB/NUMPAT). HTTP endpoints for publish and info commands, WebSocket endpoints for subscriptions - core Redis feature"),
         (name = "Transactions", description = "Redis transaction operations (MULTI/EXEC bundled in single request, compare-and-set operations using Lua scripts). Supports WATCH for optimistic locking - core Redis feature"),
+        (name = "Scripting", description = "Redis Lua scripting operations (EVAL, EVALSHA, SCRIPT LOAD/EXISTS/FLUSH/KILL/DEBUG). Execute custom Lua scripts with keys and arguments, manage script cache - core Redis feature"),
         (name = "Admin", description = "Administrative endpoints (pool stats, capabilities, server info, database ops, config, persistence, client management, monitoring, ACL)")
     ),
     paths(
@@ -486,6 +493,14 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::transactions::execute,
         crate::api::http::routes::transactions::compare_and_set,
         crate::api::http::routes::transactions::hcompare_and_set,
+        // Scripting endpoints (core Redis)
+        crate::api::http::routes::scripting::eval,
+        crate::api::http::routes::scripting::evalsha,
+        crate::api::http::routes::scripting::script_load,
+        crate::api::http::routes::scripting::script_exists,
+        crate::api::http::routes::scripting::script_flush,
+        crate::api::http::routes::scripting::script_kill,
+        crate::api::http::routes::scripting::script_debug,
         // Admin - Public endpoints
         crate::api::http::routes::admin::get_pool_stats,
         crate::api::http::routes::admin::get_capabilities,
@@ -1072,6 +1087,22 @@ use crate::shared::app_state::AppState;
             KeyValue,
             FieldValue,
             TransactionScoredMember,
+            // Scripting schemas (core Redis)
+            EvalRequest,
+            EvalShaRequest,
+            EvalResponse,
+            ScriptLoadRequest,
+            ScriptLoadResponse,
+            ScriptExistsRequest,
+            ScriptExistsResult,
+            ScriptExistsResponse,
+            ScriptFlushRequest,
+            FlushMode,
+            ScriptFlushResponse,
+            ScriptKillResponse,
+            ScriptDebugMode,
+            ScriptDebugRequest,
+            ScriptDebugResponse,
         )
     ),
     modifiers(&SecurityAddon)

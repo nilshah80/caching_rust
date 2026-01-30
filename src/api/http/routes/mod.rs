@@ -20,6 +20,7 @@ mod sorted_sets;
 mod streams;
 mod strings;
 mod transactions;
+mod scripting;
 
 pub use admin::admin_routes;
 pub use bitmaps::bitmap_routes;
@@ -39,6 +40,7 @@ pub use pubsub::pubsub_routes;
 pub use streams::{stream_admin_routes, stream_routes};
 pub use strings::string_routes;
 pub use transactions::transaction_routes;
+pub use scripting::scripting_routes;
 
 use axum::Router;
 use crate::shared::app_state::AppState;
@@ -105,6 +107,9 @@ pub fn build_router(state: AppState) -> Router {
 
     // Transactions are always available (core Redis)
     router = router.merge(transaction_routes());
+
+    // Scripting is always available (core Redis)
+    router = router.merge(scripting_routes());
 
     // TODO: Add more routes as they are implemented
     // Conditionally add routes based on capabilities:

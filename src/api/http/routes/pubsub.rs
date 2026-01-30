@@ -1199,6 +1199,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ws_subscribe_close_breaks_loop() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url.clone();
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/subscribe?channels=news");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        socket.send(WsMessage::Close(None)).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next()).await.ok();
+
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
+    async fn test_ws_psubscribe_close_breaks_loop() {
+        let (_container, redis_url) = start_redis().await;
+        let repo = Arc::new(StubPubSubRepository {
+            publish_result: PublishResult {
+                channel: "news".to_string(),
+                receivers: 0,
+            },
+            numpat_result: 0,
+            channels_result: Vec::new(),
+            numsub_result: Vec::new(),
+        });
+        let mut config = Settings::default();
+        config.redis.url = redis_url.clone();
+        let state = build_state_with_config(repo, config);
+        let (addr, shutdown_tx) = spawn_pubsub_server(state).await;
+
+        let ws_url = format!("ws://{addr}/api/v1/pubsub/psubscribe?patterns=user:*");
+        let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
+
+        let _ = timeout(Duration::from_secs(3), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        socket.send(WsMessage::Close(None)).await.unwrap();
+        let _ = timeout(Duration::from_secs(3), socket.next()).await.ok();
+
+        let _ = shutdown_tx.send(());
+    }
+
+    #[tokio::test]
     async fn test_ws_subscribe_rejects_empty_channels() {
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {

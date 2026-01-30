@@ -1764,67 +1764,60 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 - Integration tested via Docker with Redis 8.0
 - All validation paths tested
 
-### 5.5 Lua Scripting Operations (NEW)
-- [ ] **Task 5.5.1**: Implement Scripting repository trait
-- [ ] **Task 5.5.2**: Implement Scripting operations
-  | Command | Method | Priority |
-  |---------|--------|----------|
-  | EVAL | `eval` | High |
-  | EVALSHA | `evalsha` | High |
-  | EVALSHA_RO | `evalsha_ro` | Medium |
-  | EVAL_RO | `eval_ro` | Medium |
-  | SCRIPT LOAD | `script_load` | High |
-  | SCRIPT EXISTS | `script_exists` | High |
-  | SCRIPT FLUSH | `script_flush` | Medium |
-  | SCRIPT KILL | `script_kill` | Medium |
-  | SCRIPT DEBUG | `script_debug` | Low |
+### 5.5 Lua Scripting Operations ✅ COMPLETED
+- [x] **Task 5.5.1**: Implement Scripting service (ScriptingService)
+- [x] **Task 5.5.2**: Implement Scripting operations
+  | Command | Method | Status |
+  |---------|--------|--------|
+  | EVAL | `eval` | ✅ |
+  | EVALSHA | `evalsha` | ✅ |
+  | EVAL_RO | `eval` (readonly flag) | ✅ |
+  | EVALSHA_RO | `evalsha` (readonly flag) | ✅ |
+  | SCRIPT LOAD | `script_load` | ✅ |
+  | SCRIPT EXISTS | `script_exists` | ✅ |
+  | SCRIPT FLUSH | `script_flush` | ✅ |
+  | SCRIPT KILL | `script_kill` | ✅ |
+  | SCRIPT DEBUG | `script_debug` | ✅ |
 
-- [ ] **Task 5.5.3**: Create Scripting API routes
-  - `POST /api/v1/scripts/eval`
-  - `POST /api/v1/scripts/evalsha`
-  - `POST /api/v1/scripts/load`
-  - `POST /api/v1/scripts/exists`
-  - `POST /api/v1/scripts/flush`
-  - `POST /api/v1/scripts/kill`
+- [x] **Task 5.5.3**: Create Scripting API routes
+  - `POST /api/v1/scripts/eval` ✅
+  - `POST /api/v1/scripts/evalsha` ✅
+  - `POST /api/v1/scripts/load` ✅
+  - `POST /api/v1/scripts/exists` ✅
+  - `POST /api/v1/scripts/flush` ✅
+  - `POST /api/v1/scripts/kill` ✅
+  - `POST /api/v1/scripts/debug` ✅
 
-- [ ] **Task 5.5.4**: Create Scripting request/response schemas
-  ```rust
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  pub struct EvalRequest {
-      pub script: String,
-      pub keys: Vec<String>,
-      #[serde(default)]
-      pub args: Vec<serde_json::Value>,
-      #[serde(default)]
-      pub readonly: bool,
-  }
+- [x] **Task 5.5.4**: Create Scripting request/response schemas
+  - `EvalRequest` - script, keys, args, readonly flag
+  - `EvalShaRequest` - sha, keys, args, readonly flag
+  - `ScriptLoadRequest` - script
+  - `ScriptExistsRequest` - shas array
+  - `ScriptFlushRequest` - mode (ASYNC/SYNC)
+  - `ScriptDebugRequest` - mode (YES/SYNC/NO)
+  - `EvalResponse` - result (JSON value)
+  - `ScriptLoadResponse` - sha
+  - `ScriptExistsResponse` - results array
+  - `ScriptFlushResponse`, `ScriptKillResponse`, `ScriptDebugResponse`
 
-  #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-  pub struct EvalShaRequest {
-      pub sha: String,
-      pub keys: Vec<String>,
-      #[serde(default)]
-      pub args: Vec<serde_json::Value>,
-      #[serde(default)]
-      pub readonly: bool,
-  }
+**Implementation Files:**
+- `src/api/http/schemas/scripting.rs` - Request/response schemas
+- `src/application/services/scripting_service.rs` - Business logic
+- `src/api/http/routes/scripting.rs` - HTTP routes with OpenAPI docs
 
-  #[derive(Debug, Clone, Serialize, ToSchema)]
-  pub struct ScriptLoadResponse {
-      pub sha: String,
-  }
+**Features:**
+- Full Lua script execution with EVAL and EVALSHA
+- Read-only script execution support (EVAL_RO, EVALSHA_RO)
+- Script caching with SHA-based retrieval
+- Script cache management (EXISTS, FLUSH, KILL, DEBUG)
+- JSON to Redis argument conversion
+- Redis value to JSON response conversion
+- Input validation (script size, SHA format, keys/args limits)
 
-  #[derive(Debug, Clone, Serialize, ToSchema)]
-  pub struct ScriptExistsResponse {
-      pub results: Vec<ScriptExistsResult>,
-  }
-
-  #[derive(Debug, Clone, Serialize, ToSchema)]
-  pub struct ScriptExistsResult {
-      pub sha: String,
-      pub exists: bool,
-  }
-  ```
+**Test Coverage:**
+- 654 unit tests passing
+- Integration tested via Docker with Redis 8.0
+- All validation paths tested
 
 ### 5.6 Redis Functions Operations (NEW)
 - [ ] **Task 5.6.1**: Implement Functions repository trait (gated by `capabilities.features.functions`)

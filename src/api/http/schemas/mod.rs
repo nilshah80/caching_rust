@@ -18,6 +18,7 @@ pub mod sorted_sets;
 pub mod streams;
 pub mod strings;
 pub mod transactions;
+pub mod scripting;
 
 pub use bitmaps::*;
 pub use bloom::*;
@@ -35,3 +36,4 @@ pub use pubsub::*;
 pub use streams::*;
 pub use strings::*;
 pub use transactions::*;
+pub use scripting::*;

@@ -132,6 +132,37 @@ impl TransactionService {
         Self { pool }
     }
 
+    /// Map Redis errors to appropriate CacheError types for script-based operations.
+    /// Script execution errors (Lua errors) -> ScriptError (400)
+    /// Connection/transport errors -> appropriate 5xx errors
+    fn map_script_error(e: redis::RedisError) -> CacheError {
+        use redis::ErrorKind;
+        match e.kind() {
+            // Script-specific errors -> 400
+            ErrorKind::NoScriptError => {
+                CacheError::ScriptError("Script not found in cache".to_string())
+            }
+            // Extension errors include Lua runtime errors
+            ErrorKind::ExtensionError => {
+                CacheError::ScriptError(format!("Script error: {}", e))
+            }
+            // Response errors from Redis (including Lua errors)
+            ErrorKind::ResponseError => {
+                let msg = e.to_string();
+                if msg.contains("NOSCRIPT") || msg.contains("ERR Error") || msg.contains("@user_script") {
+                    CacheError::ScriptError(format!("Script error: {}", e))
+                } else {
+                    CacheError::RedisError(e)
+                }
+            }
+            // Connection/transport errors -> 5xx
+            ErrorKind::IoError => CacheError::ConnectionFailed(e.to_string()),
+            ErrorKind::ClientError => CacheError::ConnectionFailed(e.to_string()),
+            // Other errors use default RedisError mapping (500)
+            _ => CacheError::RedisError(e),
+        }
+    }
+
     /// Execute multiple commands atomically in a single request.
     ///
     /// This method:
@@ -279,19 +310,7 @@ impl TransactionService {
         // Execute atomically
         let results: Vec<redis::Value> = match pipe.query_async(&mut *conn).await {
             Ok(r) => r,
-            Err(e) => {
-                // Check if this is a WATCH abort (nil response means EXEC returned nil)
-                let err_str = e.to_string();
-                if err_str.contains("nil") || err_str.contains("EXECABORT") {
-                    // Clear WATCH state before returning connection to pool
-                    let _ = redis::cmd("UNWATCH")
-                        .query_async::<()>(&mut *conn)
-                        .await;
-                    return Err(CacheError::TransactionAborted);
-                }
-                // For other Redis errors, propagate as RedisError (maps to 500)
-                return Err(CacheError::RedisError(e));
-            }
+            Err(e) => return Self::handle_exec_error(&mut conn, e).await,
         };
 
         // Check for WATCH abort: when a watched key is modified, EXEC returns nil
@@ -309,6 +328,24 @@ impl TransactionService {
             success: parsed_results.iter().all(|r| r.success),
             results: parsed_results,
         })
+    }
+
+    async fn handle_exec_error(
+        conn: &mut deadpool_redis::Connection,
+        err: redis::RedisError,
+    ) -> Result<TransactionResponse, CacheError> {
+        // Check if this is a WATCH abort (nil response means EXEC returned nil)
+        let err_str = err.to_string();
+        if err_str.contains("nil") || err_str.contains("EXECABORT") {
+            // Clear WATCH state before returning connection to pool
+            let _ = redis::cmd("UNWATCH")
+                .query_async::<()>(&mut *conn)
+                .await;
+            return Err(CacheError::TransactionAborted);
+        }
+
+        // For other Redis errors, propagate as RedisError (maps to 500)
+        Err(CacheError::RedisError(err))
     }
 
     /// Compare-and-set operation for string values using Lua script.
@@ -345,23 +382,9 @@ impl TransactionService {
             .arg(&request.new_value)
             .invoke_async(&mut *conn)
             .await
-            .map_err(|e| CacheError::ScriptError(e.to_string()))?;
+            .map_err(Self::map_script_error)?;
 
-        // Parse result
-        let swapped = matches!(result.first(), Some(redis::Value::Int(1)));
-
-        let current_value = match result.get(1) {
-            Some(redis::Value::BulkString(bytes)) => {
-                Some(String::from_utf8_lossy(bytes).to_string())
-            }
-            Some(redis::Value::SimpleString(s)) => Some(s.clone()),
-            _ => None,
-        };
-
-        Ok(CompareAndSetResponse {
-            swapped,
-            current_value,
-        })
+        Ok(Self::parse_compare_and_set_result(&result))
     }
 
     /// Compare-and-set operation for hash field values using Lua script.
@@ -401,9 +424,12 @@ impl TransactionService {
             .arg(&request.new_value)
             .invoke_async(&mut *conn)
             .await
-            .map_err(|e| CacheError::ScriptError(e.to_string()))?;
+            .map_err(Self::map_script_error)?;
 
-        // Parse result
+        Ok(Self::parse_compare_and_set_result(&result))
+    }
+
+    fn parse_compare_and_set_result(result: &[redis::Value]) -> CompareAndSetResponse {
         let swapped = matches!(result.first(), Some(redis::Value::Int(1)));
 
         let current_value = match result.get(1) {
@@ -414,10 +440,10 @@ impl TransactionService {
             _ => None,
         };
 
-        Ok(CompareAndSetResponse {
+        CompareAndSetResponse {
             swapped,
             current_value,
-        })
+        }
     }
 
     /// Add a RedisCommand to the pipeline
@@ -908,11 +934,50 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_results_array_and_unknown() {
+        let commands = vec![
+            RedisCommand::Get { key: "a".to_string() },
+            RedisCommand::Get { key: "b".to_string() },
+        ];
+
+        let results = vec![
+            redis::Value::Array(vec![
+                redis::Value::Int(1),
+                redis::Value::BulkString(b"two".to_vec()),
+            ]),
+            redis::Value::Map(Vec::new()),
+        ];
+
+        let parsed = TransactionService::parse_results(&commands, results);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].value, Some(serde_json::json!([1, "two"])));
+        assert!(parsed[1].value.as_ref().unwrap().is_null());
+    }
+
+    #[test]
+    fn test_parse_array_value_additional_types() {
+        let arr = vec![
+            redis::Value::SimpleString("ok".to_string()),
+            redis::Value::Double(1.5),
+            redis::Value::Boolean(true),
+            redis::Value::Array(vec![redis::Value::Int(3)]),
+            redis::Value::Okay,
+        ];
+
+        let parsed = TransactionService::parse_array_value(&arr);
+        assert_eq!(
+            parsed,
+            serde_json::json!(["ok", 1.5, true, [3], "OK"])
+        );
+    }
+
+    #[test]
     fn test_add_command_to_pipe_all_variants() {
         let mut pipe = redis::pipe();
         let commands = vec![
             RedisCommand::Get { key: "k".to_string() },
             RedisCommand::Set { key: "k".to_string(), value: "v".to_string(), ttl_seconds: Some(5) },
+            RedisCommand::Set { key: "k2".to_string(), value: "v2".to_string(), ttl_seconds: None },
             RedisCommand::Incr { key: "k".to_string() },
             RedisCommand::IncrBy { key: "k".to_string(), delta: 2 },
             RedisCommand::Decr { key: "k".to_string() },
@@ -1004,6 +1069,54 @@ mod tests {
         assert!(matches!(err, CacheError::InvalidInput(_)));
         let err = TransactionService::add_command_to_pipe(&mut pipe, &rpop).unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_parse_compare_and_set_result_simple_string() {
+        let result = vec![
+            redis::Value::Int(1),
+            redis::Value::SimpleString("OK".to_string()),
+        ];
+        let parsed = TransactionService::parse_compare_and_set_result(&result);
+        assert!(parsed.swapped);
+        assert_eq!(parsed.current_value.as_deref(), Some("OK"));
+    }
+
+    #[test]
+    fn test_map_script_error_variants() {
+        let noscript = redis::RedisError::from((redis::ErrorKind::NoScriptError, "NOSCRIPT"));
+        assert!(matches!(
+            TransactionService::map_script_error(noscript),
+            CacheError::ScriptError(_)
+        ));
+
+        let extension = redis::RedisError::from((redis::ErrorKind::ExtensionError, "ERR"));
+        assert!(matches!(
+            TransactionService::map_script_error(extension),
+            CacheError::ScriptError(_)
+        ));
+
+        let response = redis::RedisError::from((
+            redis::ErrorKind::ResponseError,
+            "ERR",
+            "NOSCRIPT missing".to_string(),
+        ));
+        assert!(matches!(
+            TransactionService::map_script_error(response),
+            CacheError::ScriptError(_)
+        ));
+
+        let other = redis::RedisError::from((redis::ErrorKind::ResponseError, "WRONGTYPE"));
+        assert!(matches!(
+            TransactionService::map_script_error(other),
+            CacheError::RedisError(_)
+        ));
+
+        let io_err = redis::RedisError::from((redis::ErrorKind::IoError, "io"));
+        assert!(matches!(
+            TransactionService::map_script_error(io_err),
+            CacheError::ConnectionFailed(_)
+        ));
     }
 
     #[test]
@@ -1134,6 +1247,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_unwatch_on_add_command_error() {
+        let (_container, service, _client) = service_with_redis().await;
+        let request = TransactionRequest {
+            watch_keys: Some(vec!["watched".to_string()]),
+            commands: vec![RedisCommand::LPop { key: "list".to_string(), count: Some(0) }],
+        };
+        let result = service.execute(request).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
     async fn test_execute_watch_abort() {
         let (_container, service, client) = service_with_redis().await;
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -1169,6 +1293,18 @@ mod tests {
 
         let result = handle.await.unwrap();
         clear_watch_hooks();
+        assert!(matches!(result, Err(CacheError::TransactionAborted)));
+    }
+
+    #[tokio::test]
+    async fn test_handle_exec_error_execabort() {
+        let (_container, service, _client) = service_with_redis().await;
+        let mut conn = service.pool.get().await.unwrap();
+        let err = redis::RedisError::from((
+            redis::ErrorKind::ResponseError,
+            "EXECABORT Transaction discarded because of previous errors.",
+        ));
+        let result = TransactionService::handle_exec_error(&mut conn, err).await;
         assert!(matches!(result, Err(CacheError::TransactionAborted)));
     }
 
@@ -1233,6 +1369,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_compare_and_set_empty_key() {
+        let (_container, service, _client) = service_with_redis().await;
+        let request = CompareAndSetRequest {
+            key: "".to_string(),
+            expected_value: "1".to_string(),
+            new_value: "2".to_string(),
+        };
+        let result = service.compare_and_set(request).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
     async fn test_hcompare_and_set_variants() {
         let (_container, service, client) = service_with_redis().await;
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -1273,5 +1421,31 @@ mod tests {
         let result = service.hcompare_and_set(request).await.unwrap();
         assert!(!result.swapped);
         assert!(result.current_value.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_hcompare_and_set_empty_key() {
+        let (_container, service, _client) = service_with_redis().await;
+        let request = HCompareAndSetRequest {
+            key: "".to_string(),
+            field: "f".to_string(),
+            expected_value: "1".to_string(),
+            new_value: "2".to_string(),
+        };
+        let result = service.hcompare_and_set(request).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_hcompare_and_set_empty_field() {
+        let (_container, service, _client) = service_with_redis().await;
+        let request = HCompareAndSetRequest {
+            key: "k".to_string(),
+            field: "".to_string(),
+            expected_value: "1".to_string(),
+            new_value: "2".to_string(),
+        };
+        let result = service.hcompare_and_set(request).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 }

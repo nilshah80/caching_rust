@@ -1359,6 +1359,7 @@ mod tests {
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(crate::application::services::TransactionService::new(pool.clone()));
+        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(pool.clone()));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
 
         AppState::new_with_services(
@@ -1382,6 +1383,7 @@ mod tests {
             geo_service,
             pubsub_service,
             transaction_service,
+            scripting_service,
         )
     }
 
@@ -2107,6 +2109,7 @@ mod tests {
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(crate::application::services::TransactionService::new(pool.clone()));
+        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(pool.clone()));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(max_sse));
 
         AppState::new_with_services(
@@ -2130,6 +2133,7 @@ mod tests {
             geo_service,
             pubsub_service,
             transaction_service,
+            scripting_service,
         )
     }
 
