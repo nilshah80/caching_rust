@@ -245,7 +245,6 @@ impl InstrumentedPool {
   pub struct PubSubConfig {
       pub max_subscriptions: usize,     // default: 100
       pub connection_timeout_ms: u64,   // default: 30000
-      pub idle_timeout_ms: u64,         // default: 300000
   }
 
   #[derive(Debug, Clone, Deserialize)]
@@ -455,14 +454,13 @@ impl InstrumentedPool {
   - **Status**: Implemented - uses rediss:// scheme with rustls, supports #insecure flag for skip-verify
 
 ### 2.2 Pub/Sub Connection Manager (Separate from Pool)
-- [ ] **Task 2.2.1**: Implement dedicated Pub/Sub connection manager
+- [x] **Task 2.2.1**: Implement dedicated Pub/Sub connection manager
   ```rust
   pub struct PubSubManager {
       redis_url: String,
       tls_config: Option<TlsConfig>,
       max_subscriptions: usize,
       connection_timeout: Duration,
-      idle_timeout: Duration,
       active_subscriptions: AtomicUsize,
       metrics: Arc<PubSubMetrics>,
   }
@@ -536,6 +534,10 @@ impl InstrumentedPool {
       }
   }
   ```
+  - Uses dedicated Redis Pub/Sub connections, separate from the command pool
+  - Enforces `max_subscriptions` and connection timeout on subscription creation
+  - Subscription lifecycle cleanup happens on WebSocket disconnect / connection drop
+  - **Acceptance**: Dedicated subscription connections are created outside the pool and bounded by limits/timeouts
   - **Acceptance**: Pub/Sub uses dedicated connections with hard limits
 
 ### 2.3 Redis Capability Detection
@@ -667,7 +669,7 @@ impl InstrumentedPool {
   - Add request timeout middleware
   - **Acceptance**: Server starts and responds to requests
 
-- [ ] **Task 2.4.1a**: Define blocking command request policy (pending)
+- [x] **Task 2.4.1a**: Define blocking command request policy
   - Require explicit timeout parameter for blocking operations (server-enforced max 30s)
   - Return HTTP 204 when timeout expires with no data
   - Provide SSE endpoints for streaming use cases (e.g., XREAD)

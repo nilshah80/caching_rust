@@ -6,6 +6,7 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use redis::aio::PubSub;
 use redis::{Client, RedisResult};
@@ -43,15 +44,12 @@ impl PubSubStats {
 /// separate from the command pool. This prevents subscription operations
 /// from blocking or exhausting the main connection pool.
 ///
-/// **Note on timeouts**: The `connection_timeout_ms` and `idle_timeout_ms` settings
-/// from [`PubSubConfig`] are stored but not currently applied to connections.
-/// Redis Pub/Sub connections are long-lived by design and the redis crate's
-/// `get_async_pubsub()` doesn't support connection-level timeouts. Idle cleanup
-/// is handled by WebSocket disconnection which drops the [`PubSubConnection`].
+/// `connection_timeout_ms` is enforced when creating new subscription connections.
+/// Idle cleanup is handled by WebSocket disconnection which drops the [`PubSubConnection`].
 pub struct PubSubManager {
     /// Redis client for creating new connections
     client: Client,
-    /// Configuration (max_subscriptions is actively enforced; timeouts are advisory)
+    /// Configuration
     config: PubSubConfig,
     /// Connection statistics
     stats: Arc<PubSubStats>,
@@ -111,8 +109,18 @@ impl PubSubManager {
             return Err(CacheError::SubscriptionLimitReached);
         }
 
-        // Create a new dedicated async pubsub connection
-        let pubsub = self.client.get_async_pubsub().await
+        // Create a new dedicated async pubsub connection with connection timeout
+        let connect_timeout = Duration::from_millis(self.config.connection_timeout_ms);
+        let pubsub = tokio::time::timeout(connect_timeout, self.client.get_async_pubsub())
+            .await
+            .map_err(|_| {
+                self.stats.active_subscriptions.fetch_sub(1, Ordering::SeqCst);
+                self.stats.errors.fetch_add(1, Ordering::Relaxed);
+                CacheError::ConnectionFailed(format!(
+                    "Pub/Sub connection timed out after {}ms",
+                    self.config.connection_timeout_ms
+                ))
+            })?
             .map_err(|e| {
                 self.stats.active_subscriptions.fetch_sub(1, Ordering::SeqCst);
                 self.stats.errors.fetch_add(1, Ordering::Relaxed);

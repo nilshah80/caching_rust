@@ -12,9 +12,13 @@ use crate::domain::repositories::{
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisSortedSetRepository;
 
+/// Maximum allowed timeout for blocking operations (30 seconds)
+const MAX_BLOCKING_TIMEOUT_SECONDS: f64 = 30.0;
+
 /// Service for sorted set operations
 pub struct SortedSetService {
     repository: Arc<dyn SortedSetRepository>,
+    max_blocking_timeout: f64,
 }
 
 impl SortedSetService {
@@ -25,7 +29,15 @@ impl SortedSetService {
 
     /// Create a new SortedSetService with custom repository (useful for testing)
     pub fn new_with_repository(repository: Arc<dyn SortedSetRepository>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            max_blocking_timeout: MAX_BLOCKING_TIMEOUT_SECONDS,
+        }
+    }
+
+    /// Enforce timeout bounds for blocking operations (min 1s, max 30s)
+    fn enforce_timeout(&self, requested: f64) -> f64 {
+        requested.clamp(1.0, self.max_blocking_timeout)
     }
 
     // ========== Basic operations ==========
@@ -241,18 +253,14 @@ impl SortedSetService {
     pub async fn bzpopmin(
         &self,
         keys: Vec<String>,
-        timeout: f64,
+        timeout_seconds: u32,
     ) -> Result<Option<ZPopResult>, CacheError> {
         if keys.is_empty() {
             return Err(CacheError::InvalidInput(
                 "Keys cannot be empty".to_string(),
             ));
         }
-        if timeout < 0.0 {
-            return Err(CacheError::InvalidInput(
-                "Timeout cannot be negative".to_string(),
-            ));
-        }
+        let timeout = self.enforce_timeout(timeout_seconds as f64);
         self.repository.bzpopmin(&keys, timeout).await
     }
 
@@ -260,18 +268,14 @@ impl SortedSetService {
     pub async fn bzpopmax(
         &self,
         keys: Vec<String>,
-        timeout: f64,
+        timeout_seconds: u32,
     ) -> Result<Option<ZPopResult>, CacheError> {
         if keys.is_empty() {
             return Err(CacheError::InvalidInput(
                 "Keys cannot be empty".to_string(),
             ));
         }
-        if timeout < 0.0 {
-            return Err(CacheError::InvalidInput(
-                "Timeout cannot be negative".to_string(),
-            ));
-        }
+        let timeout = self.enforce_timeout(timeout_seconds as f64);
         self.repository.bzpopmax(&keys, timeout).await
     }
 
@@ -295,7 +299,7 @@ impl SortedSetService {
         &self,
         keys: Vec<String>,
         direction: ZPopDirection,
-        timeout: f64,
+        timeout_seconds: u32,
         count: Option<i64>,
     ) -> Result<Option<ZPopResult>, CacheError> {
         if keys.is_empty() {
@@ -303,11 +307,7 @@ impl SortedSetService {
                 "Keys cannot be empty".to_string(),
             ));
         }
-        if timeout < 0.0 {
-            return Err(CacheError::InvalidInput(
-                "Timeout cannot be negative".to_string(),
-            ));
-        }
+        let timeout = self.enforce_timeout(timeout_seconds as f64);
         self.repository.bzmpop(&keys, direction, timeout, count).await
     }
 
@@ -547,26 +547,13 @@ mod tests {
         let service = SortedSetService::new_with_repository(repo);
 
         // Empty keys
-        let err = service.bzpopmin(Vec::new(), 1.0).await.unwrap_err();
+        let err = service.bzpopmin(Vec::new(), 1).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
-        let err = service.bzpopmax(Vec::new(), 1.0).await.unwrap_err();
+        let err = service.bzpopmax(Vec::new(), 1).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
-        let err = service.bzmpop(Vec::new(), ZPopDirection::Min, 1.0, None).await.unwrap_err();
-        assert!(matches!(err, CacheError::InvalidInput(_)));
-
-        // Negative timeout
-        let err = service.bzpopmin(vec!["key".to_string()], -1.0).await.unwrap_err();
-        assert!(matches!(err, CacheError::InvalidInput(_)));
-
-        let err = service.bzpopmax(vec!["key".to_string()], -1.0).await.unwrap_err();
-        assert!(matches!(err, CacheError::InvalidInput(_)));
-
-        let err = service
-            .bzmpop(vec!["key".to_string()], ZPopDirection::Min, -1.0, None)
-            .await
-            .unwrap_err();
+        let err = service.bzmpop(Vec::new(), ZPopDirection::Min, 1, None).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 

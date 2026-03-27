@@ -4,9 +4,13 @@
 
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
     routing::{delete, get, post},
     Json, Router,
 };
+
+use validator::Validate;
 
 use crate::api::http::schemas::sorted_sets::{
     LexRangeDto, ScoreRangeDto, ScoredMemberDto, ZAddIncrRequest, ZAddIncrResponse,
@@ -674,59 +678,71 @@ pub async fn zpopmax(
 }
 
 /// BZPOPMIN - Blocking pop of member with lowest score
+///
+/// Returns 204 No Content if timeout is reached.
 #[utoipa::path(
     post,
     path = "/api/v1/sorted-sets/bzpopmin",
     tag = "Sorted Sets",
     request_body = ZBPopRequest,
     responses(
-        (status = 200, description = "Popped member", body = ZBPopResponse)
+        (status = 200, description = "Popped member", body = ZBPopResponse),
+        (status = 204, description = "Timeout reached, no data available"),
+        (status = 400, description = "Invalid request")
     )
 )]
 pub async fn bzpopmin(
     State(state): State<AppState>,
     Json(request): Json<ZBPopRequest>,
-) -> Result<Json<ApiResponse<ZBPopResponse>>, CacheError> {
+) -> Result<impl IntoResponse, CacheError> {
+    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .sorted_set_service
-        .bzpopmin(request.keys, request.timeout)
+        .bzpopmin(request.keys, request.timeout_seconds)
         .await?;
-    let (key, members) = match result {
-        Some(r) => (
-            Some(r.key),
-            r.members.into_iter().map(convert_scored_member).collect(),
-        ),
-        None => (None, Vec::new()),
-    };
-    Ok(Json(ApiResponse::success(ZBPopResponse { key, members })))
+
+    match result {
+        Some(r) => Ok(Json(ApiResponse::success(ZBPopResponse {
+            key: Some(r.key),
+            members: r.members.into_iter().map(convert_scored_member).collect(),
+        }))
+        .into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
 }
 
 /// BZPOPMAX - Blocking pop of member with highest score
+///
+/// Returns 204 No Content if timeout is reached.
 #[utoipa::path(
     post,
     path = "/api/v1/sorted-sets/bzpopmax",
     tag = "Sorted Sets",
     request_body = ZBPopRequest,
     responses(
-        (status = 200, description = "Popped member", body = ZBPopResponse)
+        (status = 200, description = "Popped member", body = ZBPopResponse),
+        (status = 204, description = "Timeout reached, no data available"),
+        (status = 400, description = "Invalid request")
     )
 )]
 pub async fn bzpopmax(
     State(state): State<AppState>,
     Json(request): Json<ZBPopRequest>,
-) -> Result<Json<ApiResponse<ZBPopResponse>>, CacheError> {
+) -> Result<impl IntoResponse, CacheError> {
+    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .sorted_set_service
-        .bzpopmax(request.keys, request.timeout)
+        .bzpopmax(request.keys, request.timeout_seconds)
         .await?;
-    let (key, members) = match result {
-        Some(r) => (
-            Some(r.key),
-            r.members.into_iter().map(convert_scored_member).collect(),
-        ),
-        None => (None, Vec::new()),
-    };
-    Ok(Json(ApiResponse::success(ZBPopResponse { key, members })))
+
+    match result {
+        Some(r) => Ok(Json(ApiResponse::success(ZBPopResponse {
+            key: Some(r.key),
+            members: r.members.into_iter().map(convert_scored_member).collect(),
+        }))
+        .into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
 }
 
 /// ZMPOP - Pop members from multiple keys
@@ -764,19 +780,24 @@ pub async fn zmpop(
 }
 
 /// BZMPOP - Blocking pop from multiple keys
+///
+/// Returns 204 No Content if timeout is reached.
 #[utoipa::path(
     post,
     path = "/api/v1/sorted-sets/bzmpop",
     tag = "Sorted Sets",
     request_body = ZBMPopRequest,
     responses(
-        (status = 200, description = "Popped members", body = ZMPopResponse)
+        (status = 200, description = "Popped members", body = ZMPopResponse),
+        (status = 204, description = "Timeout reached, no data available"),
+        (status = 400, description = "Invalid request")
     )
 )]
 pub async fn bzmpop(
     State(state): State<AppState>,
     Json(request): Json<ZBMPopRequest>,
-) -> Result<Json<ApiResponse<ZMPopResponse>>, CacheError> {
+) -> Result<impl IntoResponse, CacheError> {
+    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let direction = match request.direction.to_lowercase().as_str() {
         "min" => ZPopDirection::Min,
         "max" => ZPopDirection::Max,
@@ -786,15 +807,16 @@ pub async fn bzmpop(
             ))
         }
     };
-    let result = state.sorted_set_service.bzmpop(request.keys, direction, request.timeout, request.count).await?;
-    let (key, members) = match result {
-        Some(r) => (
-            Some(r.key),
-            r.members.into_iter().map(convert_scored_member).collect(),
-        ),
-        None => (None, Vec::new()),
-    };
-    Ok(Json(ApiResponse::success(ZMPopResponse { key, members })))
+    let result = state.sorted_set_service.bzmpop(request.keys, direction, request.timeout_seconds, request.count).await?;
+
+    match result {
+        Some(r) => Ok(Json(ApiResponse::success(ZMPopResponse {
+            key: Some(r.key),
+            members: r.members.into_iter().map(convert_scored_member).collect(),
+        }))
+        .into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
 }
 
 // ========== Random access ==========
@@ -1397,27 +1419,29 @@ mod tests {
         .unwrap();
         assert_eq!(popped.0.data.expect("data").members.len(), 1);
 
-        let blocked = bzpopmin(
+        let response = bzpopmin(
             state.clone(),
             Json(ZBPopRequest {
                 keys: vec!["popset".to_string()],
-                timeout: 1.0,
+                timeout_seconds: 1,
             }),
         )
         .await
-        .unwrap();
-        assert_eq!(blocked.0.data.expect("data").key, Some("popset".to_string()));
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
 
-        let blocked = bzpopmin(
+        let response = bzpopmin(
             state.clone(),
             Json(ZBPopRequest {
                 keys: vec!["missing".to_string()],
-                timeout: 1.0,
+                timeout_seconds: 1,
             }),
         )
         .await
-        .unwrap();
-        assert!(blocked.0.data.expect("data").key.is_none());
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         let _ = zadd(
             state.clone(),
@@ -1430,29 +1454,29 @@ mod tests {
         .await
         .unwrap();
 
-        let blocked = bzpopmax(
+        let response = bzpopmax(
             state.clone(),
             Json(ZBPopRequest {
                 keys: vec!["blockset".to_string()],
-                timeout: 1.0,
+                timeout_seconds: 1,
             }),
         )
         .await
-        .unwrap();
-        assert_eq!(blocked.0.data.expect("data").key, Some("blockset".to_string()));
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
 
-        let blocked = bzpopmax(
+        let response = bzpopmax(
             state.clone(),
             Json(ZBPopRequest {
                 keys: vec!["missing".to_string()],
-                timeout: 1.0,
+                timeout_seconds: 1,
             }),
         )
         .await
-        .unwrap();
-        let data = blocked.0.data.expect("data");
-        assert!(data.key.is_none());
-        assert!(data.members.is_empty());
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         let _ = zadd(
             state.clone(),
@@ -1512,44 +1536,45 @@ mod tests {
         .await
         .unwrap();
 
-        let popped = bzmpop(
+        let response = bzmpop(
             state.clone(),
             Json(ZBMPopRequest {
                 keys: vec!["bmpopset".to_string()],
                 direction: "max".to_string(),
-                timeout: 1.0,
+                timeout_seconds: 1,
                 count: Some(1),
             }),
         )
         .await
-        .unwrap();
-        assert_eq!(popped.0.data.expect("data").key, Some("bmpopset".to_string()));
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
 
-        let popped = bzmpop(
+        let response = bzmpop(
             state.clone(),
             Json(ZBMPopRequest {
                 keys: vec!["missing".to_string()],
                 direction: "max".to_string(),
-                timeout: 1.0,
+                timeout_seconds: 1,
                 count: Some(1),
             }),
         )
         .await
-        .unwrap();
-        assert!(popped.0.data.expect("data").key.is_none());
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-        let err = bzmpop(
+        let result = bzmpop(
             state,
             Json(ZBMPopRequest {
                 keys: vec!["popset".to_string()],
                 direction: "invalid".to_string(),
-                timeout: 1.0,
+                timeout_seconds: 1,
                 count: Some(1),
             }),
         )
-        .await
-        .unwrap_err();
-        assert!(matches!(err, CacheError::InvalidInput(_)));
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
     #[tokio::test]

@@ -231,8 +231,9 @@ pub struct ZBPopRequest {
     /// Keys to pop from
     #[validate(length(min = 1, message = "At least one key is required"))]
     pub keys: Vec<String>,
-    /// Timeout in seconds (0 for indefinite)
-    pub timeout: f64,
+    /// Timeout in seconds (server-enforced max 30s)
+    #[validate(range(min = 1, max = 30, message = "Timeout must be between 1 and 30 seconds"))]
+    pub timeout_seconds: u32,
 }
 
 /// Request for ZMPOP
@@ -255,8 +256,9 @@ pub struct ZBMPopRequest {
     pub keys: Vec<String>,
     /// Direction: "min" or "max"
     pub direction: String,
-    /// Timeout in seconds (0 for indefinite)
-    pub timeout: f64,
+    /// Timeout in seconds (server-enforced max 30s)
+    #[validate(range(min = 1, max = 30, message = "Timeout must be between 1 and 30 seconds"))]
+    pub timeout_seconds: u32,
     /// Number of elements to pop
     pub count: Option<i64>,
 }

@@ -111,10 +111,6 @@ pub struct PubSubConfig {
     /// Connection timeout for subscriptions in milliseconds (default: 30000)
     #[serde(default = "default_pubsub_connect_timeout")]
     pub connection_timeout_ms: u64,
-
-    /// Idle timeout for subscriptions in milliseconds (default: 300000 = 5 minutes)
-    #[serde(default = "default_pubsub_idle_timeout")]
-    pub idle_timeout_ms: u64,
 }
 
 /// Blocking commands configuration
@@ -217,10 +213,6 @@ fn default_pubsub_connect_timeout() -> u64 {
     30000
 }
 
-fn default_pubsub_idle_timeout() -> u64 {
-    300_000
-}
-
 fn default_max_blocking_timeout() -> u32 {
     30
 }
@@ -292,7 +284,6 @@ impl Default for PubSubConfig {
         Self {
             max_subscriptions: default_max_subscriptions(),
             connection_timeout_ms: default_pubsub_connect_timeout(),
-            idle_timeout_ms: default_pubsub_idle_timeout(),
         }
     }
 }
@@ -364,7 +355,6 @@ impl Settings {
             .set_default("pool.idle_timeout_ms", 600_000)?
             .set_default("pubsub.max_subscriptions", 100)?
             .set_default("pubsub.connection_timeout_ms", 30000)?
-            .set_default("pubsub.idle_timeout_ms", 300_000)?
             .set_default("blocking.max_timeout_seconds", 30)?
             .set_default("blocking.default_timeout_seconds", 5)?
             .set_default("blocking.max_sse_connections", 5)?
@@ -429,7 +419,6 @@ mod tests {
         let config = PubSubConfig::default();
         assert_eq!(config.max_subscriptions, 100);
         assert_eq!(config.connection_timeout_ms, 30000);
-        assert_eq!(config.idle_timeout_ms, 300_000);
     }
 
     #[test]
