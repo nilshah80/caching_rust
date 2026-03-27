@@ -1,8 +1,33 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::errors::CacheError;
+
+/// Condition for hash field expiration commands (NX, XX, GT, LT).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExpireCondition {
+    /// Set expiry only when the field has no expiry
+    NX,
+    /// Set expiry only when the field has an existing expiry
+    XX,
+    /// Set expiry only when the new expiry is greater than current one
+    GT,
+    /// Set expiry only when the new expiry is less than current one
+    LT,
+}
+
+impl ExpireCondition {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExpireCondition::NX => "NX",
+            ExpireCondition::XX => "XX",
+            ExpireCondition::GT => "GT",
+            ExpireCondition::LT => "LT",
+        }
+    }
+}
 
 #[async_trait]
 pub trait HashRepository: Send + Sync {
@@ -33,4 +58,39 @@ pub trait HashRepository: Send + Sync {
         pattern: Option<String>,
         count: Option<u64>,
     ) -> Result<(u64, Vec<String>), CacheError>;
+
+    // Hash field expiration commands (Redis 7.4+)
+    async fn hexpire(
+        &self,
+        key: &str,
+        seconds: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError>;
+    async fn hpexpire(
+        &self,
+        key: &str,
+        milliseconds: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError>;
+    async fn hexpire_at(
+        &self,
+        key: &str,
+        unix_time: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError>;
+    async fn hpexpire_at(
+        &self,
+        key: &str,
+        unix_time_ms: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError>;
+    async fn hexpire_time(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+    async fn hpexpire_time(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+    async fn httl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+    async fn hpttl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+    async fn hpersist(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
 }

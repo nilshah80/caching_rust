@@ -53,6 +53,12 @@ pub struct FeatureCapabilities {
     /// Functions support (Redis 7.0+)
     pub functions: bool,
 
+    /// LCS command support (Redis 7.0+)
+    pub lcs: bool,
+
+    /// Hash field expiration support (Redis 7.4+)
+    pub hash_field_expiration: bool,
+
     /// Cluster mode enabled
     pub cluster: bool,
 }
@@ -73,6 +79,8 @@ impl RedisCapabilities {
                 streams: true, // Assume modern Redis
                 acl: true,
                 functions: false,
+                lcs: true,
+                hash_field_expiration: true,
                 cluster: false,
             },
             detected_at: Utc::now(),
@@ -123,6 +131,8 @@ impl Default for FeatureCapabilities {
             streams: true,
             acl: true,
             functions: false,
+            lcs: true,
+            hash_field_expiration: true,
             cluster: false,
         }
     }

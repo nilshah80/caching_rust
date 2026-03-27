@@ -3,6 +3,7 @@
 //! Abstract interface for string operations.
 
 use async_trait::async_trait;
+use serde::Serialize;
 use std::time::Duration;
 
 use crate::domain::entities::{
@@ -10,6 +11,50 @@ use crate::domain::entities::{
     StringValue,
 };
 use crate::domain::errors::CacheError;
+
+/// Options for the LCS (Longest Common Subsequence) command (Redis 7.0+)
+#[derive(Debug, Clone, Default)]
+pub struct LcsOptions {
+    /// Return just the length instead of the string
+    pub len: bool,
+    /// Return match positions
+    pub idx: bool,
+    /// Minimum match length (used with IDX)
+    pub min_match_len: Option<u64>,
+    /// Include match lengths in IDX output
+    pub with_match_len: bool,
+}
+
+/// Result of the LCS command
+#[derive(Debug, Clone, Serialize)]
+pub enum LcsResult {
+    /// The LCS string itself
+    String(String),
+    /// Just the length of the LCS
+    Length(i64),
+    /// Match positions with metadata
+    Matches(LcsMatchResult),
+}
+
+/// Match result containing positions and total length
+#[derive(Debug, Clone, Serialize)]
+pub struct LcsMatchResult {
+    /// List of match positions
+    pub matches: Vec<LcsMatch>,
+    /// Total length of the LCS
+    pub len: i64,
+}
+
+/// A single match in the LCS result
+#[derive(Debug, Clone, Serialize)]
+pub struct LcsMatch {
+    /// Range in key1 (start, end)
+    pub key1_range: (i64, i64),
+    /// Range in key2 (start, end)
+    pub key2_range: (i64, i64),
+    /// Length of this match (only if WITHMATCHLEN)
+    pub match_len: Option<i64>,
+}
 
 /// Repository trait for Redis string operations
 #[async_trait]
@@ -82,4 +127,12 @@ pub trait StringRepository: Send + Sync {
 
     /// GETDEL - Get value and delete key
     async fn get_del(&self, key: &str) -> Result<Option<String>, CacheError>;
+
+    /// LCS - Longest Common Subsequence (Redis 7.0+)
+    async fn lcs(
+        &self,
+        key1: &str,
+        key2: &str,
+        options: LcsOptions,
+    ) -> Result<LcsResult, CacheError>;
 }

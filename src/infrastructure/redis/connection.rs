@@ -437,6 +437,8 @@ impl InstrumentedPool {
             streams: RedisCapabilities::version_gte(&redis_version, "5.0.0"),
             acl: RedisCapabilities::version_gte(&redis_version, "6.0.0"),
             functions: RedisCapabilities::version_gte(&redis_version, "7.0.0"),
+            lcs: RedisCapabilities::version_gte(&redis_version, "7.0.0"),
+            hash_field_expiration: RedisCapabilities::version_gte(&redis_version, "7.4.0"),
             cluster: cluster_enabled,
         };
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::HashRepository;
+use crate::domain::repositories::{ExpireCondition, HashRepository};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
 #[derive(Clone)]
@@ -193,6 +193,114 @@ impl HashRepository for RedisHashRepository {
             cmd.arg("COUNT").arg(c);
         }
         let result: (u64, Vec<String>) = cmd.query_async(&mut *conn).await?;
+        Ok(result)
+    }
+
+    // --- Hash field expiration helpers ---
+
+    async fn hexpire(
+        &self,
+        key: &str,
+        seconds: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        self.run_expire_cmd("HEXPIRE", key, seconds, fields, condition)
+            .await
+    }
+
+    async fn hpexpire(
+        &self,
+        key: &str,
+        milliseconds: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        self.run_expire_cmd("HPEXPIRE", key, milliseconds, fields, condition)
+            .await
+    }
+
+    async fn hexpire_at(
+        &self,
+        key: &str,
+        unix_time: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        self.run_expire_cmd("HEXPIREAT", key, unix_time, fields, condition)
+            .await
+    }
+
+    async fn hpexpire_at(
+        &self,
+        key: &str,
+        unix_time_ms: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        self.run_expire_cmd("HPEXPIREAT", key, unix_time_ms, fields, condition)
+            .await
+    }
+
+    async fn hexpire_time(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        self.run_field_query_cmd("HEXPIRETIME", key, fields).await
+    }
+
+    async fn hpexpire_time(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        self.run_field_query_cmd("HPEXPIRETIME", key, fields).await
+    }
+
+    async fn httl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        self.run_field_query_cmd("HTTL", key, fields).await
+    }
+
+    async fn hpttl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        self.run_field_query_cmd("HPTTL", key, fields).await
+    }
+
+    async fn hpersist(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        self.run_field_query_cmd("HPERSIST", key, fields).await
+    }
+}
+
+impl RedisHashRepository {
+    /// Helper for HEXPIRE, HPEXPIRE, HEXPIREAT, HPEXPIREAT commands.
+    async fn run_expire_cmd(
+        &self,
+        command: &str,
+        key: &str,
+        time_value: i64,
+        fields: &[String],
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd(command);
+        cmd.arg(key).arg(time_value);
+        if let Some(cond) = &condition {
+            cmd.arg(cond.as_str());
+        }
+        cmd.arg("FIELDS").arg(fields.len());
+        for field in fields {
+            cmd.arg(field);
+        }
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        Ok(result)
+    }
+
+    /// Helper for HEXPIRETIME, HPEXPIRETIME, HTTL, HPTTL, HPERSIST commands.
+    async fn run_field_query_cmd(
+        &self,
+        command: &str,
+        key: &str,
+        fields: &[String],
+    ) -> Result<Vec<i64>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd(command);
+        cmd.arg(key).arg("FIELDS").arg(fields.len());
+        for field in fields {
+            cmd.arg(field);
+        }
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
         Ok(result)
     }
 }

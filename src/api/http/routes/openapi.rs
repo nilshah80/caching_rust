@@ -92,9 +92,10 @@ use crate::api::http::schemas::geo::{
     GeoSearchStoreResponse, GeoSortOrderSchema, GeoUnitSchema,
 };
 use crate::api::http::schemas::hashes::{
-    GetMultipleFieldsRequest, HashFieldEntry, HashIncrFloatRequest, HashIncrRequest,
-    HashRandomFieldResponse, HashScanResponse, RandomFieldQuery, ScanHashQuery, SetHashNxRequest,
-    SetHashRequest,
+    ExpireConditionSchema, GetMultipleFieldsRequest, HExpireAtRequest, HExpireFieldResult,
+    HExpireRequest, HExpireResponse, HFieldsRequest, HPExpireAtRequest, HPExpireRequest,
+    HashFieldEntry, HashIncrFloatRequest, HashIncrRequest, HashRandomFieldResponse,
+    HashScanResponse, RandomFieldQuery, ScanHashQuery, SetHashNxRequest, SetHashRequest,
 };
 use crate::api::http::schemas::json::{
     JsonArrAppendRequest, JsonArrAppendResponse, JsonArrIndexRequest, JsonArrIndexResponse,
@@ -185,8 +186,9 @@ use crate::api::http::schemas::streams::{
 };
 use crate::api::http::schemas::strings::{
     AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams, GetRangeResponse,
-    IncrementRequest, IncrementResponse, MGetRequest, MGetResponse, MSetRequest, MSetResponse,
-    SetRangeRequest, SetRangeResponse, SetStringRequest, SetStringResponse, StrLenResponse,
+    IncrementRequest, IncrementResponse, LcsMatchSchema, LcsRequest, LcsResponse, MGetRequest,
+    MGetResponse, MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
+    SetStringResponse, StrLenResponse,
 };
 use crate::api::http::schemas::transactions::{
     CommandResult, CompareAndSetRequest, CompareAndSetResponse, FieldValue, HCompareAndSetRequest,
@@ -328,6 +330,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::strings::get_range,
         crate::api::http::routes::strings::set_range,
         crate::api::http::routes::strings::get_ex_string,
+        crate::api::http::routes::strings::lcs,
         // Hash endpoints
         crate::api::http::routes::hashes::hget,
         crate::api::http::routes::hashes::hset,
@@ -344,6 +347,16 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::hashes::hstr_len,
         crate::api::http::routes::hashes::hrand_field,
         crate::api::http::routes::hashes::hscan,
+        // Hash field expiration endpoints (Redis 7.4+)
+        crate::api::http::routes::hashes::hexpire,
+        crate::api::http::routes::hashes::hpexpire,
+        crate::api::http::routes::hashes::hexpire_at,
+        crate::api::http::routes::hashes::hpexpire_at,
+        crate::api::http::routes::hashes::hexpire_time,
+        crate::api::http::routes::hashes::hpexpire_time,
+        crate::api::http::routes::hashes::httl,
+        crate::api::http::routes::hashes::hpttl,
+        crate::api::http::routes::hashes::hpersist,
         // List endpoints
         crate::api::http::routes::lists::lpush,
         crate::api::http::routes::lists::rpush,
@@ -692,6 +705,9 @@ use crate::shared::app_state::AppState;
             SetRangeRequest,
             SetRangeResponse,
             GetExParams,
+            LcsRequest,
+            LcsResponse,
+            LcsMatchSchema,
             // Hash schemas
             SetHashRequest,
             SetHashNxRequest,
@@ -703,6 +719,15 @@ use crate::shared::app_state::AppState;
             HashFieldEntry,
             HashScanResponse,
             HashRandomFieldResponse,
+            // Hash field expiration schemas
+            ExpireConditionSchema,
+            HExpireRequest,
+            HPExpireRequest,
+            HExpireAtRequest,
+            HPExpireAtRequest,
+            HFieldsRequest,
+            HExpireFieldResult,
+            HExpireResponse,
             // List schemas
             ListPushRequest,
             ListPushResponse,

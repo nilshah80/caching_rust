@@ -2151,11 +2151,11 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 
 ---
 
-### 5.12 Redis 7.4+ Hash Field Expiration (NEW - Critical)
+### 5.12 Redis 7.4+ Hash Field Expiration ✅ COMPLETED
 
 > **Note**: Redis 7.4 introduced field-level expiration for hashes. This is a critical feature for session management, caching patterns, and data lifecycle management where different fields need different TTLs.
 
-- [ ] **Task 5.12.1**: Implement Hash Field Expiration repository methods
+- [x] **Task 5.12.1**: Implement Hash Field Expiration repository methods
   ```rust
   #[async_trait]
   pub trait HashFieldExpirationRepository: Send + Sync {
@@ -2188,7 +2188,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-- [ ] **Task 5.12.2**: Implement Hash Field Expiration operations
+- [x] **Task 5.12.2**: Implement Hash Field Expiration operations
   | Command | Method | Priority | Redis Version |
   |---------|--------|----------|---------------|
   | HEXPIRE | `hexpire` | High | 7.4+ |
@@ -2201,7 +2201,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   | HPTTL | `hpttl` | Medium | 7.4+ |
   | HPERSIST | `hpersist` | Medium | 7.4+ |
 
-- [ ] **Task 5.12.3**: Create Hash Field Expiration API routes
+- [x] **Task 5.12.3**: Create Hash Field Expiration API routes
   ```
   POST   /api/v1/hashes/{key}/fields/expire        # HEXPIRE
   POST   /api/v1/hashes/{key}/fields/pexpire       # HPEXPIRE
@@ -2214,7 +2214,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   POST   /api/v1/hashes/{key}/fields/persist       # HPERSIST
   ```
 
-- [ ] **Task 5.12.4**: Create Hash Field Expiration request/response schemas
+- [x] **Task 5.12.4**: Create Hash Field Expiration request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct HExpireRequest {
@@ -2255,7 +2255,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-- [ ] **Task 5.12.5**: Add version gating for Redis 7.4+
+- [x] **Task 5.12.5**: Add version gating for Redis 7.4+
   - Update `RedisCapabilities` to detect Redis 7.4+
   - Conditionally enable hash field expiration routes
   - Return 501 Not Implemented for older Redis versions
@@ -2355,11 +2355,11 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 
 ---
 
-### 5.14 LCS - Longest Common Subsequence (NEW - Medium Priority)
+### 5.14 LCS - Longest Common Subsequence ✅ COMPLETED
 
 > **Note**: The LCS command finds the longest common subsequence between two strings. Useful for text diff, DNA sequence comparison, and version comparison.
 
-- [ ] **Task 5.14.1**: Implement LCS repository method
+- [x] **Task 5.14.1**: Implement LCS repository method
   ```rust
   #[async_trait]
   pub trait LcsRepository: Send + Sync {
@@ -2409,12 +2409,12 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-- [ ] **Task 5.14.2**: Create LCS API route
+- [x] **Task 5.14.2**: Create LCS API route
   ```
   POST   /api/v1/strings/lcs   # LCS key1 key2 [LEN] [IDX] [MINMATCHLEN] [WITHMATCHLEN]
   ```
 
-- [ ] **Task 5.14.3**: Create LCS request/response schemas
+- [x] **Task 5.14.3**: Create LCS request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct LcsRequest {
@@ -2455,7 +2455,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-- [ ] **Task 5.14.4**: Add version gating for Redis 7.0+
+- [x] **Task 5.14.4**: Add version gating for Redis 7.0+
   - LCS command requires Redis 7.0+
   - Return 501 Not Implemented for older versions
 
@@ -2613,9 +2613,9 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 ### 🔴 Critical Missing (NEW - Not Previously in tasks.md)
 | Feature | Task | Priority | Redis Version |
 |---------|------|----------|---------------|
-| Hash Field Expiration | 5.12 | Critical | 7.4+ |
+| Hash Field Expiration | 5.12 | ✅ Completed | 7.4+ |
 | Redis 8.0 Hash Commands | 5.13 | High | 8.0+ |
-| LCS Command | 5.14 | Medium | 7.0+ |
+| LCS Command | 5.14 | ✅ Completed | 7.0+ |
 | SORT / SORT_RO | 5.15 | ✅ Completed |
 
 ### 🟢 Recently Completed

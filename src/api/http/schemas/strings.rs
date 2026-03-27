@@ -160,13 +160,197 @@ pub struct GetRangeParams {
     pub end: i64,
 }
 
+/// Request for LCS (Longest Common Subsequence) operation
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct LcsRequest {
+    /// First key
+    #[validate(length(min = 1, message = "key1 is required"))]
+    pub key1: String,
+    /// Second key
+    #[validate(length(min = 1, message = "key2 is required"))]
+    pub key2: String,
+    /// Return just the length
+    #[serde(default)]
+    pub len: bool,
+    /// Return match positions
+    #[serde(default)]
+    pub idx: bool,
+    /// Minimum match length (used with IDX)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_match_len: Option<u64>,
+    /// Include match lengths in IDX output
+    #[serde(default)]
+    pub with_match_len: bool,
+}
+
+/// Response for LCS operation
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum LcsResponse {
+    /// The LCS string itself
+    String {
+        /// The longest common subsequence
+        lcs: String,
+    },
+    /// Just the length
+    Length {
+        /// Length of the LCS
+        length: i64,
+    },
+    /// Match positions
+    Matches {
+        /// List of matches
+        matches: Vec<LcsMatchSchema>,
+        /// Total LCS length
+        len: i64,
+    },
+}
+
+/// A single match in the LCS result
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct LcsMatchSchema {
+    /// Start position in key1
+    pub key1_start: i64,
+    /// End position in key1
+    pub key1_end: i64,
+    /// Start position in key2
+    pub key2_start: i64,
+    /// End position in key2
+    pub key2_end: i64,
+    /// Length of this match (only if with_match_len is true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_len: Option<i64>,
+}
+
+impl From<crate::domain::repositories::LcsResult> for LcsResponse {
+    fn from(result: crate::domain::repositories::LcsResult) -> Self {
+        match result {
+            crate::domain::repositories::LcsResult::String(s) => LcsResponse::String { lcs: s },
+            crate::domain::repositories::LcsResult::Length(n) => LcsResponse::Length { length: n },
+            crate::domain::repositories::LcsResult::Matches(m) => LcsResponse::Matches {
+                matches: m
+                    .matches
+                    .into_iter()
+                    .map(|lm| LcsMatchSchema {
+                        key1_start: lm.key1_range.0,
+                        key1_end: lm.key1_range.1,
+                        key2_start: lm.key2_range.0,
+                        key2_end: lm.key2_range.1,
+                        match_len: lm.match_len,
+                    })
+                    .collect(),
+                len: m.len,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::repositories::{LcsMatch, LcsMatchResult, LcsResult};
+    use validator::Validate;
 
     #[test]
     fn test_default_increment() {
         assert_eq!(default_increment(), 1);
+    }
+
+    #[test]
+    fn test_lcs_request_empty_key1() {
+        let req = LcsRequest {
+            key1: "".to_string(),
+            key2: "b".to_string(),
+            len: false,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_lcs_request_empty_key2() {
+        let req = LcsRequest {
+            key1: "a".to_string(),
+            key2: "".to_string(),
+            len: false,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_lcs_request_valid() {
+        let req = LcsRequest {
+            key1: "a".to_string(),
+            key2: "b".to_string(),
+            len: false,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_lcs_request_with_idx_options() {
+        let req = LcsRequest {
+            key1: "k1".to_string(),
+            key2: "k2".to_string(),
+            len: false,
+            idx: true,
+            min_match_len: Some(3),
+            with_match_len: true,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_lcs_response_from_string_result() {
+        let result = LcsResult::String("hello".to_string());
+        let response: LcsResponse = result.into();
+        match response {
+            LcsResponse::String { lcs } => assert_eq!(lcs, "hello"),
+            _ => panic!("Expected String variant"),
+        }
+    }
+
+    #[test]
+    fn test_lcs_response_from_length_result() {
+        let result = LcsResult::Length(42);
+        let response: LcsResponse = result.into();
+        match response {
+            LcsResponse::Length { length } => assert_eq!(length, 42),
+            _ => panic!("Expected Length variant"),
+        }
+    }
+
+    #[test]
+    fn test_lcs_response_from_matches_result() {
+        let result = LcsResult::Matches(LcsMatchResult {
+            matches: vec![LcsMatch {
+                key1_range: (1, 3),
+                key2_range: (2, 4),
+                match_len: Some(3),
+            }],
+            len: 3,
+        });
+        let response: LcsResponse = result.into();
+        match response {
+            LcsResponse::Matches { matches, len } => {
+                assert_eq!(len, 3);
+                assert_eq!(matches.len(), 1);
+                assert_eq!(matches[0].key1_start, 1);
+                assert_eq!(matches[0].key1_end, 3);
+                assert_eq!(matches[0].key2_start, 2);
+                assert_eq!(matches[0].key2_end, 4);
+                assert_eq!(matches[0].match_len, Some(3));
+            }
+            _ => panic!("Expected Matches variant"),
+        }
     }
 }
 

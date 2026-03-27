@@ -8,10 +8,13 @@ use axum::{
     routing::{delete, get, patch, post},
 };
 
+use validator::Validate;
+
 use crate::api::http::schemas::hashes::{
-    GetMultipleFieldsRequest, HashFieldEntry, HashIncrFloatRequest, HashIncrRequest,
-    HashRandomFieldResponse, HashScanResponse, RandomFieldQuery, ScanHashQuery, SetHashNxRequest,
-    SetHashRequest,
+    GetMultipleFieldsRequest, HExpireAtRequest, HExpireFieldResult, HExpireRequest,
+    HExpireResponse, HFieldsRequest, HPExpireAtRequest, HPExpireRequest, HashFieldEntry,
+    HashIncrFloatRequest, HashIncrRequest, HashRandomFieldResponse, HashScanResponse,
+    RandomFieldQuery, ScanHashQuery, SetHashNxRequest, SetHashRequest,
 };
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -37,6 +40,19 @@ pub fn hash_routes() -> Router<AppState> {
         .route("/api/v1/hashes/{key}/fields/{field}/length", get(hstr_len))
         .route("/api/v1/hashes/{key}/random", get(hrand_field))
         .route("/api/v1/hashes/{key}/scan", get(hscan))
+        // Hash field expiration routes (Redis 7.4+)
+        .route("/api/v1/hashes/{key}/fields/expire", post(hexpire))
+        .route("/api/v1/hashes/{key}/fields/pexpire", post(hpexpire))
+        .route("/api/v1/hashes/{key}/fields/expireat", post(hexpire_at))
+        .route("/api/v1/hashes/{key}/fields/pexpireat", post(hpexpire_at))
+        .route("/api/v1/hashes/{key}/fields/expiretime", post(hexpire_time))
+        .route(
+            "/api/v1/hashes/{key}/fields/pexpiretime",
+            post(hpexpire_time),
+        )
+        .route("/api/v1/hashes/{key}/fields/ttl", post(httl))
+        .route("/api/v1/hashes/{key}/fields/pttl", post(hpttl))
+        .route("/api/v1/hashes/{key}/fields/persist", post(hpersist))
 }
 
 /// GET /api/v1/hashes/{key}/fields/{field}
@@ -430,6 +446,305 @@ pub async fn hscan(
     })))
 }
 
+/// Check that hash field expiration is supported (Redis 7.4+)
+fn require_hash_field_expiration(state: &AppState) -> Result<(), CacheError> {
+    if !state.capabilities.features.hash_field_expiration {
+        return Err(CacheError::ModuleNotAvailable(
+            "Hash field expiration requires Redis 7.4+".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Helper to zip field names with result codes into HExpireFieldResult.
+fn zip_field_results(fields: &[String], results: &[i64]) -> Vec<HExpireFieldResult> {
+    fields
+        .iter()
+        .zip(results.iter())
+        .map(|(field, &result)| HExpireFieldResult {
+            field: field.clone(),
+            result,
+        })
+        .collect()
+}
+
+/// POST /api/v1/hashes/{key}/fields/expire
+///
+/// Set expiration (in seconds) on hash fields (HEXPIRE, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/expire",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HExpireRequest,
+    responses(
+        (status = 200, description = "Expiration set results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hexpire(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HExpireRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let condition = req.condition.map(Into::into);
+    let results = state
+        .hash_service
+        .hexpire(&key, req.seconds, req.fields.clone(), condition)
+        .await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/pexpire
+///
+/// Set expiration (in milliseconds) on hash fields (HPEXPIRE, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/pexpire",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HPExpireRequest,
+    responses(
+        (status = 200, description = "Expiration set results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hpexpire(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HPExpireRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let condition = req.condition.map(Into::into);
+    let results = state
+        .hash_service
+        .hpexpire(&key, req.milliseconds, req.fields.clone(), condition)
+        .await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/expireat
+///
+/// Set expiration as unix timestamp (seconds) on hash fields (HEXPIREAT, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/expireat",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HExpireAtRequest,
+    responses(
+        (status = 200, description = "Expiration set results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hexpire_at(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HExpireAtRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let condition = req.condition.map(Into::into);
+    let results = state
+        .hash_service
+        .hexpire_at(&key, req.unix_time, req.fields.clone(), condition)
+        .await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/pexpireat
+///
+/// Set expiration as unix timestamp (milliseconds) on hash fields (HPEXPIREAT, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/pexpireat",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HPExpireAtRequest,
+    responses(
+        (status = 200, description = "Expiration set results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hpexpire_at(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HPExpireAtRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let condition = req.condition.map(Into::into);
+    let results = state
+        .hash_service
+        .hpexpire_at(&key, req.unix_time_ms, req.fields.clone(), condition)
+        .await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/expiretime
+///
+/// Get expiration unix timestamp (seconds) of hash fields (HEXPIRETIME, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/expiretime",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HFieldsRequest,
+    responses(
+        (status = 200, description = "Expiration time results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hexpire_time(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HFieldsRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let results = state
+        .hash_service
+        .hexpire_time(&key, req.fields.clone())
+        .await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/pexpiretime
+///
+/// Get expiration unix timestamp (milliseconds) of hash fields (HPEXPIRETIME, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/pexpiretime",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HFieldsRequest,
+    responses(
+        (status = 200, description = "Expiration time results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hpexpire_time(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HFieldsRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let results = state
+        .hash_service
+        .hpexpire_time(&key, req.fields.clone())
+        .await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/ttl
+///
+/// Get TTL (seconds) of hash fields (HTTL, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/ttl",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HFieldsRequest,
+    responses(
+        (status = 200, description = "TTL results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn httl(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HFieldsRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let results = state.hash_service.httl(&key, req.fields.clone()).await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/pttl
+///
+/// Get TTL (milliseconds) of hash fields (HPTTL, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/pttl",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HFieldsRequest,
+    responses(
+        (status = 200, description = "TTL results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hpttl(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HFieldsRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let results = state.hash_service.hpttl(&key, req.fields.clone()).await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
+/// POST /api/v1/hashes/{key}/fields/persist
+///
+/// Remove expiration from hash fields (HPERSIST, Redis 7.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/fields/persist",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HFieldsRequest,
+    responses(
+        (status = 200, description = "Persist results", body = HExpireResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hpersist(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HFieldsRequest>,
+) -> Result<Json<ApiResponse<HExpireResponse>>, CacheError> {
+    require_hash_field_expiration(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let results = state
+        .hash_service
+        .hpersist(&key, req.fields.clone())
+        .await?;
+    Ok(Json(ApiResponse::success(HExpireResponse {
+        results: zip_field_results(&req.fields, &results),
+    })))
+}
+
 fn to_entries(items: Vec<String>) -> Vec<HashFieldEntry> {
     let mut entries = Vec::new();
     let mut iter = items.into_iter();
@@ -442,6 +757,10 @@ fn to_entries(items: Vec<String>) -> Vec<HashFieldEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::http::schemas::hashes::{
+        ExpireConditionSchema, HExpireAtRequest, HExpireRequest, HFieldsRequest, HPExpireAtRequest,
+        HPExpireRequest,
+    };
     use crate::test_support::test_state_with_hash_repo;
     use axum::Json;
     use axum::extract::{Path, Query, State};
@@ -635,5 +954,256 @@ mod tests {
         let data = response.0.data.expect("data");
         assert_eq!(data.cursor, 0);
         assert!(!data.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        hash_repo.insert("h1", "f2", "v2");
+        let state = State(state);
+
+        let response = hexpire(
+            state.clone(),
+            Path("h1".to_string()),
+            Json(HExpireRequest {
+                fields: vec!["f1".to_string(), "f2".to_string()],
+                seconds: 60,
+                condition: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results.len(), 2);
+        assert_eq!(data.results[0].field, "f1");
+        assert_eq!(data.results[0].result, 1);
+        assert_eq!(data.results[1].field, "f2");
+        assert_eq!(data.results[1].result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_route_with_condition() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hexpire(
+            state,
+            Path("h1".to_string()),
+            Json(HExpireRequest {
+                fields: vec!["f1".to_string()],
+                seconds: 60,
+                condition: Some(ExpireConditionSchema::Nx),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hpexpire(
+            state,
+            Path("h1".to_string()),
+            Json(HPExpireRequest {
+                fields: vec!["f1".to_string()],
+                milliseconds: 60000,
+                condition: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results.len(), 1);
+        assert_eq!(data.results[0].result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_at_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hexpire_at(
+            state,
+            Path("h1".to_string()),
+            Json(HExpireAtRequest {
+                fields: vec!["f1".to_string()],
+                unix_time: 1700000000,
+                condition: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_at_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hpexpire_at(
+            state,
+            Path("h1".to_string()),
+            Json(HPExpireAtRequest {
+                fields: vec!["f1".to_string()],
+                unix_time_ms: 1700000000000,
+                condition: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_time_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hexpire_time(
+            state,
+            Path("h1".to_string()),
+            Json(HFieldsRequest {
+                fields: vec!["f1".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].result, -1);
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_time_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hpexpire_time(
+            state,
+            Path("h1".to_string()),
+            Json(HFieldsRequest {
+                fields: vec!["f1".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].result, -1);
+    }
+
+    #[tokio::test]
+    async fn test_httl_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = httl(
+            state,
+            Path("h1".to_string()),
+            Json(HFieldsRequest {
+                fields: vec!["f1".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].field, "f1");
+        assert_eq!(data.results[0].result, -1);
+    }
+
+    #[tokio::test]
+    async fn test_hpttl_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hpttl(
+            state,
+            Path("h1".to_string()),
+            Json(HFieldsRequest {
+                fields: vec!["f1".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].result, -1);
+    }
+
+    #[tokio::test]
+    async fn test_hpersist_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hpersist(
+            state,
+            Path("h1".to_string()),
+            Json(HFieldsRequest {
+                fields: vec!["f1".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.results[0].result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_zip_field_results_helper() {
+        let fields = vec!["f1".to_string(), "f2".to_string()];
+        let results = vec![1, -1];
+        let zipped = zip_field_results(&fields, &results);
+        assert_eq!(zipped.len(), 2);
+        assert_eq!(zipped[0].field, "f1");
+        assert_eq!(zipped[0].result, 1);
+        assert_eq!(zipped[1].field, "f2");
+        assert_eq!(zipped[1].result, -1);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_returns_501_when_feature_disabled() {
+        let (mut app_state, _) = test_state_with_hash_repo();
+        let mut caps = (*app_state.capabilities).clone();
+        caps.features.hash_field_expiration = false;
+        app_state.capabilities = std::sync::Arc::new(caps);
+        let state = State(app_state);
+
+        let req = HExpireRequest {
+            fields: vec!["f1".into()],
+            seconds: 60,
+            condition: None,
+        };
+        let result = hexpire(state, Path("mykey".into()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_httl_returns_501_when_feature_disabled() {
+        let (mut app_state, _) = test_state_with_hash_repo();
+        let mut caps = (*app_state.capabilities).clone();
+        caps.features.hash_field_expiration = false;
+        app_state.capabilities = std::sync::Arc::new(caps);
+        let state = State(app_state);
+
+        let req = HFieldsRequest {
+            fields: vec!["f1".into()],
+        };
+        let result = httl(state, Path("mykey".into()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
     }
 }

@@ -12,7 +12,9 @@ use crate::domain::entities::{
     StringValue,
 };
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::StringRepository;
+use crate::domain::repositories::{
+    LcsMatch, LcsMatchResult, LcsOptions, LcsResult, StringRepository,
+};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
 /// Redis implementation of StringRepository
@@ -304,5 +306,122 @@ impl StringRepository for RedisStringRepository {
         let mut conn = self.pool.get().await?;
         let result: Option<String> = redis::cmd("GETDEL").arg(key).query_async(&mut conn).await?;
         Ok(result)
+    }
+
+    async fn lcs(
+        &self,
+        key1: &str,
+        key2: &str,
+        options: LcsOptions,
+    ) -> Result<LcsResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut cmd = redis::cmd("LCS");
+        cmd.arg(key1).arg(key2);
+
+        if options.len {
+            cmd.arg("LEN");
+        }
+        if options.idx {
+            cmd.arg("IDX");
+        }
+        if let Some(min) = options.min_match_len {
+            cmd.arg("MINMATCHLEN").arg(min);
+        }
+        if options.with_match_len {
+            cmd.arg("WITHMATCHLEN");
+        }
+
+        if options.len {
+            let length: i64 = cmd.query_async(&mut conn).await?;
+            Ok(LcsResult::Length(length))
+        } else if options.idx {
+            let value: redis::Value = cmd.query_async(&mut conn).await?;
+            parse_lcs_idx_result(value)
+        } else {
+            let s: String = cmd.query_async(&mut conn).await?;
+            Ok(LcsResult::String(s))
+        }
+    }
+}
+
+/// Parse the complex nested Redis value returned by LCS ... IDX
+fn parse_lcs_idx_result(value: redis::Value) -> Result<LcsResult, CacheError> {
+    // Redis returns: ["matches", [match1, match2, ...], "len", total_len]
+    // Each match is: [[key1_start, key1_end], [key2_start, key2_end]] or
+    //                [[key1_start, key1_end], [key2_start, key2_end], match_len] (with WITHMATCHLEN)
+    match value {
+        redis::Value::Array(items) => {
+            let mut matches = Vec::new();
+            let mut len: i64 = 0;
+
+            let mut i = 0;
+            while i < items.len() {
+                match &items[i] {
+                    redis::Value::BulkString(key) if key == b"matches" => {
+                        i += 1;
+                        if i < items.len()
+                            && let redis::Value::Array(match_list) = &items[i]
+                        {
+                            for m in match_list {
+                                if let redis::Value::Array(parts) = m
+                                    && parts.len() >= 2
+                                {
+                                    let key1_range = parse_range(&parts[0])?;
+                                    let key2_range = parse_range(&parts[1])?;
+                                    let match_len = if parts.len() >= 3 {
+                                        Some(parse_integer(&parts[2])?)
+                                    } else {
+                                        None
+                                    };
+                                    matches.push(LcsMatch {
+                                        key1_range,
+                                        key2_range,
+                                        match_len,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    redis::Value::BulkString(key) if key == b"len" => {
+                        i += 1;
+                        if i < items.len() {
+                            len = parse_integer(&items[i])?;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+
+            Ok(LcsResult::Matches(LcsMatchResult { matches, len }))
+        }
+        _ => Err(CacheError::Internal(
+            "Unexpected response format from LCS IDX command".to_string(),
+        )),
+    }
+}
+
+/// Parse a [start, end] range from a Redis Value::Array
+fn parse_range(value: &redis::Value) -> Result<(i64, i64), CacheError> {
+    match value {
+        redis::Value::Array(pair) if pair.len() == 2 => {
+            let start = parse_integer(&pair[0])?;
+            let end = parse_integer(&pair[1])?;
+            Ok((start, end))
+        }
+        _ => Err(CacheError::Internal(
+            "Unexpected range format in LCS IDX response".to_string(),
+        )),
+    }
+}
+
+/// Parse an integer from a Redis Value
+fn parse_integer(value: &redis::Value) -> Result<i64, CacheError> {
+    match value {
+        redis::Value::Int(n) => Ok(*n),
+        _ => Err(CacheError::Internal(
+            "Expected integer in LCS response".to_string(),
+        )),
     }
 }

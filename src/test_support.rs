@@ -161,12 +161,13 @@ use crate::domain::entities::{
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
-    BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository,
-    KeyRepository, LMPopResult, LPosOptions, LexRange, ListDirection, ListRepository, NumSubResult,
-    ProbabilisticRepository, PubSubRepository, PublishResult, ScoreRange, ScoredMember,
-    SearchRepository, SetRepository, SetScanResult, SortOptions, SortedSetRepository,
-    StreamRepository, StringRepository, ZAddOptions, ZAddResult, ZPopDirection, ZPopResult,
-    ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
+    BlockingPopResult, BloomRepository, ExpireCondition, HashRepository, InsertPosition,
+    JsonRepository, KeyRepository, LMPopResult, LPosOptions, LcsMatch, LcsMatchResult, LcsOptions,
+    LcsResult, LexRange, ListDirection, ListRepository, NumSubResult, ProbabilisticRepository,
+    PubSubRepository, PublishResult, ScoreRange, ScoredMember, SearchRepository, SetRepository,
+    SetScanResult, SortOptions, SortedSetRepository, StreamRepository, StringRepository,
+    ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
+    ZSetAlgebraOptions,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -410,6 +411,114 @@ impl StringRepository for MockStringRepository {
     async fn get_del(&self, key: &str) -> Result<Option<String>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         Ok(store.remove(key))
+    }
+
+    async fn lcs(
+        &self,
+        key1: &str,
+        key2: &str,
+        options: LcsOptions,
+    ) -> Result<LcsResult, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let s1 = store.get(key1).cloned().unwrap_or_default();
+        let s2 = store.get(key2).cloned().unwrap_or_default();
+
+        // Compute actual LCS using dynamic programming
+        let b1 = s1.as_bytes();
+        let b2 = s2.as_bytes();
+        let m = b1.len();
+        let n = b2.len();
+        let mut dp = vec![vec![0usize; n + 1]; m + 1];
+
+        for i in 1..=m {
+            for j in 1..=n {
+                if b1[i - 1] == b2[j - 1] {
+                    dp[i][j] = dp[i - 1][j - 1] + 1;
+                } else {
+                    dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+                }
+            }
+        }
+
+        let lcs_len = dp[m][n] as i64;
+
+        if options.len {
+            return Ok(LcsResult::Length(lcs_len));
+        }
+
+        // Backtrack to find the LCS string
+        let mut lcs_chars = Vec::new();
+        let mut i = m;
+        let mut j = n;
+        while i > 0 && j > 0 {
+            if b1[i - 1] == b2[j - 1] {
+                lcs_chars.push(b1[i - 1]);
+                i -= 1;
+                j -= 1;
+            } else if dp[i - 1][j] > dp[i][j - 1] {
+                i -= 1;
+            } else {
+                j -= 1;
+            }
+        }
+        lcs_chars.reverse();
+        let lcs_string = String::from_utf8_lossy(&lcs_chars).to_string();
+
+        if options.idx {
+            // Find match positions by scanning the LCS against both strings
+            let mut matches = Vec::new();
+            let mut li = 0usize; // position in lcs
+            let mut i = 0usize; // position in s1
+            let mut j = 0usize; // position in s2
+
+            while li < lcs_chars.len() {
+                // Find start of next match run
+                while i < m && b1[i] != lcs_chars[li] {
+                    i += 1;
+                }
+                while j < n && b2[j] != lcs_chars[li] {
+                    j += 1;
+                }
+
+                let start1 = i;
+                let start2 = j;
+                let mut run_len = 0;
+
+                // Extend consecutive match
+                while li < lcs_chars.len()
+                    && i < m
+                    && j < n
+                    && b1[i] == lcs_chars[li]
+                    && b2[j] == lcs_chars[li]
+                {
+                    i += 1;
+                    j += 1;
+                    li += 1;
+                    run_len += 1;
+                }
+
+                let min_match = options.min_match_len.unwrap_or(0) as usize;
+                if run_len >= min_match.max(1) {
+                    let match_len = if options.with_match_len {
+                        Some(run_len as i64)
+                    } else {
+                        None
+                    };
+                    matches.push(LcsMatch {
+                        key1_range: (start1 as i64, (start1 + run_len - 1) as i64),
+                        key2_range: (start2 as i64, (start2 + run_len - 1) as i64),
+                        match_len,
+                    });
+                }
+            }
+
+            Ok(LcsResult::Matches(LcsMatchResult {
+                matches,
+                len: lcs_len,
+            }))
+        } else {
+            Ok(LcsResult::String(lcs_string))
+        }
     }
 }
 
@@ -1226,6 +1335,66 @@ impl HashRepository for MockHashRepository {
             }
         }
         Ok((0, result))
+    }
+
+    async fn hexpire(
+        &self,
+        _key: &str,
+        _seconds: i64,
+        fields: &[String],
+        _condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![1; fields.len()])
+    }
+
+    async fn hpexpire(
+        &self,
+        _key: &str,
+        _milliseconds: i64,
+        fields: &[String],
+        _condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![1; fields.len()])
+    }
+
+    async fn hexpire_at(
+        &self,
+        _key: &str,
+        _unix_time: i64,
+        fields: &[String],
+        _condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![1; fields.len()])
+    }
+
+    async fn hpexpire_at(
+        &self,
+        _key: &str,
+        _unix_time_ms: i64,
+        fields: &[String],
+        _condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![1; fields.len()])
+    }
+
+    async fn hexpire_time(&self, _key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![-1; fields.len()])
+    }
+
+    async fn hpexpire_time(&self, _key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![-1; fields.len()])
+    }
+
+    async fn httl(&self, _key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![-1; fields.len()])
+    }
+
+    async fn hpttl(&self, _key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![-1; fields.len()])
+    }
+
+    async fn hpersist(&self, _key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
+        Ok(vec![1; fields.len()])
     }
 }
 

@@ -10,9 +10,13 @@ use axum::{
 
 use crate::api::http::schemas::strings::{
     AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams, GetRangeResponse,
-    IncrementRequest, IncrementResponse, MGetRequest, MGetResponse, MSetRequest, MSetResponse,
-    SetRangeRequest, SetRangeResponse, SetStringRequest, SetStringResponse, StrLenResponse,
+    IncrementRequest, IncrementResponse, LcsRequest, LcsResponse, MGetRequest, MGetResponse,
+    MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
+    SetStringResponse, StrLenResponse,
 };
+use crate::domain::repositories::LcsOptions;
+use validator::Validate;
+
 use crate::domain::entities::StringValue;
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -39,6 +43,8 @@ pub fn string_routes() -> Router<AppState> {
         .route("/api/v1/strings/{key}/range", patch(set_range))
         // GETEX
         .route("/api/v1/strings/{key}/getex", get(get_ex_string))
+        // LCS
+        .route("/api/v1/strings/lcs", post(lcs))
 }
 
 /// GET /api/v1/strings/:key
@@ -495,6 +501,47 @@ async fn get_ex_string(
     Ok(Json(ApiResponse::new(value)))
 }
 
+/// POST /api/v1/strings/lcs
+///
+/// Compute the Longest Common Subsequence of two string keys (Redis 7.0+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/strings/lcs",
+    request_body = LcsRequest,
+    responses(
+        (status = 200, description = "LCS computed", body = LcsResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Strings"
+)]
+pub async fn lcs(
+    State(state): State<AppState>,
+    Json(request): Json<LcsRequest>,
+) -> Result<Json<ApiResponse<LcsResponse>>, CacheError> {
+    if !state.capabilities.features.lcs {
+        return Err(CacheError::ModuleNotAvailable(
+            "LCS command requires Redis 7.0+".to_string(),
+        ));
+    }
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let options = LcsOptions {
+        len: request.len,
+        idx: request.idx,
+        min_match_len: request.min_match_len,
+        with_match_len: request.with_match_len,
+    };
+
+    let result = state
+        .string_service
+        .lcs(&request.key1, &request.key2, options)
+        .await?;
+
+    Ok(Json(ApiResponse::success(LcsResponse::from(result))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -791,5 +838,131 @@ mod tests {
         assert!(
             matches!(result, Err(CacheError::InvalidInput(ref msg)) if msg.contains("non-negative"))
         );
+    }
+
+    #[tokio::test]
+    async fn test_lcs_string_result() {
+        let (state, string_repo, _, _) = test_state();
+        let state = State(state);
+
+        string_repo.insert("k1", "ohmytext");
+        string_repo.insert("k2", "mynewtext");
+
+        let req = LcsRequest {
+            key1: "k1".to_string(),
+            key2: "k2".to_string(),
+            len: false,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        let resp = lcs(state, Json(req)).await.unwrap();
+        let data = resp.0.data.unwrap();
+        match data {
+            LcsResponse::String { lcs: s } => assert_eq!(s, "mytext"),
+            _ => panic!("Expected String variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcs_length_result() {
+        let (state, string_repo, _, _) = test_state();
+        let state = State(state);
+
+        string_repo.insert("k1", "ohmytext");
+        string_repo.insert("k2", "mynewtext");
+
+        let req = LcsRequest {
+            key1: "k1".to_string(),
+            key2: "k2".to_string(),
+            len: true,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        let resp = lcs(state, Json(req)).await.unwrap();
+        let data = resp.0.data.unwrap();
+        match data {
+            LcsResponse::Length { length } => assert_eq!(length, 6),
+            _ => panic!("Expected Length variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcs_matches_result() {
+        let (state, string_repo, _, _) = test_state();
+        let state = State(state);
+
+        string_repo.insert("k1", "ohmytext");
+        string_repo.insert("k2", "mynewtext");
+
+        let req = LcsRequest {
+            key1: "k1".to_string(),
+            key2: "k2".to_string(),
+            len: false,
+            idx: true,
+            min_match_len: None,
+            with_match_len: true,
+        };
+        let resp = lcs(state, Json(req)).await.unwrap();
+        let data = resp.0.data.unwrap();
+        match data {
+            LcsResponse::Matches { matches, len } => {
+                assert_eq!(len, 6);
+                assert!(!matches.is_empty());
+                // Verify match_len is present since with_match_len was true
+                assert!(matches.iter().all(|m| m.match_len.is_some()));
+            }
+            _ => panic!("Expected Matches variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcs_validation_rejects_empty_keys() {
+        let (state, _, _, _) = test_state();
+        let state = State(state);
+
+        let req = LcsRequest {
+            key1: "".to_string(),
+            key2: "b".to_string(),
+            len: false,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        let result = lcs(state.clone(), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let req2 = LcsRequest {
+            key1: "a".to_string(),
+            key2: "".to_string(),
+            len: false,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        let result2 = lcs(state, Json(req2)).await;
+        assert!(matches!(result2, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_lcs_returns_501_when_feature_disabled() {
+        let (mut app_state, _, _, _) = test_state();
+        // Create capabilities with lcs disabled
+        let mut caps = (*app_state.capabilities).clone();
+        caps.features.lcs = false;
+        app_state.capabilities = std::sync::Arc::new(caps);
+        let state = State(app_state);
+
+        let req = LcsRequest {
+            key1: "k1".into(),
+            key2: "k2".into(),
+            len: false,
+            idx: false,
+            min_match_len: None,
+            with_match_len: false,
+        };
+        let result = lcs(state, Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
     }
 }

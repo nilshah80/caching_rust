@@ -28,7 +28,7 @@ pub use geo_repository::{
     GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,
     GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder, GeoUnit,
 };
-pub use hash_repository::HashRepository;
+pub use hash_repository::{ExpireCondition, HashRepository};
 pub use json_repository::JsonRepository;
 pub use key_repository::{KeyRepository, SortOptions, SortOrder};
 pub use list_repository::{
@@ -43,4 +43,4 @@ pub use sorted_set_repository::{
     ZPopDirection, ZPopResult, ZRangeOptions, ZRangeType, ZScanResult, ZSetAlgebraOptions,
 };
 pub use stream_repository::StreamRepository;
-pub use string_repository::StringRepository;
+pub use string_repository::{LcsMatch, LcsMatchResult, LcsOptions, LcsResult, StringRepository};

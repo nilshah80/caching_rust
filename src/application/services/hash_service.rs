@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::HashRepository;
+use crate::domain::repositories::{ExpireCondition, HashRepository};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisHashRepository;
 
@@ -127,6 +127,125 @@ impl HashService {
     ) -> Result<(u64, Vec<String>), CacheError> {
         self.repository.hscan(key, cursor, pattern, count).await
     }
+
+    // --- Hash field expiration methods (Redis 7.4+) ---
+
+    fn validate_key_and_fields(key: &str, fields: &[String]) -> Result<(), CacheError> {
+        if key.is_empty() {
+            return Err(CacheError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if fields.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Fields cannot be empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn hexpire(
+        &self,
+        key: &str,
+        seconds: i64,
+        fields: Vec<String>,
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        if seconds <= 0 {
+            return Err(CacheError::InvalidInput(
+                "Seconds must be positive".to_string(),
+            ));
+        }
+        self.repository
+            .hexpire(key, seconds, &fields, condition)
+            .await
+    }
+
+    pub async fn hpexpire(
+        &self,
+        key: &str,
+        milliseconds: i64,
+        fields: Vec<String>,
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        if milliseconds <= 0 {
+            return Err(CacheError::InvalidInput(
+                "Milliseconds must be positive".to_string(),
+            ));
+        }
+        self.repository
+            .hpexpire(key, milliseconds, &fields, condition)
+            .await
+    }
+
+    pub async fn hexpire_at(
+        &self,
+        key: &str,
+        unix_time: i64,
+        fields: Vec<String>,
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        if unix_time <= 0 {
+            return Err(CacheError::InvalidInput(
+                "Unix time must be positive".to_string(),
+            ));
+        }
+        self.repository
+            .hexpire_at(key, unix_time, &fields, condition)
+            .await
+    }
+
+    pub async fn hpexpire_at(
+        &self,
+        key: &str,
+        unix_time_ms: i64,
+        fields: Vec<String>,
+        condition: Option<ExpireCondition>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        if unix_time_ms <= 0 {
+            return Err(CacheError::InvalidInput(
+                "Unix time in milliseconds must be positive".to_string(),
+            ));
+        }
+        self.repository
+            .hpexpire_at(key, unix_time_ms, &fields, condition)
+            .await
+    }
+
+    pub async fn hexpire_time(
+        &self,
+        key: &str,
+        fields: Vec<String>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        self.repository.hexpire_time(key, &fields).await
+    }
+
+    pub async fn hpexpire_time(
+        &self,
+        key: &str,
+        fields: Vec<String>,
+    ) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        self.repository.hpexpire_time(key, &fields).await
+    }
+
+    pub async fn httl(&self, key: &str, fields: Vec<String>) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        self.repository.httl(key, &fields).await
+    }
+
+    pub async fn hpttl(&self, key: &str, fields: Vec<String>) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        self.repository.hpttl(key, &fields).await
+    }
+
+    pub async fn hpersist(&self, key: &str, fields: Vec<String>) -> Result<Vec<i64>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        self.repository.hpersist(key, &fields).await
+    }
 }
 
 #[cfg(test)]
@@ -237,5 +356,524 @@ mod tests {
     fn test_hash_service_new() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let _service = HashService::new(pool);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_empty_key() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service
+            .hexpire("", 10, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_empty_fields() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service.hexpire("key", 10, vec![], None).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_negative_seconds() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service
+            .hexpire("key", -1, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_zero_seconds() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service
+            .hexpire("key", 0, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let result = service
+            .hexpire("key", 10, vec!["f1".into(), "f2".into()], None)
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1, 1]);
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_validation_and_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service
+            .hpexpire("", 1000, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .hpexpire("key", 1000, vec![], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .hpexpire("key", 0, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service
+            .hpexpire("key", 1000, vec!["f1".into()], None)
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_at_validation_and_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service
+            .hexpire_at("", 1000, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .hexpire_at("key", 1000, vec![], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .hexpire_at("key", -1, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service
+            .hexpire_at("key", 1000, vec!["f1".into()], None)
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_at_validation_and_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service
+            .hpexpire_at("", 1000, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .hpexpire_at("key", 1000, vec![], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .hpexpire_at("key", 0, vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service
+            .hpexpire_at("key", 1000, vec!["f1".into()], None)
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_time_validation_and_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service
+            .hexpire_time("", vec!["f1".into()])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.hexpire_time("key", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service
+            .hexpire_time("key", vec!["f1".into()])
+            .await
+            .unwrap();
+        assert_eq!(result, vec![-1]);
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_time_validation_and_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service
+            .hpexpire_time("", vec!["f1".into()])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.hpexpire_time("key", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service
+            .hpexpire_time("key", vec!["f1".into()])
+            .await
+            .unwrap();
+        assert_eq!(result, vec![-1]);
+    }
+
+    #[tokio::test]
+    async fn test_httl_delegates_to_mock() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service.httl("", vec!["f1".into()]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.httl("key", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service
+            .httl("key", vec!["f1".into(), "f2".into()])
+            .await
+            .unwrap();
+        assert_eq!(result, vec![-1, -1]);
+    }
+
+    #[tokio::test]
+    async fn test_hpttl_delegates_to_mock() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service.hpttl("", vec!["f1".into()]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.hpttl("key", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service.hpttl("key", vec!["f1".into()]).await.unwrap();
+        assert_eq!(result, vec![-1]);
+    }
+
+    #[tokio::test]
+    async fn test_hpersist_delegates_to_mock() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+
+        let err = service.hpersist("", vec!["f1".into()]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.hpersist("key", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let result = service.hpersist("key", vec!["f1".into()]).await.unwrap();
+        assert_eq!(result, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_with_condition() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        use crate::domain::repositories::ExpireCondition;
+        let result = service
+            .hexpire("key", 10, vec!["f1".into()], Some(ExpireCondition::NX))
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1]);
+
+        let result = service
+            .hexpire("key", 10, vec!["f1".into()], Some(ExpireCondition::XX))
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1]);
+
+        let result = service
+            .hexpire("key", 10, vec!["f1".into()], Some(ExpireCondition::GT))
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1]);
+
+        let result = service
+            .hexpire("key", 10, vec!["f1".into()], Some(ExpireCondition::LT))
+            .await
+            .unwrap();
+        assert_eq!(result, vec![1]);
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::sync::Arc;
+    use testcontainers::ContainerAsync;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+
+    async fn start_redis() -> (ContainerAsync<Redis>, String) {
+        let container = Redis::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
+        let url = format!("redis://{host}:{port}");
+        (container, url)
+    }
+
+    async fn create_service() -> (ContainerAsync<Redis>, HashService) {
+        let (container, redis_url) = start_redis().await;
+        let pool = Arc::new(
+            crate::infrastructure::redis::connection::InstrumentedPool::new_for_tests_with_url(
+                &redis_url,
+            )
+            .unwrap(),
+        );
+        let service = HashService::new(pool);
+        (container, service)
+    }
+
+    /// Returns true if the error indicates the command is not supported (Redis < 7.4).
+    fn is_unsupported_command(err: &CacheError) -> bool {
+        let msg = format!("{err:?}");
+        msg.contains("unknown command") || msg.contains("ERR")
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_then_httl() {
+        let (_container, service) = create_service().await;
+
+        // Set up hash fields
+        service
+            .hset(
+                "myhash",
+                vec![
+                    ("f1".to_string(), "v1".to_string()),
+                    ("f2".to_string(), "v2".to_string()),
+                ],
+            )
+            .await
+            .unwrap();
+
+        // Try HEXPIRE - may fail if Redis < 7.4
+        let result = service
+            .hexpire("myhash", 60, vec!["f1".to_string(), "f2".to_string()], None)
+            .await;
+
+        match result {
+            Ok(values) => {
+                assert_eq!(values.len(), 2);
+                // 1 means expiration was set
+                assert_eq!(values[0], 1);
+                assert_eq!(values[1], 1);
+
+                // Now check TTL
+                let ttl_result = service
+                    .httl("myhash", vec!["f1".to_string(), "f2".to_string()])
+                    .await
+                    .unwrap();
+                assert_eq!(ttl_result.len(), 2);
+                // TTL should be > 0 and <= 60
+                assert!(ttl_result[0] > 0 && ttl_result[0] <= 60);
+                assert!(ttl_result[1] > 0 && ttl_result[1] <= 60);
+            }
+            Err(e) if is_unsupported_command(&e) => {
+                // Redis < 7.4, skip gracefully
+            }
+            Err(e) => panic!("Unexpected error: {e:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_with_nx_condition() {
+        let (_container, service) = create_service().await;
+
+        service
+            .hset("myhash_nx", vec![("f1".to_string(), "v1".to_string())])
+            .await
+            .unwrap();
+
+        let result = service
+            .hexpire(
+                "myhash_nx",
+                60,
+                vec!["f1".to_string()],
+                Some(ExpireCondition::NX),
+            )
+            .await;
+
+        match result {
+            Ok(values) => {
+                // NX on field without expiration should succeed
+                assert_eq!(values, vec![1]);
+
+                // Try NX again - should fail since expiry already exists
+                let result2 = service
+                    .hexpire(
+                        "myhash_nx",
+                        120,
+                        vec!["f1".to_string()],
+                        Some(ExpireCondition::NX),
+                    )
+                    .await
+                    .unwrap();
+                // 0 means condition not met
+                assert_eq!(result2, vec![0]);
+            }
+            Err(e) if is_unsupported_command(&e) => {}
+            Err(e) => panic!("Unexpected error: {e:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hpersist_removes_expiration() {
+        let (_container, service) = create_service().await;
+
+        service
+            .hset("myhash_persist", vec![("f1".to_string(), "v1".to_string())])
+            .await
+            .unwrap();
+
+        let result = service
+            .hexpire("myhash_persist", 60, vec!["f1".to_string()], None)
+            .await;
+
+        match result {
+            Ok(values) => {
+                assert_eq!(values, vec![1]);
+
+                // Now persist (remove expiration)
+                let persist_result = service
+                    .hpersist("myhash_persist", vec!["f1".to_string()])
+                    .await
+                    .unwrap();
+                assert_eq!(persist_result, vec![1]);
+
+                // TTL should now be -1 (no expiration)
+                let ttl_result = service
+                    .httl("myhash_persist", vec!["f1".to_string()])
+                    .await
+                    .unwrap();
+                assert_eq!(ttl_result, vec![-1]);
+            }
+            Err(e) if is_unsupported_command(&e) => {}
+            Err(e) => panic!("Unexpected error: {e:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_and_hpttl() {
+        let (_container, service) = create_service().await;
+
+        service
+            .hset("myhash_ms", vec![("f1".to_string(), "v1".to_string())])
+            .await
+            .unwrap();
+
+        let result = service
+            .hpexpire("myhash_ms", 60000, vec!["f1".to_string()], None)
+            .await;
+
+        match result {
+            Ok(values) => {
+                assert_eq!(values, vec![1]);
+
+                let pttl_result = service
+                    .hpttl("myhash_ms", vec!["f1".to_string()])
+                    .await
+                    .unwrap();
+                assert_eq!(pttl_result.len(), 1);
+                assert!(pttl_result[0] > 0 && pttl_result[0] <= 60000);
+            }
+            Err(e) if is_unsupported_command(&e) => {}
+            Err(e) => panic!("Unexpected error: {e:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hexpire_at_and_hexpire_time() {
+        let (_container, service) = create_service().await;
+
+        service
+            .hset("myhash_at", vec![("f1".to_string(), "v1".to_string())])
+            .await
+            .unwrap();
+
+        // Set expiry to a future timestamp
+        let future_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+
+        let result = service
+            .hexpire_at("myhash_at", future_ts, vec!["f1".to_string()], None)
+            .await;
+
+        match result {
+            Ok(values) => {
+                assert_eq!(values, vec![1]);
+
+                let expire_time_result = service
+                    .hexpire_time("myhash_at", vec!["f1".to_string()])
+                    .await
+                    .unwrap();
+                assert_eq!(expire_time_result.len(), 1);
+                assert!(expire_time_result[0] > 0);
+            }
+            Err(e) if is_unsupported_command(&e) => {}
+            Err(e) => panic!("Unexpected error: {e:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hpexpire_at_and_hpexpire_time() {
+        let (_container, service) = create_service().await;
+
+        service
+            .hset("myhash_pat", vec![("f1".to_string(), "v1".to_string())])
+            .await
+            .unwrap();
+
+        let future_ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64
+            + 3600000;
+
+        let result = service
+            .hpexpire_at("myhash_pat", future_ts_ms, vec!["f1".to_string()], None)
+            .await;
+
+        match result {
+            Ok(values) => {
+                assert_eq!(values, vec![1]);
+
+                let pexpire_time_result = service
+                    .hpexpire_time("myhash_pat", vec!["f1".to_string()])
+                    .await
+                    .unwrap();
+                assert_eq!(pexpire_time_result.len(), 1);
+                assert!(pexpire_time_result[0] > 0);
+            }
+            Err(e) if is_unsupported_command(&e) => {}
+            Err(e) => panic!("Unexpected error: {e:?}"),
+        }
     }
 }

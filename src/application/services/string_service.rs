@@ -10,7 +10,7 @@ use crate::domain::entities::{
     SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::StringRepository;
+use crate::domain::repositories::{LcsOptions, LcsResult, StringRepository};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisStringRepository;
 
@@ -210,6 +210,39 @@ impl StringService {
     pub async fn get_del(&self, key: &str) -> Result<Option<String>, CacheError> {
         self.repository.get_del(key).await
     }
+
+    /// Compute the Longest Common Subsequence of two string keys (Redis 7.0+)
+    pub async fn lcs(
+        &self,
+        key1: &str,
+        key2: &str,
+        options: LcsOptions,
+    ) -> Result<LcsResult, CacheError> {
+        if key1.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "key1 must not be empty".to_string(),
+            ));
+        }
+        if key2.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "key2 must not be empty".to_string(),
+            ));
+        }
+
+        // If idx is false, ignore idx-only options
+        let effective_options = if options.idx {
+            options
+        } else {
+            LcsOptions {
+                len: options.len,
+                idx: false,
+                min_match_len: None,
+                with_match_len: false,
+            }
+        };
+
+        self.repository.lcs(key1, key2, effective_options).await
+    }
 }
 
 #[cfg(test)]
@@ -365,6 +398,15 @@ mod tests {
         async fn get_del(&self, _key: &str) -> Result<Option<String>, CacheError> {
             Ok(Some("v".to_string()))
         }
+
+        async fn lcs(
+            &self,
+            _key1: &str,
+            _key2: &str,
+            _options: LcsOptions,
+        ) -> Result<LcsResult, CacheError> {
+            Ok(LcsResult::String("abc".to_string()))
+        }
     }
 
     #[tokio::test]
@@ -445,5 +487,128 @@ mod tests {
     fn test_string_service_new() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let _service = StringService::new(pool);
+    }
+
+    #[tokio::test]
+    async fn test_lcs_empty_key1() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service
+            .lcs("", "key2", LcsOptions::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(ref msg) if msg.contains("key1")));
+    }
+
+    #[tokio::test]
+    async fn test_lcs_empty_key2() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service
+            .lcs("key1", "", LcsOptions::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(ref msg) if msg.contains("key2")));
+    }
+
+    #[tokio::test]
+    async fn test_lcs_valid_call_delegates() {
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("k1", "ohmytext");
+        repo.insert("k2", "mynewtext");
+        let service = StringService::new_with_repository(repo);
+
+        let result = service
+            .lcs("k1", "k2", LcsOptions::default())
+            .await
+            .expect("lcs");
+        match result {
+            LcsResult::String(s) => assert_eq!(s, "mytext"),
+            _ => panic!("Expected LcsResult::String"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcs_len_mode() {
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("k1", "ohmytext");
+        repo.insert("k2", "mynewtext");
+        let service = StringService::new_with_repository(repo);
+
+        let result = service
+            .lcs(
+                "k1",
+                "k2",
+                LcsOptions {
+                    len: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("lcs");
+        match result {
+            LcsResult::Length(n) => assert_eq!(n, 6),
+            _ => panic!("Expected LcsResult::Length"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcs_idx_mode() {
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("k1", "ohmytext");
+        repo.insert("k2", "mynewtext");
+        let service = StringService::new_with_repository(repo);
+
+        let result = service
+            .lcs(
+                "k1",
+                "k2",
+                LcsOptions {
+                    idx: true,
+                    with_match_len: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("lcs");
+        match result {
+            LcsResult::Matches(m) => {
+                assert_eq!(m.len, 6);
+                assert!(!m.matches.is_empty());
+                // First match should be "my" at positions k1[2..3], k2[0..1]
+                assert!(m.matches[0].match_len.is_some());
+            }
+            _ => panic!("Expected LcsResult::Matches"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lcs_idx_strips_options_when_not_idx() {
+        // When idx is false, min_match_len and with_match_len should be ignored
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("k1", "abc");
+        repo.insert("k2", "abc");
+        let service = StringService::new_with_repository(repo);
+
+        let result = service
+            .lcs(
+                "k1",
+                "k2",
+                LcsOptions {
+                    idx: false,
+                    min_match_len: Some(5),
+                    with_match_len: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("lcs");
+        // Should return string mode, not matches
+        match result {
+            LcsResult::String(s) => assert_eq!(s, "abc"),
+            _ => panic!("Expected LcsResult::String when idx is false"),
+        }
     }
 }
