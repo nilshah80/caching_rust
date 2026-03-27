@@ -161,13 +161,13 @@ use crate::domain::entities::{
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
-    BlockingPopResult, BloomRepository, ExpireCondition, HashRepository, InsertPosition,
-    JsonRepository, KeyRepository, LMPopResult, LPosOptions, LcsMatch, LcsMatchResult, LcsOptions,
-    LcsResult, LexRange, ListDirection, ListRepository, NumSubResult, ProbabilisticRepository,
-    PubSubRepository, PublishResult, ScoreRange, ScoredMember, SearchRepository, SetRepository,
-    SetScanResult, SortOptions, SortedSetRepository, StreamRepository, StringRepository,
-    ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
-    ZSetAlgebraOptions,
+    BlockingPopResult, BloomRepository, ExpireCondition, HSetExCondition, HashExpiration,
+    HashRepository, InsertPosition, JsonRepository, KeyRepository, LMPopResult, LPosOptions,
+    LcsMatch, LcsMatchResult, LcsOptions, LcsResult, LexRange, ListDirection, ListRepository,
+    NumSubResult, ProbabilisticRepository, PubSubRepository, PublishResult, ScoreRange,
+    ScoredMember, SearchRepository, SetRepository, SetScanResult, SortOptions, SortedSetRepository,
+    StreamRepository, StringRepository, ZAddOptions, ZAddResult, ZPopDirection, ZPopResult,
+    ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -730,6 +730,37 @@ impl AdminRepository for MockAdminRepository {
             allowed: true,
             reason: None,
         })
+    }
+
+    async fn command_list(&self, _filter: Option<&str>) -> Result<Vec<String>, CacheError> {
+        Ok(vec![
+            "get".to_string(),
+            "set".to_string(),
+            "del".to_string(),
+        ])
+    }
+
+    async fn command_count(&self) -> Result<i64, CacheError> {
+        Ok(242)
+    }
+
+    async fn command_docs(&self, _commands: &[String]) -> Result<serde_json::Value, CacheError> {
+        Ok(serde_json::json!({"get": {"summary": "Get the value of a key"}}))
+    }
+
+    async fn command_info(&self, _commands: &[String]) -> Result<serde_json::Value, CacheError> {
+        Ok(serde_json::json!([[
+            "get",
+            2,
+            ["readonly", "fast"],
+            1,
+            1,
+            1
+        ]]))
+    }
+
+    async fn command_getkeys(&self, _command: &[String]) -> Result<Vec<String>, CacheError> {
+        Ok(vec!["mykey".to_string()])
     }
 }
 
@@ -1395,6 +1426,63 @@ impl HashRepository for MockHashRepository {
 
     async fn hpersist(&self, _key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
         Ok(vec![1; fields.len()])
+    }
+
+    async fn hgetex(
+        &self,
+        key: &str,
+        fields: &[String],
+        _expiration: Option<HashExpiration>,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        let map = store.get(key);
+        Ok(fields
+            .iter()
+            .map(|field| map.and_then(|m| m.get(field).cloned()))
+            .collect())
+    }
+
+    async fn hsetex(
+        &self,
+        key: &str,
+        field_values: &[(String, String)],
+        condition: Option<HSetExCondition>,
+        _expiration: Option<HashExpiration>,
+    ) -> Result<i64, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        let mut count = 0i64;
+        for (field, value) in field_values {
+            match &condition {
+                Some(HSetExCondition::FNX) => {
+                    if !entry.contains_key(field) {
+                        entry.insert(field.clone(), value.clone());
+                        count += 1;
+                    }
+                }
+                Some(HSetExCondition::FXX) => {
+                    if entry.contains_key(field) {
+                        entry.insert(field.clone(), value.clone());
+                        count += 1;
+                    }
+                }
+                None => {
+                    entry.insert(field.clone(), value.clone());
+                    count += 1;
+                }
+            }
+        }
+        Ok(count)
+    }
+
+    async fn hgetdel(
+        &self,
+        key: &str,
+        fields: &[String],
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let entry = store.entry(key.to_string()).or_default();
+        Ok(fields.iter().map(|field| entry.remove(field)).collect())
     }
 }
 

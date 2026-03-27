@@ -56,8 +56,14 @@ pub struct FeatureCapabilities {
     /// LCS command support (Redis 7.0+)
     pub lcs: bool,
 
+    /// COMMAND DOCS/LIST support (Redis 7.0+)
+    pub command_docs: bool,
+
     /// Hash field expiration support (Redis 7.4+)
     pub hash_field_expiration: bool,
+
+    /// Redis 8.0 hash commands (HGETEX, HSETEX, HGETDEL)
+    pub hash_8_commands: bool,
 
     /// Cluster mode enabled
     pub cluster: bool,
@@ -80,7 +86,9 @@ impl RedisCapabilities {
                 acl: true,
                 functions: false,
                 lcs: true,
+                command_docs: true,
                 hash_field_expiration: true,
+                hash_8_commands: true,
                 cluster: false,
             },
             detected_at: Utc::now(),
@@ -132,7 +140,9 @@ impl Default for FeatureCapabilities {
             acl: true,
             functions: false,
             lcs: true,
+            command_docs: true,
             hash_field_expiration: true,
+            hash_8_commands: true,
             cluster: false,
         }
     }
@@ -181,6 +191,7 @@ mod tests {
         assert!(caps.streams);
         assert!(caps.acl);
         assert!(!caps.functions);
+        assert!(caps.hash_8_commands);
         assert!(!caps.cluster);
     }
 
@@ -304,5 +315,16 @@ mod tests {
         assert!(RedisCapabilities::version_gte(v, "5.0.0")); // streams
         assert!(RedisCapabilities::version_gte(v, "6.0.0")); // acl
         assert!(RedisCapabilities::version_gte(v, "7.0.0")); // functions
+        assert!(!RedisCapabilities::version_gte(v, "8.0.0")); // hash_8_commands
+    }
+
+    #[test]
+    fn test_features_redis_8() {
+        let v = "8.0.0";
+        assert!(RedisCapabilities::version_gte(v, "5.0.0")); // streams
+        assert!(RedisCapabilities::version_gte(v, "6.0.0")); // acl
+        assert!(RedisCapabilities::version_gte(v, "7.0.0")); // functions
+        assert!(RedisCapabilities::version_gte(v, "7.4.0")); // hash_field_expiration
+        assert!(RedisCapabilities::version_gte(v, "8.0.0")); // hash_8_commands
     }
 }

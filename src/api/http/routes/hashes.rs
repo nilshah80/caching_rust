@@ -12,9 +12,10 @@ use validator::Validate;
 
 use crate::api::http::schemas::hashes::{
     GetMultipleFieldsRequest, HExpireAtRequest, HExpireFieldResult, HExpireRequest,
-    HExpireResponse, HFieldsRequest, HPExpireAtRequest, HPExpireRequest, HashFieldEntry,
-    HashIncrFloatRequest, HashIncrRequest, HashRandomFieldResponse, HashScanResponse,
-    RandomFieldQuery, ScanHashQuery, SetHashNxRequest, SetHashRequest,
+    HExpireResponse, HFieldsRequest, HGetDelRequest, HGetDelResponse, HGetExRequest,
+    HGetExResponse, HPExpireAtRequest, HPExpireRequest, HSetExRequest, HSetExResponse,
+    HashFieldEntry, HashIncrFloatRequest, HashIncrRequest, HashRandomFieldResponse,
+    HashScanResponse, RandomFieldQuery, ScanHashQuery, SetHashNxRequest, SetHashRequest,
 };
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -53,6 +54,10 @@ pub fn hash_routes() -> Router<AppState> {
         .route("/api/v1/hashes/{key}/fields/ttl", post(httl))
         .route("/api/v1/hashes/{key}/fields/pttl", post(hpttl))
         .route("/api/v1/hashes/{key}/fields/persist", post(hpersist))
+        // Redis 8.0+ hash commands
+        .route("/api/v1/hashes/{key}/getex", post(hgetex))
+        .route("/api/v1/hashes/{key}/setex", post(hsetex))
+        .route("/api/v1/hashes/{key}/getdel", post(hgetdel))
 }
 
 /// GET /api/v1/hashes/{key}/fields/{field}
@@ -745,6 +750,107 @@ pub async fn hpersist(
     })))
 }
 
+/// Check that Redis 8.0+ hash commands are supported.
+fn require_redis8_hash(state: &AppState) -> Result<(), CacheError> {
+    if !state.capabilities.features.hash_8_commands {
+        return Err(CacheError::ModuleNotAvailable(
+            "HGETEX/HSETEX/HGETDEL require Redis 8.0+".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// POST /api/v1/hashes/{key}/getex
+///
+/// Get field values and optionally set/remove their expiration atomically (HGETEX, Redis 8.0+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/getex",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HGetExRequest,
+    responses(
+        (status = 200, description = "Field values with optional expiration change", body = HGetExResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "Redis 8.0+ required")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hgetex(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HGetExRequest>,
+) -> Result<Json<ApiResponse<HGetExResponse>>, CacheError> {
+    require_redis8_hash(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let expiration = req.expiration.map(Into::into);
+    let values = state
+        .hash_service
+        .hgetex(&key, req.fields, expiration)
+        .await?;
+    Ok(Json(ApiResponse::success(HGetExResponse { values })))
+}
+
+/// POST /api/v1/hashes/{key}/setex
+///
+/// Set fields with optional condition and expiration (HSETEX, Redis 8.0+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/setex",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HSetExRequest,
+    responses(
+        (status = 200, description = "Number of fields set", body = HSetExResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "Redis 8.0+ required")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hsetex(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HSetExRequest>,
+) -> Result<Json<ApiResponse<HSetExResponse>>, CacheError> {
+    require_redis8_hash(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let condition = req.condition.map(Into::into);
+    let expiration = req.expiration.map(Into::into);
+    let field_values: Vec<(String, String)> = req.fields.into_iter().collect();
+    let count = state
+        .hash_service
+        .hsetex(&key, field_values, condition, expiration)
+        .await?;
+    Ok(Json(ApiResponse::success(HSetExResponse { count })))
+}
+
+/// POST /api/v1/hashes/{key}/getdel
+///
+/// Get field values and delete them atomically (HGETDEL, Redis 8.0+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hashes/{key}/getdel",
+    params(("key" = String, Path, description = "The hash key")),
+    request_body = HGetDelRequest,
+    responses(
+        (status = 200, description = "Field values before deletion", body = HGetDelResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "Redis 8.0+ required")
+    ),
+    tag = "Hashes"
+)]
+pub async fn hgetdel(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HGetDelRequest>,
+) -> Result<Json<ApiResponse<HGetDelResponse>>, CacheError> {
+    require_redis8_hash(&state)?;
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let values = state.hash_service.hgetdel(&key, req.fields).await?;
+    Ok(Json(ApiResponse::success(HGetDelResponse { values })))
+}
+
 fn to_entries(items: Vec<String>) -> Vec<HashFieldEntry> {
     let mut entries = Vec::new();
     let mut iter = items.into_iter();
@@ -1204,6 +1310,175 @@ mod tests {
             fields: vec!["f1".into()],
         };
         let result = httl(state, Path("mykey".into()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    // --- Redis 8.0+ route tests ---
+
+    #[tokio::test]
+    async fn test_hgetex_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        hash_repo.insert("h1", "f2", "v2");
+        let state = State(state);
+
+        let response = hgetex(
+            state,
+            Path("h1".to_string()),
+            Json(crate::api::http::schemas::hashes::HGetExRequest {
+                fields: vec!["f1".to_string(), "f2".to_string(), "missing".to_string()],
+                expiration: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.values.len(), 3);
+        assert_eq!(data.values[0].as_deref(), Some("v1"));
+        assert_eq!(data.values[1].as_deref(), Some("v2"));
+        assert!(data.values[2].is_none());
+    }
+
+    #[tokio::test]
+    async fn test_hgetex_route_with_expiration() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        let state = State(state);
+
+        let response = hgetex(
+            state,
+            Path("h1".to_string()),
+            Json(crate::api::http::schemas::hashes::HGetExRequest {
+                fields: vec!["f1".to_string()],
+                expiration: Some(crate::api::http::schemas::hashes::HGetExExpirationSchema::Ex(60)),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.values[0].as_deref(), Some("v1"));
+    }
+
+    #[tokio::test]
+    async fn test_hgetex_returns_501_when_feature_disabled() {
+        let (mut app_state, _) = test_state_with_hash_repo();
+        let mut caps = (*app_state.capabilities).clone();
+        caps.features.hash_8_commands = false;
+        app_state.capabilities = std::sync::Arc::new(caps);
+        let state = State(app_state);
+
+        let req = crate::api::http::schemas::hashes::HGetExRequest {
+            fields: vec!["f1".into()],
+            expiration: None,
+        };
+        let result = hgetex(state, Path("mykey".into()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_route_success() {
+        let (state, _hash_repo) = test_state_with_hash_repo();
+        let state = State(state);
+
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("f1".to_string(), "v1".to_string());
+        fields.insert("f2".to_string(), "v2".to_string());
+
+        let response = hsetex(
+            state,
+            Path("h1".to_string()),
+            Json(crate::api::http::schemas::hashes::HSetExRequest {
+                fields,
+                condition: None,
+                expiration: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_route_with_condition_and_expiration() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "old");
+        let state = State(state);
+
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("f1".to_string(), "new".to_string());
+        fields.insert("f2".to_string(), "v2".to_string());
+
+        let response = hsetex(
+            state,
+            Path("h1".to_string()),
+            Json(crate::api::http::schemas::hashes::HSetExRequest {
+                fields,
+                condition: Some(crate::api::http::schemas::hashes::HSetExConditionSchema::Fnx),
+                expiration: Some(crate::api::http::schemas::hashes::HSetExExpirationSchema::Ex(60)),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        // FNX: f1 exists so not set, f2 new so set
+        assert_eq!(data.count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_returns_501_when_feature_disabled() {
+        let (mut app_state, _) = test_state_with_hash_repo();
+        let mut caps = (*app_state.capabilities).clone();
+        caps.features.hash_8_commands = false;
+        app_state.capabilities = std::sync::Arc::new(caps);
+        let state = State(app_state);
+
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("f1".to_string(), "v1".to_string());
+
+        let req = crate::api::http::schemas::hashes::HSetExRequest {
+            fields,
+            condition: None,
+            expiration: None,
+        };
+        let result = hsetex(state, Path("mykey".into()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_hgetdel_route_success() {
+        let (state, hash_repo) = test_state_with_hash_repo();
+        hash_repo.insert("h1", "f1", "v1");
+        hash_repo.insert("h1", "f2", "v2");
+        let state = State(state);
+
+        let response = hgetdel(
+            state,
+            Path("h1".to_string()),
+            Json(crate::api::http::schemas::hashes::HGetDelRequest {
+                fields: vec!["f1".to_string(), "missing".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.values.len(), 2);
+        assert_eq!(data.values[0].as_deref(), Some("v1"));
+        assert!(data.values[1].is_none());
+    }
+
+    #[tokio::test]
+    async fn test_hgetdel_returns_501_when_feature_disabled() {
+        let (mut app_state, _) = test_state_with_hash_repo();
+        let mut caps = (*app_state.capabilities).clone();
+        caps.features.hash_8_commands = false;
+        app_state.capabilities = std::sync::Arc::new(caps);
+        let state = State(app_state);
+
+        let req = crate::api::http::schemas::hashes::HGetDelRequest {
+            fields: vec!["f1".into()],
+        };
+        let result = hgetdel(state, Path("mykey".into()), Json(req)).await;
         assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
     }
 }

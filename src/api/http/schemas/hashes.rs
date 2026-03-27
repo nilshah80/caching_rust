@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::domain::repositories::ExpireCondition;
+use crate::domain::repositories::{ExpireCondition, HSetExCondition, HashExpiration};
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
 pub struct SetHashRequest {
@@ -153,6 +153,134 @@ pub struct HExpireFieldResult {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct HExpireResponse {
     pub results: Vec<HExpireFieldResult>,
+}
+
+// --- Redis 8.0+ Hash schemas ---
+
+/// Expiration options for HGETEX (no KEEPTTL).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HGetExExpirationSchema {
+    /// Set expiry in seconds
+    Ex(i64),
+    /// Set expiry in milliseconds
+    Px(i64),
+    /// Set expiry as unix timestamp (seconds)
+    Exat(i64),
+    /// Set expiry as unix timestamp (milliseconds)
+    Pxat(i64),
+    /// Remove existing expiry
+    Persist,
+}
+
+impl From<HGetExExpirationSchema> for HashExpiration {
+    fn from(schema: HGetExExpirationSchema) -> Self {
+        match schema {
+            HGetExExpirationSchema::Ex(s) => HashExpiration::Ex(s),
+            HGetExExpirationSchema::Px(ms) => HashExpiration::Px(ms),
+            HGetExExpirationSchema::Exat(ts) => HashExpiration::Exat(ts),
+            HGetExExpirationSchema::Pxat(ts) => HashExpiration::Pxat(ts),
+            HGetExExpirationSchema::Persist => HashExpiration::Persist,
+        }
+    }
+}
+
+/// Expiration options for HSETEX (no PERSIST, has KEEPTTL).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HSetExExpirationSchema {
+    /// Set expiry in seconds
+    Ex(i64),
+    /// Set expiry in milliseconds
+    Px(i64),
+    /// Set expiry as unix timestamp (seconds)
+    Exat(i64),
+    /// Set expiry as unix timestamp (milliseconds)
+    Pxat(i64),
+    /// Keep existing TTL
+    Keepttl,
+}
+
+impl From<HSetExExpirationSchema> for HashExpiration {
+    fn from(schema: HSetExExpirationSchema) -> Self {
+        match schema {
+            HSetExExpirationSchema::Ex(s) => HashExpiration::Ex(s),
+            HSetExExpirationSchema::Px(ms) => HashExpiration::Px(ms),
+            HSetExExpirationSchema::Exat(ts) => HashExpiration::Exat(ts),
+            HSetExExpirationSchema::Pxat(ts) => HashExpiration::Pxat(ts),
+            HSetExExpirationSchema::Keepttl => HashExpiration::Keepttl,
+        }
+    }
+}
+
+/// Condition for HSETEX command.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum HSetExConditionSchema {
+    /// Set field only if it does not already exist
+    Fnx,
+    /// Set field only if it already exists
+    Fxx,
+}
+
+impl From<HSetExConditionSchema> for HSetExCondition {
+    fn from(schema: HSetExConditionSchema) -> Self {
+        match schema {
+            HSetExConditionSchema::Fnx => HSetExCondition::FNX,
+            HSetExConditionSchema::Fxx => HSetExCondition::FXX,
+        }
+    }
+}
+
+/// Request body for HGETEX command (Redis 8.0+).
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct HGetExRequest {
+    /// Fields to get values for
+    #[validate(length(min = 1, message = "At least one field required"))]
+    pub fields: Vec<String>,
+    /// Optional expiration to set/remove on the fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expiration: Option<HGetExExpirationSchema>,
+}
+
+/// Request body for HSETEX command (Redis 8.0+).
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct HSetExRequest {
+    /// Field-value pairs to set
+    #[validate(length(min = 1, message = "At least one field required"))]
+    pub fields: HashMap<String, String>,
+    /// Optional condition for setting fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<HSetExConditionSchema>,
+    /// Optional expiration for the fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expiration: Option<HSetExExpirationSchema>,
+}
+
+/// Request body for HGETDEL command (Redis 8.0+).
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct HGetDelRequest {
+    /// Fields to get values for and then delete
+    #[validate(length(min = 1, message = "At least one field required"))]
+    pub fields: Vec<String>,
+}
+
+/// Response for HGETEX command.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HGetExResponse {
+    pub values: Vec<Option<String>>,
+}
+
+/// Response for HSETEX command.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HSetExResponse {
+    pub count: i64,
+}
+
+/// Response for HGETDEL command.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HGetDelResponse {
+    pub values: Vec<Option<String>>,
 }
 
 #[cfg(test)]
@@ -345,5 +473,219 @@ mod tests {
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(!json.contains("condition"));
+    }
+
+    // --- HGETEX schema tests ---
+
+    #[test]
+    fn test_hgetex_request_empty_fields_fails() {
+        let req = HGetExRequest {
+            fields: vec![],
+            expiration: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_hgetex_request_valid_passes() {
+        let req = HGetExRequest {
+            fields: vec!["f1".to_string()],
+            expiration: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_hgetex_request_with_expiration() {
+        let req = HGetExRequest {
+            fields: vec!["f1".to_string()],
+            expiration: Some(HGetExExpirationSchema::Ex(60)),
+        };
+        assert!(req.validate().is_ok());
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("ex"));
+    }
+
+    #[test]
+    fn test_hgetex_request_expiration_skipped_when_none() {
+        let req = HGetExRequest {
+            fields: vec!["f1".to_string()],
+            expiration: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(!json.contains("expiration"));
+    }
+
+    #[test]
+    fn test_hgetex_expiration_schema_all_variants() {
+        use crate::domain::repositories::HashExpiration;
+
+        let ex: HashExpiration = HGetExExpirationSchema::Ex(60).into();
+        assert!(matches!(ex, HashExpiration::Ex(60)));
+
+        let px: HashExpiration = HGetExExpirationSchema::Px(1000).into();
+        assert!(matches!(px, HashExpiration::Px(1000)));
+
+        let exat: HashExpiration = HGetExExpirationSchema::Exat(1700000000).into();
+        assert!(matches!(exat, HashExpiration::Exat(1700000000)));
+
+        let pxat: HashExpiration = HGetExExpirationSchema::Pxat(1700000000000).into();
+        assert!(matches!(pxat, HashExpiration::Pxat(1700000000000)));
+
+        let persist: HashExpiration = HGetExExpirationSchema::Persist.into();
+        assert!(matches!(persist, HashExpiration::Persist));
+    }
+
+    #[test]
+    fn test_hgetex_expiration_deserialization() {
+        let ex: HGetExExpirationSchema = serde_json::from_str(r#"{"ex": 60}"#).unwrap();
+        assert!(matches!(ex, HGetExExpirationSchema::Ex(60)));
+
+        let persist: HGetExExpirationSchema = serde_json::from_str(r#""persist""#).unwrap();
+        assert!(matches!(persist, HGetExExpirationSchema::Persist));
+    }
+
+    #[test]
+    fn test_hgetex_response() {
+        let resp = HGetExResponse {
+            values: vec![Some("v1".to_string()), None],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("v1"));
+        assert!(json.contains("null"));
+    }
+
+    // --- HSETEX schema tests ---
+
+    #[test]
+    fn test_hsetex_request_empty_fields_fails() {
+        let req = HSetExRequest {
+            fields: HashMap::new(),
+            condition: None,
+            expiration: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_hsetex_request_valid_passes() {
+        let mut fields = HashMap::new();
+        fields.insert("f1".to_string(), "v1".to_string());
+        let req = HSetExRequest {
+            fields,
+            condition: None,
+            expiration: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_hsetex_request_with_condition_and_expiration() {
+        let mut fields = HashMap::new();
+        fields.insert("f1".to_string(), "v1".to_string());
+        let req = HSetExRequest {
+            fields,
+            condition: Some(HSetExConditionSchema::Fnx),
+            expiration: Some(HSetExExpirationSchema::Ex(60)),
+        };
+        assert!(req.validate().is_ok());
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("FNX"));
+        assert!(json.contains("ex"));
+    }
+
+    #[test]
+    fn test_hsetex_condition_schema_conversions() {
+        use crate::domain::repositories::HSetExCondition;
+
+        let fnx: HSetExCondition = HSetExConditionSchema::Fnx.into();
+        assert!(matches!(fnx, HSetExCondition::FNX));
+
+        let fxx: HSetExCondition = HSetExConditionSchema::Fxx.into();
+        assert!(matches!(fxx, HSetExCondition::FXX));
+    }
+
+    #[test]
+    fn test_hsetex_condition_schema_deserialization() {
+        let fnx: HSetExConditionSchema = serde_json::from_str(r#""FNX""#).unwrap();
+        assert!(matches!(fnx, HSetExConditionSchema::Fnx));
+        let fxx: HSetExConditionSchema = serde_json::from_str(r#""FXX""#).unwrap();
+        assert!(matches!(fxx, HSetExConditionSchema::Fxx));
+    }
+
+    #[test]
+    fn test_hsetex_expiration_schema_all_variants() {
+        use crate::domain::repositories::HashExpiration;
+
+        let ex: HashExpiration = HSetExExpirationSchema::Ex(60).into();
+        assert!(matches!(ex, HashExpiration::Ex(60)));
+
+        let px: HashExpiration = HSetExExpirationSchema::Px(1000).into();
+        assert!(matches!(px, HashExpiration::Px(1000)));
+
+        let exat: HashExpiration = HSetExExpirationSchema::Exat(1700000000).into();
+        assert!(matches!(exat, HashExpiration::Exat(1700000000)));
+
+        let pxat: HashExpiration = HSetExExpirationSchema::Pxat(1700000000000).into();
+        assert!(matches!(pxat, HashExpiration::Pxat(1700000000000)));
+
+        let keepttl: HashExpiration = HSetExExpirationSchema::Keepttl.into();
+        assert!(matches!(keepttl, HashExpiration::Keepttl));
+    }
+
+    #[test]
+    fn test_hsetex_expiration_deserialization() {
+        let ex: HSetExExpirationSchema = serde_json::from_str(r#"{"ex": 60}"#).unwrap();
+        assert!(matches!(ex, HSetExExpirationSchema::Ex(60)));
+
+        let keepttl: HSetExExpirationSchema = serde_json::from_str(r#""keepttl""#).unwrap();
+        assert!(matches!(keepttl, HSetExExpirationSchema::Keepttl));
+    }
+
+    #[test]
+    fn test_hsetex_request_optional_fields_skipped() {
+        let mut fields = HashMap::new();
+        fields.insert("f1".to_string(), "v1".to_string());
+        let req = HSetExRequest {
+            fields,
+            condition: None,
+            expiration: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(!json.contains("condition"));
+        assert!(!json.contains("expiration"));
+    }
+
+    #[test]
+    fn test_hsetex_response() {
+        let resp = HSetExResponse { count: 3 };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("3"));
+    }
+
+    // --- HGETDEL schema tests ---
+
+    #[test]
+    fn test_hgetdel_request_empty_fields_fails() {
+        let req = HGetDelRequest { fields: vec![] };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_hgetdel_request_valid_passes() {
+        let req = HGetDelRequest {
+            fields: vec!["f1".to_string()],
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_hgetdel_response() {
+        let resp = HGetDelResponse {
+            values: vec![Some("v1".to_string()), None],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("v1"));
+        assert!(json.contains("null"));
     }
 }

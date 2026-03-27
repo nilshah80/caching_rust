@@ -18,6 +18,32 @@ pub enum ExpireCondition {
     LT,
 }
 
+/// Expiration options for HGETEX and HSETEX commands (Redis 8.0+).
+#[derive(Debug, Clone)]
+pub enum HashExpiration {
+    /// Set expiry in seconds
+    Ex(i64),
+    /// Set expiry in milliseconds
+    Px(i64),
+    /// Set expiry as unix timestamp (seconds)
+    Exat(i64),
+    /// Set expiry as unix timestamp (milliseconds)
+    Pxat(i64),
+    /// Remove existing expiry
+    Persist,
+    /// Keep existing TTL (HSETEX only)
+    Keepttl,
+}
+
+/// Condition for HSETEX command (Redis 8.0+).
+#[derive(Debug, Clone)]
+pub enum HSetExCondition {
+    /// Set field only if it does not already exist
+    FNX,
+    /// Set field only if it already exists
+    FXX,
+}
+
 impl ExpireCondition {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -93,4 +119,26 @@ pub trait HashRepository: Send + Sync {
     async fn httl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
     async fn hpttl(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
     async fn hpersist(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError>;
+
+    // Redis 8.0+ hash commands
+    async fn hgetex(
+        &self,
+        key: &str,
+        fields: &[String],
+        expiration: Option<HashExpiration>,
+    ) -> Result<Vec<Option<String>>, CacheError>;
+
+    async fn hsetex(
+        &self,
+        key: &str,
+        field_values: &[(String, String)],
+        condition: Option<HSetExCondition>,
+        expiration: Option<HashExpiration>,
+    ) -> Result<i64, CacheError>;
+
+    async fn hgetdel(
+        &self,
+        key: &str,
+        fields: &[String],
+    ) -> Result<Vec<Option<String>>, CacheError>;
 }

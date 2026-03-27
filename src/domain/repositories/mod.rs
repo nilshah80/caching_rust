@@ -28,7 +28,7 @@ pub use geo_repository::{
     GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,
     GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder, GeoUnit,
 };
-pub use hash_repository::{ExpireCondition, HashRepository};
+pub use hash_repository::{ExpireCondition, HSetExCondition, HashExpiration, HashRepository};
 pub use json_repository::JsonRepository;
 pub use key_repository::{KeyRepository, SortOptions, SortOrder};
 pub use list_repository::{

@@ -181,4 +181,23 @@ pub trait AdminRepository: Send + Sync {
         username: &str,
         command: &[String],
     ) -> Result<AclDryrunResult, CacheError>;
+
+    // ========================================================================
+    // Command Introspection Operations
+    // ========================================================================
+
+    /// List all commands, optionally filtered by pattern (COMMAND LIST command, Redis 7.0+)
+    async fn command_list(&self, filter: Option<&str>) -> Result<Vec<String>, CacheError>;
+
+    /// Get total number of commands (COMMAND COUNT command, Redis 2.8.13+)
+    async fn command_count(&self) -> Result<i64, CacheError>;
+
+    /// Get command documentation (COMMAND DOCS command, Redis 7.0+)
+    async fn command_docs(&self, commands: &[String]) -> Result<serde_json::Value, CacheError>;
+
+    /// Get command info (COMMAND INFO command, Redis 2.8.13+)
+    async fn command_info(&self, commands: &[String]) -> Result<serde_json::Value, CacheError>;
+
+    /// Extract keys from a command (COMMAND GETKEYS command, Redis 2.8.13+)
+    async fn command_getkeys(&self, command: &[String]) -> Result<Vec<String>, CacheError>;
 }

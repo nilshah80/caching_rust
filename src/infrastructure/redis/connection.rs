@@ -438,7 +438,10 @@ impl InstrumentedPool {
             acl: RedisCapabilities::version_gte(&redis_version, "6.0.0"),
             functions: RedisCapabilities::version_gte(&redis_version, "7.0.0"),
             lcs: RedisCapabilities::version_gte(&redis_version, "7.0.0"),
+            command_docs: RedisCapabilities::version_gte(&redis_version, "7.0.0"),
             hash_field_expiration: RedisCapabilities::version_gte(&redis_version, "7.4.0"),
+            // Redis 8.0 pre-releases report as 7.9.x, so gate at 7.9.0
+            hash_8_commands: RedisCapabilities::version_gte(&redis_version, "7.9.0"),
             cluster: cluster_enabled,
         };
 

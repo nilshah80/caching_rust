@@ -359,6 +359,48 @@ impl AdminService {
         }
         self.repository.acl_dryrun(username, command).await
     }
+
+    // ========================================================================
+    // Command Introspection Operations
+    // ========================================================================
+
+    /// List all commands, optionally filtered by pattern
+    pub async fn command_list(&self, filter: Option<&str>) -> Result<Vec<String>, CacheError> {
+        self.repository.command_list(filter).await
+    }
+
+    /// Get total number of commands
+    pub async fn command_count(&self) -> Result<i64, CacheError> {
+        self.repository.command_count().await
+    }
+
+    /// Get command documentation
+    pub async fn command_docs(&self, commands: &[String]) -> Result<serde_json::Value, CacheError> {
+        if commands.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "At least one command name required".to_string(),
+            ));
+        }
+        self.repository.command_docs(commands).await
+    }
+
+    /// Get command info
+    pub async fn command_info(&self, commands: &[String]) -> Result<serde_json::Value, CacheError> {
+        if commands.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "At least one command name required".to_string(),
+            ));
+        }
+        self.repository.command_info(commands).await
+    }
+
+    /// Extract keys from a command
+    pub async fn command_getkeys(&self, command: &[String]) -> Result<Vec<String>, CacheError> {
+        if command.is_empty() {
+            return Err(CacheError::InvalidInput("Command is required".to_string()));
+        }
+        self.repository.command_getkeys(command).await
+    }
 }
 
 #[cfg(test)]
@@ -542,6 +584,32 @@ mod tests {
                 reason: None,
             })
         }
+
+        async fn command_list(&self, _filter: Option<&str>) -> Result<Vec<String>, CacheError> {
+            Ok(vec!["get".to_string(), "set".to_string()])
+        }
+
+        async fn command_count(&self) -> Result<i64, CacheError> {
+            Ok(200)
+        }
+
+        async fn command_docs(
+            &self,
+            _commands: &[String],
+        ) -> Result<serde_json::Value, CacheError> {
+            Ok(serde_json::json!({}))
+        }
+
+        async fn command_info(
+            &self,
+            _commands: &[String],
+        ) -> Result<serde_json::Value, CacheError> {
+            Ok(serde_json::json!([]))
+        }
+
+        async fn command_getkeys(&self, _command: &[String]) -> Result<Vec<String>, CacheError> {
+            Ok(vec!["key".to_string()])
+        }
     }
 
     #[tokio::test]
@@ -605,6 +673,60 @@ mod tests {
 
         service.acl_genpass(None).await.expect("genpass");
         assert_eq!(*repo.genpass_bits.lock().expect("lock"), Some(256));
+    }
+
+    #[tokio::test]
+    async fn test_command_introspection_validation() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+
+        // command_docs with empty commands
+        let err = service.command_docs(&[]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        // command_info with empty commands
+        let err = service.command_info(&[]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        // command_getkeys with empty command
+        let err = service.command_getkeys(&[]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_command_introspection_passthrough() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+
+        let list = service.command_list(None).await.expect("command_list");
+        assert_eq!(list, vec!["get".to_string(), "set".to_string()]);
+
+        let list_filtered = service
+            .command_list(Some("get*"))
+            .await
+            .expect("command_list filtered");
+        assert_eq!(list_filtered, vec!["get".to_string(), "set".to_string()]);
+
+        let count = service.command_count().await.expect("command_count");
+        assert_eq!(count, 200);
+
+        let docs = service
+            .command_docs(&["GET".to_string()])
+            .await
+            .expect("command_docs");
+        assert!(docs.is_object());
+
+        let info = service
+            .command_info(&["GET".to_string()])
+            .await
+            .expect("command_info");
+        assert!(info.is_array());
+
+        let keys = service
+            .command_getkeys(&["GET".to_string(), "mykey".to_string()])
+            .await
+            .expect("command_getkeys");
+        assert_eq!(keys, vec!["key".to_string()]);
     }
 
     #[test]

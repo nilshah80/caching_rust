@@ -611,6 +611,97 @@ impl AdminRepository for RedisAdminRepository {
             })
         }
     }
+
+    // ========================================================================
+    // Command Introspection Operations
+    // ========================================================================
+
+    async fn command_list(&self, filter: Option<&str>) -> Result<Vec<String>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("COMMAND");
+        cmd.arg("LIST");
+        if let Some(f) = filter {
+            cmd.arg("FILTERBY").arg("PATTERN").arg(f);
+        }
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
+        Ok(result)
+    }
+
+    async fn command_count(&self) -> Result<i64, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let result: i64 = redis::cmd("COMMAND")
+            .arg("COUNT")
+            .query_async(&mut conn)
+            .await?;
+        Ok(result)
+    }
+
+    async fn command_docs(&self, commands: &[String]) -> Result<serde_json::Value, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("COMMAND");
+        cmd.arg("DOCS");
+        for c in commands {
+            cmd.arg(c.as_str());
+        }
+        let result: redis::Value = cmd.query_async(&mut conn).await?;
+        Ok(redis_value_to_json(result))
+    }
+
+    async fn command_info(&self, commands: &[String]) -> Result<serde_json::Value, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("COMMAND");
+        cmd.arg("INFO");
+        for c in commands {
+            cmd.arg(c.as_str());
+        }
+        let result: redis::Value = cmd.query_async(&mut conn).await?;
+        Ok(redis_value_to_json(result))
+    }
+
+    async fn command_getkeys(&self, command: &[String]) -> Result<Vec<String>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("COMMAND");
+        cmd.arg("GETKEYS");
+        for arg in command {
+            cmd.arg(arg.as_str());
+        }
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Helper: Convert redis::Value to serde_json::Value
+// ============================================================================
+
+fn redis_value_to_json(value: redis::Value) -> serde_json::Value {
+    match value {
+        redis::Value::Nil => serde_json::Value::Null,
+        redis::Value::Int(i) => serde_json::json!(i),
+        redis::Value::BulkString(bytes) => String::from_utf8(bytes)
+            .map(|s| serde_json::json!(s))
+            .unwrap_or(serde_json::Value::Null),
+        redis::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(redis_value_to_json).collect())
+        }
+        redis::Value::SimpleString(s) => serde_json::json!(s),
+        redis::Value::Okay => serde_json::json!("OK"),
+        redis::Value::Map(pairs) => {
+            let obj: serde_json::Map<String, serde_json::Value> = pairs
+                .into_iter()
+                .filter_map(|(k, v)| {
+                    let key = match k {
+                        redis::Value::BulkString(key_bytes) => String::from_utf8(key_bytes).ok(),
+                        redis::Value::SimpleString(s) => Some(s),
+                        _ => None,
+                    };
+                    key.map(|k| (k, redis_value_to_json(v)))
+                })
+                .collect();
+            serde_json::Value::Object(obj)
+        }
+        _ => serde_json::Value::Null,
+    }
 }
 
 // ============================================================================
@@ -1023,5 +1114,95 @@ db0:keys=5,expires=0,avg_ttl=0\n";
         assert_eq!(parsed[0].count, 3);
         assert_eq!(parsed[0].reason, "invalid");
         assert_eq!(parsed[0].timestamp_us, 99);
+    }
+
+    #[test]
+    fn test_redis_value_to_json_nil() {
+        let result = redis_value_to_json(redis::Value::Nil);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_redis_value_to_json_int() {
+        let result = redis_value_to_json(redis::Value::Int(42));
+        assert_eq!(result, serde_json::json!(42));
+    }
+
+    #[test]
+    fn test_redis_value_to_json_bulk_string() {
+        let result = redis_value_to_json(redis::Value::BulkString(b"hello".to_vec()));
+        assert_eq!(result, serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn test_redis_value_to_json_bulk_string_invalid_utf8() {
+        let result = redis_value_to_json(redis::Value::BulkString(vec![0xff, 0xfe]));
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_redis_value_to_json_array() {
+        let result = redis_value_to_json(redis::Value::Array(vec![
+            redis::Value::Int(1),
+            redis::Value::BulkString(b"two".to_vec()),
+            redis::Value::Nil,
+        ]));
+        assert_eq!(result, serde_json::json!([1, "two", null]));
+    }
+
+    #[test]
+    fn test_redis_value_to_json_simple_string() {
+        let result = redis_value_to_json(redis::Value::SimpleString("OK".to_string()));
+        assert_eq!(result, serde_json::json!("OK"));
+    }
+
+    #[test]
+    fn test_redis_value_to_json_okay() {
+        let result = redis_value_to_json(redis::Value::Okay);
+        assert_eq!(result, serde_json::json!("OK"));
+    }
+
+    #[test]
+    fn test_redis_value_to_json_map() {
+        let result = redis_value_to_json(redis::Value::Map(vec![
+            (
+                redis::Value::BulkString(b"name".to_vec()),
+                redis::Value::BulkString(b"GET".to_vec()),
+            ),
+            (
+                redis::Value::SimpleString("arity".to_string()),
+                redis::Value::Int(2),
+            ),
+        ]));
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj.get("name").unwrap(), &serde_json::json!("GET"));
+        assert_eq!(obj.get("arity").unwrap(), &serde_json::json!(2));
+    }
+
+    #[test]
+    fn test_redis_value_to_json_map_non_string_key() {
+        // Non-string keys should be filtered out
+        let result = redis_value_to_json(redis::Value::Map(vec![
+            (
+                redis::Value::Int(1),
+                redis::Value::BulkString(b"value".to_vec()),
+            ),
+            (
+                redis::Value::BulkString(b"valid".to_vec()),
+                redis::Value::Int(42),
+            ),
+        ]));
+        let obj = result.as_object().unwrap();
+        assert_eq!(obj.len(), 1);
+        assert_eq!(obj.get("valid").unwrap(), &serde_json::json!(42));
+    }
+
+    #[test]
+    fn test_redis_value_to_json_nested() {
+        let result = redis_value_to_json(redis::Value::Array(vec![redis::Value::Map(vec![(
+            redis::Value::BulkString(b"key".to_vec()),
+            redis::Value::Array(vec![redis::Value::Int(1), redis::Value::Int(2)]),
+        )])]));
+        assert_eq!(result, serde_json::json!([{"key": [1, 2]}]));
     }
 }

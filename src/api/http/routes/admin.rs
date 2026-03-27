@@ -5,7 +5,7 @@
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
     routing::{delete, get, post},
 };
@@ -370,6 +370,52 @@ pub struct AclDryrunResponse {
     pub reason: Option<String>,
 }
 
+/// Command list query parameters
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CommandListQuery {
+    /// Optional filter pattern (e.g., "*get*")
+    pub pattern: Option<String>,
+}
+
+/// Command list response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CommandListResponse {
+    pub commands: Vec<String>,
+}
+
+/// Command count response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CommandCountResponse {
+    pub count: i64,
+}
+
+/// Command docs request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CommandDocsRequest {
+    /// Command names to get documentation for
+    pub commands: Vec<String>,
+}
+
+/// Command info request (reuses same shape as docs)
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CommandInfoRequest {
+    /// Command names to get info for
+    pub commands: Vec<String>,
+}
+
+/// Command getkeys request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CommandGetKeysRequest {
+    /// Full command with arguments (e.g., ["GET", "mykey"])
+    pub command: Vec<String>,
+}
+
+/// Command getkeys response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CommandGetKeysResponse {
+    pub keys: Vec<String>,
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -430,6 +476,12 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/acl/genpass", post(acl_genpass))
         .route("/api/v1/admin/acl/log", post(acl_log))
         .route("/api/v1/admin/acl/dryrun", post(acl_dryrun))
+        // Command introspection operations (protected)
+        .route("/api/v1/admin/commands", get(command_list))
+        .route("/api/v1/admin/commands/count", get(command_count))
+        .route("/api/v1/admin/commands/docs", post(command_docs))
+        .route("/api/v1/admin/commands/info", post(command_info))
+        .route("/api/v1/admin/commands/getkeys", post(command_getkeys))
 }
 
 // ============================================================================
@@ -1560,6 +1612,149 @@ pub async fn acl_dryrun(
         .map_err(to_status_code)
 }
 
+// ============================================================================
+// Command Introspection Operations
+// ============================================================================
+
+/// GET /api/v1/admin/commands
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/commands",
+    params(
+        ("pattern" = Option<String>, Query, description = "Optional filter pattern (e.g., '*get*')")
+    ),
+    responses(
+        (status = 200, description = "List of commands", body = CommandListResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn command_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<CommandListQuery>,
+) -> Result<ApiResponse<CommandListResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    if !state.capabilities.features.command_docs {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    state
+        .admin_service
+        .command_list(query.pattern.as_deref())
+        .await
+        .map(|commands| ApiResponse::success(CommandListResponse { commands }))
+        .map_err(to_status_code)
+}
+
+/// GET /api/v1/admin/commands/count
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/commands/count",
+    responses(
+        (status = 200, description = "Total number of commands", body = CommandCountResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn command_count(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<CommandCountResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .command_count()
+        .await
+        .map(|count| ApiResponse::success(CommandCountResponse { count }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/commands/docs
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/commands/docs",
+    request_body = CommandDocsRequest,
+    responses(
+        (status = 200, description = "Command documentation", body = serde_json::Value),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn command_docs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CommandDocsRequest>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    if !state.capabilities.features.command_docs {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    state
+        .admin_service
+        .command_docs(&request.commands)
+        .await
+        .map(|data| Json(ApiResponse::success(data)))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/commands/info
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/commands/info",
+    request_body = CommandInfoRequest,
+    responses(
+        (status = 200, description = "Command info", body = serde_json::Value),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn command_info(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CommandInfoRequest>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .command_info(&request.commands)
+        .await
+        .map(|data| Json(ApiResponse::success(data)))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/commands/getkeys
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/commands/getkeys",
+    request_body = CommandGetKeysRequest,
+    responses(
+        (status = 200, description = "Extracted keys", body = CommandGetKeysResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn command_getkeys(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CommandGetKeysRequest>,
+) -> Result<ApiResponse<CommandGetKeysResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .command_getkeys(&request.command)
+        .await
+        .map(|keys| ApiResponse::success(CommandGetKeysResponse { keys }))
+        .map_err(to_status_code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1817,5 +2012,122 @@ mod tests {
         let dryrun_data = result.data.unwrap();
         assert!(dryrun_data.allowed);
         assert!(dryrun_data.reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_command_introspection_handlers() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let state = State(state);
+
+        // command_list without filter
+        let result = command_list(
+            state.clone(),
+            auth.clone(),
+            Query(CommandListQuery { pattern: None }),
+        )
+        .await
+        .unwrap();
+        let data = result.data.unwrap();
+        assert!(!data.commands.is_empty());
+        assert!(data.commands.contains(&"get".to_string()));
+
+        // command_list with filter
+        let result = command_list(
+            state.clone(),
+            auth.clone(),
+            Query(CommandListQuery {
+                pattern: Some("get*".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(result.data.is_some());
+
+        // command_count
+        let result = command_count(state.clone(), auth.clone()).await.unwrap();
+        let data = result.data.unwrap();
+        assert!(data.count > 0);
+
+        // command_docs
+        let result = command_docs(
+            state.clone(),
+            auth.clone(),
+            Json(CommandDocsRequest {
+                commands: vec!["GET".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(result.0.data.is_some());
+
+        // command_info
+        let result = command_info(
+            state.clone(),
+            auth.clone(),
+            Json(CommandInfoRequest {
+                commands: vec!["GET".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(result.0.data.is_some());
+
+        // command_getkeys
+        let result = command_getkeys(
+            state.clone(),
+            auth.clone(),
+            Json(CommandGetKeysRequest {
+                command: vec!["GET".to_string(), "mykey".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.data.unwrap();
+        assert!(!data.keys.is_empty());
+
+        // Test unauthorized access
+        let no_auth = HeaderMap::new();
+        let err = command_list(
+            state.clone(),
+            no_auth.clone(),
+            Query(CommandListQuery { pattern: None }),
+        )
+        .await;
+        assert!(err.is_err());
+        assert_eq!(err.unwrap_err(), StatusCode::UNAUTHORIZED);
+
+        let err = command_count(state.clone(), no_auth.clone()).await;
+        assert!(err.is_err());
+
+        let err = command_docs(
+            state.clone(),
+            no_auth.clone(),
+            Json(CommandDocsRequest {
+                commands: vec!["GET".to_string()],
+            }),
+        )
+        .await;
+        assert!(err.is_err());
+
+        let err = command_info(
+            state.clone(),
+            no_auth.clone(),
+            Json(CommandInfoRequest {
+                commands: vec!["GET".to_string()],
+            }),
+        )
+        .await;
+        assert!(err.is_err());
+
+        let err = command_getkeys(
+            state.clone(),
+            no_auth,
+            Json(CommandGetKeysRequest {
+                command: vec!["GET".to_string(), "mykey".to_string()],
+            }),
+        )
+        .await;
+        assert!(err.is_err());
     }
 }

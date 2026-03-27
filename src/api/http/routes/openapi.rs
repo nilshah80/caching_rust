@@ -31,6 +31,14 @@ use crate::api::http::routes::admin::{
     ClientSetNameRequest,
     ClientSetNameResponse,
     ClientUnpauseResponse,
+    // Command introspection
+    CommandCountResponse,
+    CommandDocsRequest,
+    CommandGetKeysRequest,
+    CommandGetKeysResponse,
+    CommandInfoRequest,
+    CommandListQuery,
+    CommandListResponse,
     // Config operations
     ConfigGetRequest,
     ConfigGetResponse,
@@ -93,9 +101,11 @@ use crate::api::http::schemas::geo::{
 };
 use crate::api::http::schemas::hashes::{
     ExpireConditionSchema, GetMultipleFieldsRequest, HExpireAtRequest, HExpireFieldResult,
-    HExpireRequest, HExpireResponse, HFieldsRequest, HPExpireAtRequest, HPExpireRequest,
-    HashFieldEntry, HashIncrFloatRequest, HashIncrRequest, HashRandomFieldResponse,
-    HashScanResponse, RandomFieldQuery, ScanHashQuery, SetHashNxRequest, SetHashRequest,
+    HExpireRequest, HExpireResponse, HFieldsRequest, HGetDelRequest, HGetDelResponse,
+    HGetExExpirationSchema, HGetExRequest, HGetExResponse, HPExpireAtRequest, HPExpireRequest,
+    HSetExConditionSchema, HSetExExpirationSchema, HSetExRequest, HSetExResponse, HashFieldEntry,
+    HashIncrFloatRequest, HashIncrRequest, HashRandomFieldResponse, HashScanResponse,
+    RandomFieldQuery, ScanHashQuery, SetHashNxRequest, SetHashRequest,
 };
 use crate::api::http::schemas::json::{
     JsonArrAppendRequest, JsonArrAppendResponse, JsonArrIndexRequest, JsonArrIndexResponse,
@@ -357,6 +367,10 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::hashes::httl,
         crate::api::http::routes::hashes::hpttl,
         crate::api::http::routes::hashes::hpersist,
+        // Redis 8.0+ hash endpoints
+        crate::api::http::routes::hashes::hgetex,
+        crate::api::http::routes::hashes::hsetex,
+        crate::api::http::routes::hashes::hgetdel,
         // List endpoints
         crate::api::http::routes::lists::lpush,
         crate::api::http::routes::lists::rpush,
@@ -646,6 +660,12 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::acl_genpass,
         crate::api::http::routes::admin::acl_log,
         crate::api::http::routes::admin::acl_dryrun,
+        // Admin - Command Introspection
+        crate::api::http::routes::admin::command_list,
+        crate::api::http::routes::admin::command_count,
+        crate::api::http::routes::admin::command_docs,
+        crate::api::http::routes::admin::command_info,
+        crate::api::http::routes::admin::command_getkeys,
     ),
     components(
         schemas(
@@ -728,6 +748,16 @@ use crate::shared::app_state::AppState;
             HFieldsRequest,
             HExpireFieldResult,
             HExpireResponse,
+            // Redis 8.0+ hash schemas
+            HGetExExpirationSchema,
+            HGetExRequest,
+            HGetExResponse,
+            HSetExExpirationSchema,
+            HSetExConditionSchema,
+            HSetExRequest,
+            HSetExResponse,
+            HGetDelRequest,
+            HGetDelResponse,
             // List schemas
             ListPushRequest,
             ListPushResponse,
@@ -966,6 +996,14 @@ use crate::shared::app_state::AppState;
             AclLogResponse,
             AclDryrunRequest,
             AclDryrunResponse,
+            // Admin - Command Introspection
+            CommandListQuery,
+            CommandListResponse,
+            CommandCountResponse,
+            CommandDocsRequest,
+            CommandInfoRequest,
+            CommandGetKeysRequest,
+            CommandGetKeysResponse,
             // JSON schemas (RedisJSON module)
             JsonSetRequest,
             JsonSetResponse,

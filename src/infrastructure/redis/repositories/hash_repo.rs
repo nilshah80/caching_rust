@@ -4,7 +4,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::{ExpireCondition, HashRepository};
+use crate::domain::repositories::{
+    ExpireCondition, HSetExCondition, HashExpiration, HashRepository,
+};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
 #[derive(Clone)]
@@ -261,9 +263,108 @@ impl HashRepository for RedisHashRepository {
     async fn hpersist(&self, key: &str, fields: &[String]) -> Result<Vec<i64>, CacheError> {
         self.run_field_query_cmd("HPERSIST", key, fields).await
     }
+
+    async fn hgetex(
+        &self,
+        key: &str,
+        fields: &[String],
+        expiration: Option<HashExpiration>,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("HGETEX");
+        cmd.arg(key);
+        Self::apply_hash_expiration(&mut cmd, &expiration);
+        cmd.arg("FIELDS").arg(fields.len());
+        for f in fields {
+            cmd.arg(f);
+        }
+        let result: Vec<redis::Value> = cmd.query_async(&mut *conn).await?;
+        Ok(Self::convert_values(result))
+    }
+
+    async fn hsetex(
+        &self,
+        key: &str,
+        field_values: &[(String, String)],
+        condition: Option<HSetExCondition>,
+        expiration: Option<HashExpiration>,
+    ) -> Result<i64, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("HSETEX");
+        cmd.arg(key);
+        match &condition {
+            Some(HSetExCondition::FNX) => {
+                cmd.arg("FNX");
+            }
+            Some(HSetExCondition::FXX) => {
+                cmd.arg("FXX");
+            }
+            None => {}
+        }
+        Self::apply_hash_expiration(&mut cmd, &expiration);
+        cmd.arg("FIELDS").arg(field_values.len());
+        for (f, v) in field_values {
+            cmd.arg(f).arg(v);
+        }
+        let result: i64 = cmd.query_async(&mut *conn).await?;
+        Ok(result)
+    }
+
+    async fn hgetdel(
+        &self,
+        key: &str,
+        fields: &[String],
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("HGETDEL");
+        cmd.arg(key);
+        cmd.arg("FIELDS").arg(fields.len());
+        for f in fields {
+            cmd.arg(f);
+        }
+        let result: Vec<redis::Value> = cmd.query_async(&mut *conn).await?;
+        Ok(Self::convert_values(result))
+    }
 }
 
 impl RedisHashRepository {
+    /// Convert redis::Value array to Vec<Option<String>>.
+    fn convert_values(values: Vec<redis::Value>) -> Vec<Option<String>> {
+        values
+            .into_iter()
+            .map(|v| match v {
+                redis::Value::BulkString(bytes) => String::from_utf8(bytes).ok(),
+                redis::Value::SimpleString(s) => Some(s),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Apply hash expiration arguments to a command.
+    fn apply_hash_expiration(cmd: &mut redis::Cmd, expiration: &Option<HashExpiration>) {
+        match expiration {
+            Some(HashExpiration::Ex(s)) => {
+                cmd.arg("EX").arg(*s);
+            }
+            Some(HashExpiration::Px(ms)) => {
+                cmd.arg("PX").arg(*ms);
+            }
+            Some(HashExpiration::Exat(ts)) => {
+                cmd.arg("EXAT").arg(*ts);
+            }
+            Some(HashExpiration::Pxat(ts)) => {
+                cmd.arg("PXAT").arg(*ts);
+            }
+            Some(HashExpiration::Persist) => {
+                cmd.arg("PERSIST");
+            }
+            Some(HashExpiration::Keepttl) => {
+                cmd.arg("KEEPTTL");
+            }
+            None => {}
+        }
+    }
+
     /// Helper for HEXPIRE, HPEXPIRE, HEXPIREAT, HPEXPIREAT commands.
     async fn run_expire_cmd(
         &self,

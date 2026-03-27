@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::{ExpireCondition, HashRepository};
+use crate::domain::repositories::{
+    ExpireCondition, HSetExCondition, HashExpiration, HashRepository,
+};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisHashRepository;
 
@@ -245,6 +247,47 @@ impl HashService {
     pub async fn hpersist(&self, key: &str, fields: Vec<String>) -> Result<Vec<i64>, CacheError> {
         Self::validate_key_and_fields(key, &fields)?;
         self.repository.hpersist(key, &fields).await
+    }
+
+    // --- Redis 8.0+ hash commands ---
+
+    pub async fn hgetex(
+        &self,
+        key: &str,
+        fields: Vec<String>,
+        expiration: Option<HashExpiration>,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        self.repository.hgetex(key, &fields, expiration).await
+    }
+
+    pub async fn hsetex(
+        &self,
+        key: &str,
+        field_values: Vec<(String, String)>,
+        condition: Option<HSetExCondition>,
+        expiration: Option<HashExpiration>,
+    ) -> Result<i64, CacheError> {
+        if key.is_empty() {
+            return Err(CacheError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        if field_values.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Fields cannot be empty".to_string(),
+            ));
+        }
+        self.repository
+            .hsetex(key, &field_values, condition, expiration)
+            .await
+    }
+
+    pub async fn hgetdel(
+        &self,
+        key: &str,
+        fields: Vec<String>,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        Self::validate_key_and_fields(key, &fields)?;
+        self.repository.hgetdel(key, &fields).await
     }
 }
 
@@ -588,6 +631,164 @@ mod tests {
 
         let result = service.hpersist("key", vec!["f1".into()]).await.unwrap();
         assert_eq!(result, vec![1]);
+    }
+
+    // --- Redis 8.0+ command tests ---
+
+    #[tokio::test]
+    async fn test_hgetex_empty_key() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service
+            .hgetex("", vec!["f1".into()], None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hgetex_empty_fields() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service.hgetex("key", vec![], None).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hgetex_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        repo.insert("key", "f1", "v1");
+        let service = HashService::new_with_repository(repo);
+        let result = service
+            .hgetex("key", vec!["f1".into(), "missing".into()], None)
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].as_deref(), Some("v1"));
+        assert!(result[1].is_none());
+    }
+
+    #[tokio::test]
+    async fn test_hgetex_with_expiration() {
+        use crate::domain::repositories::HashExpiration;
+        let repo = Arc::new(MockHashRepository::new());
+        repo.insert("key", "f1", "v1");
+        let service = HashService::new_with_repository(repo);
+        let result = service
+            .hgetex("key", vec!["f1".into()], Some(HashExpiration::Ex(60)))
+            .await
+            .unwrap();
+        assert_eq!(result[0].as_deref(), Some("v1"));
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_empty_key() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service
+            .hsetex("", vec![("f1".into(), "v1".into())], None, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_empty_fields() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service.hsetex("key", vec![], None, None).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let result = service
+            .hsetex(
+                "key",
+                vec![("f1".into(), "v1".into()), ("f2".into(), "v2".into())],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, 2);
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_with_fnx_condition() {
+        use crate::domain::repositories::HSetExCondition;
+        let repo = Arc::new(MockHashRepository::new());
+        repo.insert("key", "f1", "old");
+        let service = HashService::new_with_repository(repo);
+        // FNX: only set if field does NOT exist
+        let result = service
+            .hsetex(
+                "key",
+                vec![("f1".into(), "new".into()), ("f2".into(), "v2".into())],
+                Some(HSetExCondition::FNX),
+                None,
+            )
+            .await
+            .unwrap();
+        // f1 exists so not set, f2 doesn't exist so set
+        assert_eq!(result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hsetex_with_fxx_condition() {
+        use crate::domain::repositories::HSetExCondition;
+        let repo = Arc::new(MockHashRepository::new());
+        repo.insert("key", "f1", "old");
+        let service = HashService::new_with_repository(repo);
+        // FXX: only set if field DOES exist
+        let result = service
+            .hsetex(
+                "key",
+                vec![("f1".into(), "new".into()), ("f2".into(), "v2".into())],
+                Some(HSetExCondition::FXX),
+                None,
+            )
+            .await
+            .unwrap();
+        // f1 exists so set, f2 doesn't exist so not set
+        assert_eq!(result, 1);
+    }
+
+    #[tokio::test]
+    async fn test_hgetdel_empty_key() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service.hgetdel("", vec!["f1".into()]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hgetdel_empty_fields() {
+        let repo = Arc::new(MockHashRepository::new());
+        let service = HashService::new_with_repository(repo);
+        let err = service.hgetdel("key", vec![]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hgetdel_success() {
+        let repo = Arc::new(MockHashRepository::new());
+        repo.insert("key", "f1", "v1");
+        repo.insert("key", "f2", "v2");
+        let service = HashService::new_with_repository(repo.clone());
+        let result = service
+            .hgetdel("key", vec!["f1".into(), "missing".into()])
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].as_deref(), Some("v1"));
+        assert!(result[1].is_none());
+        // Verify f1 was deleted
+        let remaining = service.hgetall("key").await.unwrap();
+        assert!(!remaining.contains_key("f1"));
+        assert!(remaining.contains_key("f2"));
     }
 
     #[tokio::test]

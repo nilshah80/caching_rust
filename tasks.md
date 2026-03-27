@@ -1977,8 +1977,8 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-### 5.9 Redis 7.0+ Command Introspection (MISSING)
-- [ ] **Task 5.9.1**: Implement Command Introspection operations (gated by `capabilities.features.command_docs`)
+### 5.9 Redis 7.0+ Command Introspection ✅ COMPLETED
+- [x] **Task 5.9.1**: Implement Command Introspection operations (gated by `capabilities.features.command_docs`)
   | Command | Method | Priority | Redis Version |
   |---------|--------|----------|---------------|
   | COMMAND DOCS | `command_docs` | Medium | 7.0+ |
@@ -1987,16 +1987,17 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   | COMMAND INFO | `command_info` | Medium | 2.8.13+ |
   | COMMAND COUNT | `command_count` | Low | 2.8.13+ |
 
-- [ ] **Task 5.9.2**: Create Command Introspection API routes
+- [x] **Task 5.9.2**: Create Command Introspection API routes
   ```
-  GET    /api/v1/admin/commands                  # List all commands
-  GET    /api/v1/admin/commands/:name/docs       # Get command documentation
-  GET    /api/v1/admin/commands/:name/info       # Get command info
-  POST   /api/v1/admin/commands/getkeys          # Extract keys from command
-  GET    /api/v1/admin/commands/count            # Get command count
+  GET    /api/v1/admin/commands                  # List all commands (7.0+, gated)
+  GET    /api/v1/admin/commands/count            # Get command count (2.8.13+)
+  POST   /api/v1/admin/commands/docs             # Get command documentation (7.0+, gated)
+  POST   /api/v1/admin/commands/info             # Get command info (2.8.13+)
+  POST   /api/v1/admin/commands/getkeys          # Extract keys from command (2.8.13+)
   ```
+  **Note**: COMMAND DOCS/INFO use POST (not GET) because they accept multiple command names in the request body. COMMAND LIST and COMMAND DOCS are version-gated to Redis 7.0+ via `capabilities.features.command_docs`.
 
-- [ ] **Task 5.9.3**: Create Command Introspection request/response schemas
+- [x] **Task 5.9.3**: Create Command Introspection request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, ToSchema)]
   pub struct CommandListResponse {
@@ -2262,25 +2263,25 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 
 ---
 
-### 5.13 Redis 8.0+ Hash Commands (NEW - High Priority)
+### 5.13 Redis 8.0+ Hash Commands ✅ COMPLETED
 
 > **Note**: Redis 8.0 introduces atomic hash operations that combine get/set with expiration or deletion in a single command.
 
-- [ ] **Task 5.13.1**: Implement Redis 8.0 Hash operations
+- [x] **Task 5.13.1**: Implement Redis 8.0 Hash operations
   | Command | Method | Priority | Redis Version |
   |---------|--------|----------|---------------|
   | HGETEX | `hgetex` | High | 8.0+ |
   | HSETEX | `hsetex` | High | 8.0+ |
   | HGETDEL | `hgetdel` | High | 8.0+ |
 
-- [ ] **Task 5.13.2**: Create Redis 8.0 Hash API routes
+- [x] **Task 5.13.2**: Create Redis 8.0 Hash API routes
   ```
   POST   /api/v1/hashes/{key}/getex     # HGETEX - Get fields and optionally set expiration
   POST   /api/v1/hashes/{key}/setex     # HSETEX - Set fields with optional expiration
   POST   /api/v1/hashes/{key}/getdel    # HGETDEL - Get and delete fields
   ```
 
-- [ ] **Task 5.13.3**: Create Redis 8.0 Hash request/response schemas
+- [x] **Task 5.13.3**: Create Redis 8.0 Hash request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct HGetExRequest {
@@ -2348,7 +2349,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-- [ ] **Task 5.13.4**: Add version gating for Redis 8.0+
+- [x] **Task 5.13.4**: Add version gating for Redis 8.0+
   - Update `RedisCapabilities` to detect Redis 8.0+
   - Conditionally enable Redis 8.0 hash routes
   - Return 501 Not Implemented for older Redis versions
