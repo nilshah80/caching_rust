@@ -3,11 +3,7 @@
 //! HTTP endpoints for Redis transaction operations.
 //! Implements the single-request bundled transaction model.
 
-use axum::{
-    extract::State,
-    routing::post,
-    Json, Router,
-};
+use axum::{Json, Router, extract::State, routing::post};
 use validator::Validate;
 
 use crate::api::http::schemas::transactions::{
@@ -53,7 +49,9 @@ pub async fn execute(
     State(state): State<AppState>,
     Json(request): Json<TransactionRequest>,
 ) -> Result<Json<ApiResponse<TransactionResponse>>, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let response = state.transaction_service.execute(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -81,7 +79,9 @@ pub async fn compare_and_set(
     State(state): State<AppState>,
     Json(request): Json<CompareAndSetRequest>,
 ) -> Result<Json<ApiResponse<CompareAndSetResponse>>, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let response = state.transaction_service.compare_and_set(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -108,7 +108,9 @@ pub async fn hcompare_and_set(
     State(state): State<AppState>,
     Json(request): Json<HCompareAndSetRequest>,
 ) -> Result<Json<ApiResponse<CompareAndSetResponse>>, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let response = state.transaction_service.hcompare_and_set(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -116,7 +118,7 @@ pub async fn hcompare_and_set(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::schemas::transactions::{RedisCommand, CommandResult};
+    use crate::api::http::schemas::transactions::{CommandResult, RedisCommand};
     use crate::infrastructure::config::Settings;
     use crate::test_support::test_state_with_config;
 
@@ -182,7 +184,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = TransactionRequest {
             watch_keys: None,
             commands: Vec::new(),
@@ -193,21 +196,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = TransactionRequest {
             watch_keys: None,
-            commands: vec![RedisCommand::Get { key: "k".to_string() }],
+            commands: vec![RedisCommand::Get {
+                key: "k".to_string(),
+            }],
         };
         let result = execute(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_compare_and_set_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = CompareAndSetRequest {
             key: "".to_string(),
             expected_value: "1".to_string(),
@@ -219,7 +228,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_compare_and_set_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = CompareAndSetRequest {
             key: "version".to_string(),
             expected_value: "1".to_string(),
@@ -228,13 +238,16 @@ mod tests {
         let result = compare_and_set(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_hcompare_and_set_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = HCompareAndSetRequest {
             key: "".to_string(),
             field: "".to_string(),
@@ -247,7 +260,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_hcompare_and_set_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = HCompareAndSetRequest {
             key: "user:1".to_string(),
             field: "version".to_string(),
@@ -257,7 +271,9 @@ mod tests {
         let result = hcompare_and_set(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
@@ -363,7 +379,12 @@ mod tests {
 
         for (i, cmd_json) in commands.iter().enumerate() {
             let result: Result<RedisCommand, _> = serde_json::from_str(cmd_json);
-            assert!(result.is_ok(), "Failed to parse command {}: {}", i, cmd_json);
+            assert!(
+                result.is_ok(),
+                "Failed to parse command {}: {}",
+                i,
+                cmd_json
+            );
         }
     }
 }

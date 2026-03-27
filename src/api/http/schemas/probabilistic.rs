@@ -7,10 +7,9 @@ use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::domain::entities::{
-    CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult,
-    PfAddResult, PfCountResult, PfMergeResult,
-    TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo, TopKItem, TopKListResult,
-    TopKQueryResult, TopKReserveResult,
+    CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult, PfAddResult,
+    PfCountResult, PfMergeResult, TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo,
+    TopKItem, TopKListResult, TopKQueryResult, TopKReserveResult,
 };
 
 // ==================== Count-Min Sketch Schemas ====================
@@ -31,11 +30,19 @@ pub struct CmsInitByDimRequest {
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct CmsInitByProbRequest {
     /// Error rate (overestimation, e.g., 0.01 for 1%)
-    #[validate(range(min = 0.0001, max = 0.9999, message = "Error must be between 0.0001 and 0.9999"))]
+    #[validate(range(
+        min = 0.0001,
+        max = 0.9999,
+        message = "Error must be between 0.0001 and 0.9999"
+    ))]
     pub error: f64,
 
     /// Probability of error (e.g., 0.001 for 0.1%)
-    #[validate(range(min = 0.0001, max = 0.9999, message = "Probability must be between 0.0001 and 0.9999"))]
+    #[validate(range(
+        min = 0.0001,
+        max = 0.9999,
+        message = "Probability must be between 0.0001 and 0.9999"
+    ))]
     pub probability: f64,
 }
 
@@ -581,7 +588,10 @@ mod tests {
 
         let topk_list = TopKListResponse::from(TopKListResult {
             key: "topk:list".to_string(),
-            items: vec![TopKItem { item: "a".to_string(), count: 1 }],
+            items: vec![TopKItem {
+                item: "a".to_string(),
+                count: 1,
+            }],
         });
         assert_eq!(topk_list.items.len(), 1);
 

@@ -3,9 +3,9 @@
 //! HTTP endpoints for RedisJSON operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, patch, post, put},
-    Json, Router,
 };
 use validator::Validate;
 
@@ -14,12 +14,12 @@ use crate::api::http::schemas::json::{
     JsonArrInsertRequest, JsonArrInsertResponse, JsonArrLenParams, JsonArrLenResponse,
     JsonArrPopRequest, JsonArrPopResponse, JsonArrTrimRequest, JsonArrTrimResponse,
     JsonClearParams, JsonClearResponse, JsonDebugMemoryParams, JsonDebugMemoryResponse,
-    JsonDelParams, JsonDelResponse, JsonGetParams, JsonGetResponse, JsonMGetRequest,
-    JsonMGetItem, JsonMGetResponse, JsonMSetRequest, JsonNumIncrByRequest, JsonNumMultByRequest,
-    JsonNumResponse, JsonObjKeysParams, JsonObjKeysResponse, JsonObjLenParams, JsonObjLenResponse,
-    JsonRespParams, JsonRespResponse, JsonSetRequest, JsonSetResponse, JsonStrAppendRequest,
-    JsonStrAppendResponse, JsonStrLenParams, JsonStrLenResponse, JsonToggleParams,
-    JsonToggleResponse, JsonTypeParams, JsonTypeResponse,
+    JsonDelParams, JsonDelResponse, JsonGetParams, JsonGetResponse, JsonMGetItem, JsonMGetRequest,
+    JsonMGetResponse, JsonMSetRequest, JsonNumIncrByRequest, JsonNumMultByRequest, JsonNumResponse,
+    JsonObjKeysParams, JsonObjKeysResponse, JsonObjLenParams, JsonObjLenResponse, JsonRespParams,
+    JsonRespResponse, JsonSetRequest, JsonSetResponse, JsonStrAppendRequest, JsonStrAppendResponse,
+    JsonStrLenParams, JsonStrLenResponse, JsonToggleParams, JsonToggleResponse, JsonTypeParams,
+    JsonTypeResponse,
 };
 use crate::domain::entities::JsonMSetItem;
 use crate::domain::errors::CacheError;
@@ -87,7 +87,10 @@ async fn json_set(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.json_service.json_set(&key, &request.path, request.value, request.nx, request.xx).await?;
+    let result = state
+        .json_service
+        .json_set(&key, &request.path, request.value, request.nx, request.xx)
+        .await?;
 
     Ok(Json(ApiResponse::new(JsonSetResponse {
         key: result.key,
@@ -183,7 +186,10 @@ async fn json_mget(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.json_service.json_mget(request.keys.clone(), &request.path).await?;
+    let result = state
+        .json_service
+        .json_mget(request.keys.clone(), &request.path)
+        .await?;
 
     let results: Vec<JsonMGetItem> = result
         .results
@@ -326,7 +332,10 @@ async fn json_str_append(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.json_service.json_str_append(&key, &request.path, &request.value).await?;
+    let result = state
+        .json_service
+        .json_str_append(&key, &request.path, &request.value)
+        .await?;
 
     Ok(Json(ApiResponse::new(JsonStrAppendResponse {
         key: result.key,
@@ -524,7 +533,10 @@ async fn json_arr_append(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.json_service.json_arr_append(&key, &request.path, request.values).await?;
+    let result = state
+        .json_service
+        .json_arr_append(&key, &request.path, request.values)
+        .await?;
 
     Ok(Json(ApiResponse::new(JsonArrAppendResponse {
         key: result.key,
@@ -557,7 +569,13 @@ async fn json_arr_index(
 ) -> Result<Json<ApiResponse<JsonArrIndexResponse>>, CacheError> {
     let result = state
         .json_service
-        .json_arr_index(&key, &request.path, request.value, request.start, request.stop)
+        .json_arr_index(
+            &key,
+            &request.path,
+            request.value,
+            request.start,
+            request.stop,
+        )
         .await?;
 
     Ok(Json(ApiResponse::new(JsonArrIndexResponse {
@@ -593,7 +611,10 @@ async fn json_arr_insert(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.json_service.json_arr_insert(&key, &request.path, request.index, request.values).await?;
+    let result = state
+        .json_service
+        .json_arr_insert(&key, &request.path, request.index, request.values)
+        .await?;
 
     Ok(Json(ApiResponse::new(JsonArrInsertResponse {
         key: result.key,
@@ -800,20 +821,21 @@ async fn json_resp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::Json;
     use axum::body::Body;
     use axum::extract::{Path, State};
     use axum::http::Request;
-    use axum::Json;
     use serde_json::json;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
 
+    use crate::api::http::schemas::json::JsonMSetItemRequest;
     use crate::application::services::{
-        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService,
+        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService,
+        KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
-    use crate::api::http::schemas::json::JsonMSetItemRequest;
     use crate::domain::entities::{
         JsonArrAppendResult, JsonArrIndexResult, JsonArrInsertResult, JsonArrLenResult,
         JsonArrPopResult, JsonArrTrimResult, JsonClearResult, JsonDebugMemoryResult, JsonDelResult,
@@ -826,9 +848,11 @@ mod tests {
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
-        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
-        MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository,
-        MockStreamRepository, MockStringRepository, test_state_with_json_repo,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository,
+        MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
+        MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
+        MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+        test_state_with_json_repo,
     };
 
     struct SequenceJsonRepository {
@@ -862,7 +886,12 @@ mod tests {
             key: &str,
             paths: &[String],
         ) -> Result<Option<JsonGetResult>, CacheError> {
-            let next = { self.json_get_results.lock().expect("json_get lock").pop_front() };
+            let next = {
+                self.json_get_results
+                    .lock()
+                    .expect("json_get lock")
+                    .pop_front()
+            };
             if let Some(result) = next {
                 return result;
             }
@@ -957,7 +986,9 @@ mod tests {
             start: Option<i64>,
             stop: Option<i64>,
         ) -> Result<JsonArrIndexResult, CacheError> {
-            self.base.json_arr_index(key, path, value, start, stop).await
+            self.base
+                .json_arr_index(key, path, value, start, stop)
+                .await
         }
 
         async fn json_arr_insert(
@@ -1022,42 +1053,63 @@ mod tests {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let config = Arc::new(Settings::default());
         let capabilities = Arc::new(RedisCapabilities::default_capabilities());
-        let string_service =
-            Arc::new(StringService::new_with_repository(Arc::new(MockStringRepository::new())));
-        let hash_service =
-            Arc::new(HashService::new_with_repository(Arc::new(MockHashRepository::new())));
-        let list_service =
-            Arc::new(ListService::new_with_repository(Arc::new(MockListRepository::new())));
-        let set_service =
-            Arc::new(SetService::new_with_repository(Arc::new(MockSetRepository::new())));
+        let string_service = Arc::new(StringService::new_with_repository(Arc::new(
+            MockStringRepository::new(),
+        )));
+        let hash_service = Arc::new(HashService::new_with_repository(Arc::new(
+            MockHashRepository::new(),
+        )));
+        let list_service = Arc::new(ListService::new_with_repository(Arc::new(
+            MockListRepository::new(),
+        )));
+        let set_service = Arc::new(SetService::new_with_repository(Arc::new(
+            MockSetRepository::new(),
+        )));
         let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(
             MockSortedSetRepository::new(),
         )));
-        let bitmap_service =
-            Arc::new(BitMapService::new_with_repository(Arc::new(MockBitMapRepository::new())));
-        let key_service =
-            Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
-        let admin_service =
-            Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
-        let stream_service =
-            Arc::new(StreamService::new_with_repository(Arc::new(MockStreamRepository::new())));
+        let bitmap_service = Arc::new(BitMapService::new_with_repository(Arc::new(
+            MockBitMapRepository::new(),
+        )));
+        let key_service = Arc::new(KeyService::new_with_repository(Arc::new(
+            MockKeyRepository::new(),
+        )));
+        let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(
+            MockAdminRepository,
+        )));
+        let stream_service = Arc::new(StreamService::new_with_repository(Arc::new(
+            MockStreamRepository::new(),
+        )));
         let json_service = Arc::new(JsonService::new_with_repository(repo));
-        let search_service =
-            Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
-        let bloom_service =
-            Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
-        let probabilistic_service =
-            Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
-        let geo_service =
-            Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
+        let search_service = Arc::new(SearchService::new_with_repository(Arc::new(
+            MockSearchRepository::new(),
+        )));
+        let bloom_service = Arc::new(BloomService::new_with_repository(Arc::new(
+            MockBloomRepository::new(),
+        )));
+        let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(Arc::new(
+            MockProbabilisticRepository::new(),
+        )));
+        let geo_service = Arc::new(GeoService::new_with_repository(Arc::new(
+            MockGeoRepository::new(),
+        )));
         let pubsub_manager = Arc::new(
-            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(&config.redis.url, config.pubsub.clone())
-                .expect("Failed to create PubSubManager for tests")
+            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(
+                &config.redis.url,
+                config.pubsub.clone(),
+            )
+            .expect("Failed to create PubSubManager for tests"),
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
-        let transaction_service = Arc::new(crate::application::services::TransactionService::new(pool.clone()));
-        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(pool.clone()));
-        let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
+        let transaction_service = Arc::new(crate::application::services::TransactionService::new(
+            pool.clone(),
+        ));
+        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(
+            pool.clone(),
+        ));
+        let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(
+            config.blocking.max_sse_connections,
+        ));
 
         AppState::new_with_services(
             pool,

@@ -10,7 +10,9 @@ use std::sync::Arc;
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{NumSubResult, PubSubRepository, PublishResult};
 use crate::infrastructure::redis::connection::InstrumentedPool;
-use crate::infrastructure::redis::pubsub_manager::{PubSubConnection, PubSubManager, PubSubStatsSnapshot};
+use crate::infrastructure::redis::pubsub_manager::{
+    PubSubConnection, PubSubManager, PubSubStatsSnapshot,
+};
 use crate::infrastructure::redis::repositories::RedisPubSubRepository;
 
 /// Service for Pub/Sub operations
@@ -26,10 +28,7 @@ pub struct PubSubService {
 impl PubSubService {
     /// Create a new PubSubService
     pub fn new(pool: Arc<InstrumentedPool>, pubsub_manager: Arc<PubSubManager>) -> Self {
-        Self::new_with_repository(
-            Arc::new(RedisPubSubRepository::new(pool)),
-            pubsub_manager,
-        )
+        Self::new_with_repository(Arc::new(RedisPubSubRepository::new(pool)), pubsub_manager)
     }
 
     /// Create a PubSubService with a custom repository (useful for testing)
@@ -56,7 +55,11 @@ impl PubSubService {
     /// Publish a message to a sharded channel (SPUBLISH)
     ///
     /// For Redis Cluster sharded pub/sub (Redis 7.0+).
-    pub async fn spublish(&self, channel: &str, message: &str) -> Result<PublishResult, CacheError> {
+    pub async fn spublish(
+        &self,
+        channel: &str,
+        message: &str,
+    ) -> Result<PublishResult, CacheError> {
         self.validate_channel(channel)?;
         self.repository.spublish(channel, message).await
     }
@@ -142,20 +145,28 @@ impl PubSubService {
 
     fn validate_channel(&self, channel: &str) -> Result<(), CacheError> {
         if channel.is_empty() {
-            return Err(CacheError::InvalidInput("Channel name cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Channel name cannot be empty".to_string(),
+            ));
         }
         if channel.len() > 1024 {
-            return Err(CacheError::InvalidInput("Channel name too long (max 1024 characters)".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Channel name too long (max 1024 characters)".to_string(),
+            ));
         }
         Ok(())
     }
 
     fn validate_pattern(&self, pattern: &str) -> Result<(), CacheError> {
         if pattern.is_empty() {
-            return Err(CacheError::InvalidInput("Pattern cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Pattern cannot be empty".to_string(),
+            ));
         }
         if pattern.len() > 1024 {
-            return Err(CacheError::InvalidInput("Pattern too long (max 1024 characters)".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Pattern too long (max 1024 characters)".to_string(),
+            ));
         }
         Ok(())
     }
@@ -164,9 +175,9 @@ impl PubSubService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infrastructure::config::PubSubConfig;
     use async_trait::async_trait;
     use std::sync::Arc;
-    use crate::infrastructure::config::PubSubConfig;
 
     struct StaticPubSubRepository {
         publish_result: PublishResult,
@@ -177,11 +188,19 @@ mod tests {
 
     #[async_trait]
     impl PubSubRepository for StaticPubSubRepository {
-        async fn publish(&self, _channel: &str, _message: &str) -> Result<PublishResult, CacheError> {
+        async fn publish(
+            &self,
+            _channel: &str,
+            _message: &str,
+        ) -> Result<PublishResult, CacheError> {
             Ok(self.publish_result.clone())
         }
 
-        async fn spublish(&self, _channel: &str, _message: &str) -> Result<PublishResult, CacheError> {
+        async fn spublish(
+            &self,
+            _channel: &str,
+            _message: &str,
+        ) -> Result<PublishResult, CacheError> {
             Ok(self.publish_result.clone())
         }
 
@@ -189,7 +208,10 @@ mod tests {
             Ok(self.channels_result.clone())
         }
 
-        async fn pubsub_numsub(&self, _channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+        async fn pubsub_numsub(
+            &self,
+            _channels: &[String],
+        ) -> Result<Vec<NumSubResult>, CacheError> {
             Ok(self.numsub_result.clone())
         }
 
@@ -197,11 +219,17 @@ mod tests {
             Ok(self.numpat_result)
         }
 
-        async fn pubsub_shardchannels(&self, _pattern: Option<&str>) -> Result<Vec<String>, CacheError> {
+        async fn pubsub_shardchannels(
+            &self,
+            _pattern: Option<&str>,
+        ) -> Result<Vec<String>, CacheError> {
             Ok(self.channels_result.clone())
         }
 
-        async fn pubsub_shardnumsub(&self, _channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+        async fn pubsub_shardnumsub(
+            &self,
+            _channels: &[String],
+        ) -> Result<Vec<NumSubResult>, CacheError> {
             Ok(self.numsub_result.clone())
         }
     }
@@ -263,7 +291,7 @@ mod tests {
         });
         let service = service_with_repo(repo);
 
-        let err = service.numsub(&vec!["".to_string()]).await.unwrap_err();
+        let err = service.numsub(&["".to_string()]).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 
@@ -283,7 +311,7 @@ mod tests {
         let err = service.shardchannels(Some("")).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
-        let err = service.shardnumsub(&vec!["".to_string()]).await.unwrap_err();
+        let err = service.shardnumsub(&["".to_string()]).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 

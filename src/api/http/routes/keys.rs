@@ -3,18 +3,20 @@
 //! HTTP endpoints for Redis key management operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, patch, post},
-    Json, Router,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+
+use validator::Validate;
 
 use crate::api::http::schemas::keys::{
-    CopyRequest, CopyResponse, DeleteKeysRequest, DeleteKeysResponse, DumpResponse,
-    ExistsRequest, ExistsResponse, ExpireRequest, ExpireResponse, KeyInfoResponse,
-    KeysParams, KeysResponse, ObjectInfoResponse, PersistResponse, RandomKeyResponse,
-    RenameRequest, RenameResponse, RestoreRequest, RestoreResponse, ScanParams,
-    ScanResponse, TouchRequest, TouchResponse, TtlResponse, TypeResponse,
+    CopyRequest, CopyResponse, DeleteKeysRequest, DeleteKeysResponse, DumpResponse, ExistsRequest,
+    ExistsResponse, ExpireRequest, ExpireResponse, KeyInfoResponse, KeysParams, KeysResponse,
+    ObjectInfoResponse, PersistResponse, RandomKeyResponse, RenameRequest, RenameResponse,
+    RestoreRequest, RestoreResponse, ScanParams, ScanResponse, SortRequest, SortResponse,
+    SortStoreRequest, SortStoreResponse, TouchRequest, TouchResponse, TtlResponse, TypeResponse,
 };
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -49,6 +51,10 @@ pub fn key_routes() -> Router<AppState> {
         .route("/api/v1/keys/{key}/restore", post(restore_key))
         // Object info
         .route("/api/v1/keys/{key}/object", get(get_object_info))
+        // Sort operations
+        .route("/api/v1/keys/{key}/sort", post(sort_key))
+        .route("/api/v1/keys/{key}/sort/store", post(sort_store_key))
+        .route("/api/v1/keys/{key}/sort/readonly", post(sort_ro_key))
 }
 
 /// POST /api/v1/keys/delete
@@ -203,7 +209,9 @@ pub async fn random_key(
 ) -> Result<Json<ApiResponse<RandomKeyResponse>>, CacheError> {
     let result = state.key_service.random_key().await?;
 
-    Ok(Json(ApiResponse::new(RandomKeyResponse { key: result.key })))
+    Ok(Json(ApiResponse::new(RandomKeyResponse {
+        key: result.key,
+    })))
 }
 
 /// GET /api/v1/keys/:key
@@ -326,14 +334,30 @@ pub async fn set_expire(
     } = request;
 
     let result = match (seconds, milliseconds, expire_at, pexpire_at) {
-        (Some(seconds), _, _, _) => state.key_service.expire(&key, seconds, nx, xx, gt, lt).await?,
+        (Some(seconds), _, _, _) => {
+            state
+                .key_service
+                .expire(&key, seconds, nx, xx, gt, lt)
+                .await?
+        }
         (None, Some(milliseconds), _, _) => {
-            state.key_service.pexpire(&key, milliseconds, nx, xx, gt, lt).await?
+            state
+                .key_service
+                .pexpire(&key, milliseconds, nx, xx, gt, lt)
+                .await?
         }
         (None, None, Some(timestamp), _) => {
-            state.key_service.expire_at(&key, timestamp, nx, xx, gt, lt).await?
+            state
+                .key_service
+                .expire_at(&key, timestamp, nx, xx, gt, lt)
+                .await?
         }
-        (None, None, None, Some(timestamp)) => state.key_service.pexpire_at(&key, timestamp, nx, xx, gt, lt).await?,
+        (None, None, None, Some(timestamp)) => {
+            state
+                .key_service
+                .pexpire_at(&key, timestamp, nx, xx, gt, lt)
+                .await?
+        }
         _ => {
             return Err(CacheError::InvalidInput(
                 "One of seconds, milliseconds, expire_at, or pexpire_at is required".to_string(),
@@ -511,7 +535,10 @@ pub async fn restore_key(
     let data = BASE64
         .decode(&request.data)
         .map_err(|e| CacheError::InvalidInput(format!("Invalid base64 data: {}", e)))?;
-    let success = state.key_service.restore(&key, request.ttl, &data, request.replace).await?;
+    let success = state
+        .key_service
+        .restore(&key, request.ttl, &data, request.replace)
+        .await?;
 
     Ok(Json(ApiResponse::new(RestoreResponse { key, success })))
 }
@@ -548,12 +575,94 @@ pub async fn get_object_info(
     })))
 }
 
+/// POST /api/v1/keys/:key/sort
+///
+/// Sort the elements in a list, set or sorted set.
+#[utoipa::path(
+    post,
+    path = "/api/v1/keys/{key}/sort",
+    params(
+        ("key" = String, Path, description = "The key to sort")
+    ),
+    request_body = SortRequest,
+    responses(
+        (status = 200, description = "Sorted elements", body = SortResponse)
+    ),
+    tag = "Keys"
+)]
+pub async fn sort_key(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<SortRequest>,
+) -> Result<Json<ApiResponse<SortResponse>>, CacheError> {
+    let options = request.into_sort_options();
+    let values = state.key_service.sort(&key, options).await?;
+    Ok(Json(ApiResponse::new(SortResponse { values })))
+}
+
+/// POST /api/v1/keys/:key/sort/store
+///
+/// Sort elements and store the result in a destination key.
+#[utoipa::path(
+    post,
+    path = "/api/v1/keys/{key}/sort/store",
+    params(
+        ("key" = String, Path, description = "The key to sort")
+    ),
+    request_body = SortStoreRequest,
+    responses(
+        (status = 200, description = "Elements sorted and stored", body = SortStoreResponse)
+    ),
+    tag = "Keys"
+)]
+pub async fn sort_store_key(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<SortStoreRequest>,
+) -> Result<Json<ApiResponse<SortStoreResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let destination = request.destination;
+    let options = request.options.into_sort_options();
+    let count = state
+        .key_service
+        .sort_store(&key, &destination, options)
+        .await?;
+    Ok(Json(ApiResponse::new(SortStoreResponse { count })))
+}
+
+/// POST /api/v1/keys/:key/sort/readonly
+///
+/// Read-only sort (Redis 7.0+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/keys/{key}/sort/readonly",
+    params(
+        ("key" = String, Path, description = "The key to sort (read-only)")
+    ),
+    request_body = SortRequest,
+    responses(
+        (status = 200, description = "Sorted elements (read-only)", body = SortResponse)
+    ),
+    tag = "Keys"
+)]
+pub async fn sort_ro_key(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<SortRequest>,
+) -> Result<Json<ApiResponse<SortResponse>>, CacheError> {
+    let options = request.into_sort_options();
+    let values = state.key_service.sort_ro(&key, options).await?;
+    Ok(Json(ApiResponse::new(SortResponse { values })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::test_state;
-    use axum::extract::{Path, Query, State};
     use axum::Json;
+    use axum::extract::{Path, Query, State};
 
     #[tokio::test]
     async fn test_key_routes_batch_and_query() {
@@ -613,7 +722,9 @@ mod tests {
         let random = random_key(state.clone()).await.unwrap();
         assert!(random.0.data.expect("data").key.is_some());
 
-        let info = get_key_info(state.clone(), Path("alpha".to_string())).await.unwrap();
+        let info = get_key_info(state.clone(), Path("alpha".to_string()))
+            .await
+            .unwrap();
         assert!(info.0.data.expect("data").exists);
 
         let delete = delete_keys(
@@ -842,5 +953,76 @@ mod tests {
         assert_eq!(data.ref_count, Some(1));
         assert_eq!(data.idle_time, Some(0));
         assert_eq!(data.freq, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_sort_key_returns_ok() {
+        let (state, _string_repo, _key_repo, _admin_repo) = test_state();
+        let state = State(state);
+
+        let result = sort_key(
+            state,
+            Path("mylist".to_string()),
+            Json(SortRequest {
+                by: None,
+                get: vec![],
+                offset: None,
+                count: None,
+                order: crate::api::http::schemas::keys::SortOrderSchema::Asc,
+                alpha: false,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.0.data.expect("data");
+        assert!(data.values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_sort_store_key_empty_destination_fails() {
+        let (state, _string_repo, _key_repo, _admin_repo) = test_state();
+        let state = State(state);
+
+        let err = sort_store_key(
+            state,
+            Path("mylist".to_string()),
+            Json(SortStoreRequest {
+                destination: "".to_string(),
+                options: SortRequest {
+                    by: None,
+                    get: vec![],
+                    offset: None,
+                    count: None,
+                    order: crate::api::http::schemas::keys::SortOrderSchema::Asc,
+                    alpha: false,
+                },
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_sort_ro_key_returns_ok() {
+        let (state, _string_repo, _key_repo, _admin_repo) = test_state();
+        let state = State(state);
+
+        let result = sort_ro_key(
+            state,
+            Path("mylist".to_string()),
+            Json(SortRequest {
+                by: None,
+                get: vec![],
+                offset: None,
+                count: None,
+                order: crate::api::http::schemas::keys::SortOrderSchema::Asc,
+                alpha: false,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.0.data.expect("data");
+        assert!(data.values.is_empty());
     }
 }

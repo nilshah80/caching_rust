@@ -3,7 +3,7 @@
 //! Implementation of BloomRepository for Redis using RedisBloom module commands.
 
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use redis::Value;
 use std::sync::Arc;
 
@@ -44,12 +44,10 @@ impl RedisBloomRepository {
         match value {
             Value::Int(i) => *i as u64,
             // Handle BulkString that may contain numeric data (some Redis versions return strings)
-            Value::BulkString(bytes) => {
-                String::from_utf8_lossy(bytes)
-                    .trim()
-                    .parse::<u64>()
-                    .unwrap_or(0)
-            }
+            Value::BulkString(bytes) => String::from_utf8_lossy(bytes)
+                .trim()
+                .parse::<u64>()
+                .unwrap_or(0),
             // For other types, log and return 0 (graceful degradation)
             _ => 0,
         }
@@ -60,12 +58,10 @@ impl RedisBloomRepository {
         match value {
             Value::Int(i) => *i as u32,
             // Handle BulkString that may contain numeric data (some Redis versions return strings)
-            Value::BulkString(bytes) => {
-                String::from_utf8_lossy(bytes)
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(0)
-            }
+            Value::BulkString(bytes) => String::from_utf8_lossy(bytes)
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(0),
             // For other types, return 0 (graceful degradation)
             _ => 0,
         }
@@ -92,7 +88,9 @@ impl RedisBloomRepository {
                                 "Capacity" => info.capacity = Self::extract_u64(val),
                                 "Size" => info.size = Self::extract_u64(val),
                                 "Number of filters" => info.num_filters = Self::extract_u64(val),
-                                "Number of items inserted" => info.num_items_inserted = Self::extract_u64(val),
+                                "Number of items inserted" => {
+                                    info.num_items_inserted = Self::extract_u64(val)
+                                }
                                 "Expansion rate" => info.expansion = Some(Self::extract_u32(val)),
                                 _ => {}
                             }
@@ -130,8 +128,12 @@ impl RedisBloomRepository {
                                 "Size" => info.size = Self::extract_u64(val),
                                 "Number of buckets" => info.num_buckets = Self::extract_u64(val),
                                 "Number of filters" => info.num_filters = Self::extract_u64(val),
-                                "Number of items inserted" => info.num_items_inserted = Self::extract_u64(val),
-                                "Number of items deleted" => info.num_items_deleted = Self::extract_u64(val),
+                                "Number of items inserted" => {
+                                    info.num_items_inserted = Self::extract_u64(val)
+                                }
+                                "Number of items deleted" => {
+                                    info.num_items_deleted = Self::extract_u64(val)
+                                }
                                 "Bucket size" => info.bucket_size = Self::extract_u32(val),
                                 "Expansion rate" => info.expansion_rate = Self::extract_u32(val),
                                 "Max iterations" => info.max_iterations = Self::extract_u32(val),
@@ -152,13 +154,15 @@ impl RedisBloomRepository {
 impl BloomRepository for RedisBloomRepository {
     // ==================== Bloom Filter Operations ====================
 
-    async fn bf_reserve(&self, key: &str, options: BloomReserveOptions) -> Result<BloomReserveResult, CacheError> {
+    async fn bf_reserve(
+        &self,
+        key: &str,
+        options: BloomReserveOptions,
+    ) -> Result<BloomReserveResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("BF.RESERVE");
-        cmd.arg(key)
-            .arg(options.error_rate)
-            .arg(options.capacity);
+        cmd.arg(key).arg(options.error_rate).arg(options.capacity);
 
         if let Some(expansion) = options.expansion {
             cmd.arg("EXPANSION").arg(expansion);
@@ -200,8 +204,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await
-            ?;
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
 
         Ok(BloomAddResult {
             key: key.to_string(),
@@ -216,8 +219,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(item)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(BloomExistsResult {
             key: key.to_string(),
@@ -225,7 +227,11 @@ impl BloomRepository for RedisBloomRepository {
         })
     }
 
-    async fn bf_mexists(&self, key: &str, items: Vec<String>) -> Result<BloomExistsResult, CacheError> {
+    async fn bf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<BloomExistsResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("BF.MEXISTS");
@@ -234,8 +240,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await
-            ?;
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
 
         Ok(BloomExistsResult {
             key: key.to_string(),
@@ -243,7 +248,12 @@ impl BloomRepository for RedisBloomRepository {
         })
     }
 
-    async fn bf_insert(&self, key: &str, options: BloomInsertOptions, items: Vec<String>) -> Result<BloomInsertResult, CacheError> {
+    async fn bf_insert(
+        &self,
+        key: &str,
+        options: BloomInsertOptions,
+        items: Vec<String>,
+    ) -> Result<BloomInsertResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("BF.INSERT");
@@ -274,8 +284,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await
-            ?;
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
 
         Ok(BloomInsertResult {
             key: key.to_string(),
@@ -289,8 +298,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: Value = redis::cmd("BF.INFO")
             .arg(key)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Self::parse_bloom_info(result)
     }
@@ -301,8 +309,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("BF.CARD")
             .arg(key)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(BloomCardResult {
             key: key.to_string(),
@@ -310,15 +317,18 @@ impl BloomRepository for RedisBloomRepository {
         })
     }
 
-    async fn bf_scandump(&self, key: &str, iterator: u64) -> Result<BloomScanDumpResult, CacheError> {
+    async fn bf_scandump(
+        &self,
+        key: &str,
+        iterator: u64,
+    ) -> Result<BloomScanDumpResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let result: Value = redis::cmd("BF.SCANDUMP")
             .arg(key)
             .arg(iterator)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         match result {
             Value::Array(arr) if arr.len() >= 2 => {
@@ -328,13 +338,23 @@ impl BloomRepository for RedisBloomRepository {
                     Value::Nil => None,
                     _ => None,
                 };
-                Ok(BloomScanDumpResult { iterator: iter, data })
+                Ok(BloomScanDumpResult {
+                    iterator: iter,
+                    data,
+                })
             }
-            _ => Err(CacheError::Internal("Invalid BF.SCANDUMP response".to_string())),
+            _ => Err(CacheError::Internal(
+                "Invalid BF.SCANDUMP response".to_string(),
+            )),
         }
     }
 
-    async fn bf_loadchunk(&self, key: &str, iterator: u64, data: &[u8]) -> Result<BloomLoadChunkResult, CacheError> {
+    async fn bf_loadchunk(
+        &self,
+        key: &str,
+        iterator: u64,
+        data: &[u8],
+    ) -> Result<BloomLoadChunkResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let _: () = redis::cmd("BF.LOADCHUNK")
@@ -342,8 +362,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(iterator)
             .arg(data)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(BloomLoadChunkResult {
             key: key.to_string(),
@@ -353,7 +372,11 @@ impl BloomRepository for RedisBloomRepository {
 
     // ==================== Cuckoo Filter Operations ====================
 
-    async fn cf_reserve(&self, key: &str, options: CuckooReserveOptions) -> Result<CuckooReserveResult, CacheError> {
+    async fn cf_reserve(
+        &self,
+        key: &str,
+        options: CuckooReserveOptions,
+    ) -> Result<CuckooReserveResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("CF.RESERVE");
@@ -371,8 +394,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg("EXPANSION").arg(expansion);
         }
 
-        let _: () = cmd.query_async(&mut *conn).await
-            ?;
+        let _: () = cmd.query_async(&mut *conn).await?;
 
         Ok(CuckooReserveResult {
             key: key.to_string(),
@@ -387,8 +409,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(item)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(CuckooAddResult {
             key: key.to_string(),
@@ -403,8 +424,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(item)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(CuckooAddResult {
             key: key.to_string(),
@@ -412,7 +432,12 @@ impl BloomRepository for RedisBloomRepository {
         })
     }
 
-    async fn cf_insert(&self, key: &str, options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+    async fn cf_insert(
+        &self,
+        key: &str,
+        options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("CF.INSERT");
@@ -431,8 +456,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await
-            ?;
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
 
         Ok(CuckooInsertResult {
             key: key.to_string(),
@@ -440,7 +464,12 @@ impl BloomRepository for RedisBloomRepository {
         })
     }
 
-    async fn cf_insertnx(&self, key: &str, options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+    async fn cf_insertnx(
+        &self,
+        key: &str,
+        options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("CF.INSERTNX");
@@ -459,8 +488,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await
-            ?;
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
 
         Ok(CuckooInsertResult {
             key: key.to_string(),
@@ -475,8 +503,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(item)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(CuckooExistsResult {
             key: key.to_string(),
@@ -484,7 +511,11 @@ impl BloomRepository for RedisBloomRepository {
         })
     }
 
-    async fn cf_mexists(&self, key: &str, items: Vec<String>) -> Result<CuckooExistsResult, CacheError> {
+    async fn cf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<CuckooExistsResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("CF.MEXISTS");
@@ -493,8 +524,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await
-            ?;
+        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
 
         Ok(CuckooExistsResult {
             key: key.to_string(),
@@ -509,8 +539,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(item)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(CuckooDelResult {
             key: key.to_string(),
@@ -525,8 +554,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(item)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(CuckooCountResult {
             key: key.to_string(),
@@ -540,21 +568,23 @@ impl BloomRepository for RedisBloomRepository {
         let result: Value = redis::cmd("CF.INFO")
             .arg(key)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Self::parse_cuckoo_info(result)
     }
 
-    async fn cf_scandump(&self, key: &str, iterator: u64) -> Result<CuckooScanDumpResult, CacheError> {
+    async fn cf_scandump(
+        &self,
+        key: &str,
+        iterator: u64,
+    ) -> Result<CuckooScanDumpResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let result: Value = redis::cmd("CF.SCANDUMP")
             .arg(key)
             .arg(iterator)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         match result {
             Value::Array(arr) if arr.len() >= 2 => {
@@ -564,13 +594,23 @@ impl BloomRepository for RedisBloomRepository {
                     Value::Nil => None,
                     _ => None,
                 };
-                Ok(CuckooScanDumpResult { iterator: iter, data })
+                Ok(CuckooScanDumpResult {
+                    iterator: iter,
+                    data,
+                })
             }
-            _ => Err(CacheError::Internal("Invalid CF.SCANDUMP response".to_string())),
+            _ => Err(CacheError::Internal(
+                "Invalid CF.SCANDUMP response".to_string(),
+            )),
         }
     }
 
-    async fn cf_loadchunk(&self, key: &str, iterator: u64, data: &[u8]) -> Result<CuckooLoadChunkResult, CacheError> {
+    async fn cf_loadchunk(
+        &self,
+        key: &str,
+        iterator: u64,
+        data: &[u8],
+    ) -> Result<CuckooLoadChunkResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let _: () = redis::cmd("CF.LOADCHUNK")
@@ -578,8 +618,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(iterator)
             .arg(data)
             .query_async(&mut *conn)
-            .await
-            ?;
+            .await?;
 
         Ok(CuckooLoadChunkResult {
             key: key.to_string(),
@@ -606,11 +645,20 @@ mod tests {
         // Int value
         assert_eq!(RedisBloomRepository::extract_u64(&Value::Int(42)), 42);
         // BulkString with numeric value
-        assert_eq!(RedisBloomRepository::extract_u64(&Value::BulkString(b"42".to_vec())), 42);
+        assert_eq!(
+            RedisBloomRepository::extract_u64(&Value::BulkString(b"42".to_vec())),
+            42
+        );
         // BulkString with whitespace
-        assert_eq!(RedisBloomRepository::extract_u64(&Value::BulkString(b" 123 ".to_vec())), 123);
+        assert_eq!(
+            RedisBloomRepository::extract_u64(&Value::BulkString(b" 123 ".to_vec())),
+            123
+        );
         // BulkString with non-numeric value (should return 0)
-        assert_eq!(RedisBloomRepository::extract_u64(&Value::BulkString(b"not_a_number".to_vec())), 0);
+        assert_eq!(
+            RedisBloomRepository::extract_u64(&Value::BulkString(b"not_a_number".to_vec())),
+            0
+        );
         // Nil value (should return 0)
         assert_eq!(RedisBloomRepository::extract_u64(&Value::Nil), 0);
         // Other types (should return 0)
@@ -622,11 +670,20 @@ mod tests {
         // Int value
         assert_eq!(RedisBloomRepository::extract_u32(&Value::Int(42)), 42);
         // BulkString with numeric value
-        assert_eq!(RedisBloomRepository::extract_u32(&Value::BulkString(b"42".to_vec())), 42);
+        assert_eq!(
+            RedisBloomRepository::extract_u32(&Value::BulkString(b"42".to_vec())),
+            42
+        );
         // BulkString with whitespace
-        assert_eq!(RedisBloomRepository::extract_u32(&Value::BulkString(b" 123 ".to_vec())), 123);
+        assert_eq!(
+            RedisBloomRepository::extract_u32(&Value::BulkString(b" 123 ".to_vec())),
+            123
+        );
         // BulkString with non-numeric value (should return 0)
-        assert_eq!(RedisBloomRepository::extract_u32(&Value::BulkString(b"not_a_number".to_vec())), 0);
+        assert_eq!(
+            RedisBloomRepository::extract_u32(&Value::BulkString(b"not_a_number".to_vec())),
+            0
+        );
         // Nil value (should return 0)
         assert_eq!(RedisBloomRepository::extract_u32(&Value::Nil), 0);
     }

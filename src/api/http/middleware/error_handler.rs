@@ -3,9 +3,9 @@
 //! Global error handling for unhandled errors.
 
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use tracing::error;
 

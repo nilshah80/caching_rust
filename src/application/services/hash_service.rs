@@ -25,7 +25,9 @@ impl HashService {
 
     pub async fn hset(&self, key: &str, pairs: Vec<(String, String)>) -> Result<i64, CacheError> {
         if pairs.is_empty() {
-            return Err(CacheError::InvalidInput("Pairs cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Pairs cannot be empty".to_string(),
+            ));
         }
         self.repository.hset(key, pairs).await
     }
@@ -38,23 +40,33 @@ impl HashService {
         self.repository.hgetall(key).await
     }
 
-    pub async fn hmget(&self, key: &str, fields: Vec<String>) -> Result<Vec<Option<String>>, CacheError> {
+    pub async fn hmget(
+        &self,
+        key: &str,
+        fields: Vec<String>,
+    ) -> Result<Vec<Option<String>>, CacheError> {
         if fields.is_empty() {
-            return Err(CacheError::InvalidInput("Fields cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Fields cannot be empty".to_string(),
+            ));
         }
         self.repository.hmget(key, &fields).await
     }
 
     pub async fn hmset(&self, key: &str, pairs: Vec<(String, String)>) -> Result<(), CacheError> {
         if pairs.is_empty() {
-            return Err(CacheError::InvalidInput("Pairs cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Pairs cannot be empty".to_string(),
+            ));
         }
         self.repository.hmset(key, pairs).await
     }
 
     pub async fn hdel(&self, key: &str, fields: Vec<String>) -> Result<i64, CacheError> {
         if fields.is_empty() {
-            return Err(CacheError::InvalidInput("Fields cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Fields cannot be empty".to_string(),
+            ));
         }
         self.repository.hdel(key, &fields).await
     }
@@ -79,7 +91,12 @@ impl HashService {
         self.repository.hincr_by(key, field, delta).await
     }
 
-    pub async fn hincr_by_float(&self, key: &str, field: &str, delta: f64) -> Result<f64, CacheError> {
+    pub async fn hincr_by_float(
+        &self,
+        key: &str,
+        field: &str,
+        delta: f64,
+    ) -> Result<f64, CacheError> {
         self.repository.hincr_by_float(key, field, delta).await
     }
 
@@ -87,14 +104,27 @@ impl HashService {
         self.repository.hstr_len(key, field).await
     }
 
-    pub async fn hrand_field(&self, key: &str, count: Option<i64>, with_values: bool) -> Result<Vec<String>, CacheError> {
+    pub async fn hrand_field(
+        &self,
+        key: &str,
+        count: Option<i64>,
+        with_values: bool,
+    ) -> Result<Vec<String>, CacheError> {
         if with_values && count.is_none() {
-            return Err(CacheError::InvalidInput("Count is required when with_values is true".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Count is required when with_values is true".to_string(),
+            ));
         }
         self.repository.hrand_field(key, count, with_values).await
     }
 
-    pub async fn hscan(&self, key: &str, cursor: u64, pattern: Option<String>, count: Option<u64>) -> Result<(u64, Vec<String>), CacheError> {
+    pub async fn hscan(
+        &self,
+        key: &str,
+        cursor: u64,
+        pattern: Option<String>,
+        count: Option<u64>,
+    ) -> Result<(u64, Vec<String>), CacheError> {
         self.repository.hscan(key, cursor, pattern, count).await
     }
 }
@@ -102,8 +132,8 @@ impl HashService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::MockHashRepository;
     use crate::infrastructure::redis::connection::InstrumentedPool;
+    use crate::test_support::MockHashRepository;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -161,14 +191,14 @@ mod tests {
         assert_eq!(values[0].as_deref(), Some("1"));
 
         service
-            .hmset(
-                "hash",
-                vec![("field3".to_string(), "3".to_string())],
-            )
+            .hmset("hash", vec![("field3".to_string(), "3".to_string())])
             .await
             .unwrap();
 
-        let deleted = service.hdel("hash", vec!["field2".to_string()]).await.unwrap();
+        let deleted = service
+            .hdel("hash", vec!["field2".to_string()])
+            .await
+            .unwrap();
         assert_eq!(deleted, 1);
 
         let exists = service.hexists("hash", "field1").await.unwrap();
@@ -195,7 +225,10 @@ mod tests {
         let random = service.hrand_field("hash", Some(1), false).await.unwrap();
         assert_eq!(random.len(), 1);
 
-        let (cursor, entries) = service.hscan("hash", 0, Some("field".to_string()), Some(10)).await.unwrap();
+        let (cursor, entries) = service
+            .hscan("hash", 0, Some("field".to_string()), Some(10))
+            .await
+            .unwrap();
         assert_eq!(cursor, 0);
         assert!(!entries.is_empty());
     }

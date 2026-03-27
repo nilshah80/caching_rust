@@ -3,7 +3,7 @@
 //! Request and response types for list API endpoints.
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 /// Request to push values to a list
@@ -241,6 +241,73 @@ pub struct ListRemoveResponse {
     pub removed: i64,
 }
 
+/// Request for LMPOP operation
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct LMPopRequest {
+    /// Keys to pop from (checked in order)
+    #[validate(length(min = 1, message = "At least one key is required"))]
+    pub keys: Vec<String>,
+    /// Direction to pop from (left or right)
+    pub direction: ListDirectionParam,
+    /// Number of elements to pop (default: 1, must be >= 1)
+    #[serde(default)]
+    #[validate(range(min = 1, message = "Count must be at least 1"))]
+    pub count: Option<u32>,
+}
+
+/// Request for BLMPOP operation
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct BLMPopRequest {
+    /// Keys to pop from (checked in order)
+    #[validate(length(min = 1, message = "At least one key is required"))]
+    pub keys: Vec<String>,
+    /// Direction to pop from (left or right)
+    pub direction: ListDirectionParam,
+    /// Timeout in seconds (max 30)
+    #[validate(range(min = 1, max = 30))]
+    pub timeout_seconds: u32,
+    /// Number of elements to pop (default: 1, must be >= 1)
+    #[serde(default)]
+    #[validate(range(min = 1, message = "Count must be at least 1"))]
+    pub count: Option<u32>,
+}
+
+/// Response from LMPOP/BLMPOP operations
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LMPopResponse {
+    /// Key that was popped from (None if no data)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Popped elements
+    pub elements: Vec<String>,
+}
+
+/// Query parameters for BLPOP/BRPOP SSE streaming endpoints
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct BlockingPopStreamQuery {
+    /// Number of seconds between polls (default: 5, max: 30)
+    #[serde(default = "default_poll_seconds")]
+    pub poll_seconds: Option<u32>,
+}
+
+/// Query parameters for BLMPOP SSE streaming endpoint
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct BLMPopStreamQuery {
+    /// Comma-separated list of keys to pop from
+    pub keys: String,
+    /// Direction to pop from (left or right)
+    pub direction: ListDirectionParam,
+    /// Number of seconds between polls (default: 5, max: 30)
+    #[serde(default = "default_poll_seconds")]
+    pub poll_seconds: Option<u32>,
+    /// Number of elements to pop (default: 1, must be >= 1)
+    pub count: Option<u32>,
+}
+
+fn default_poll_seconds() -> Option<u32> {
+    Some(5)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,8 +327,14 @@ mod tests {
         let left_domain: crate::domain::repositories::ListDirection = left.into();
         let right_domain: crate::domain::repositories::ListDirection = right.into();
 
-        assert_eq!(left_domain, crate::domain::repositories::ListDirection::Left);
-        assert_eq!(right_domain, crate::domain::repositories::ListDirection::Right);
+        assert_eq!(
+            left_domain,
+            crate::domain::repositories::ListDirection::Left
+        );
+        assert_eq!(
+            right_domain,
+            crate::domain::repositories::ListDirection::Right
+        );
     }
 
     #[test]
@@ -272,8 +345,14 @@ mod tests {
         let before_domain: crate::domain::repositories::InsertPosition = before.into();
         let after_domain: crate::domain::repositories::InsertPosition = after.into();
 
-        assert_eq!(before_domain, crate::domain::repositories::InsertPosition::Before);
-        assert_eq!(after_domain, crate::domain::repositories::InsertPosition::After);
+        assert_eq!(
+            before_domain,
+            crate::domain::repositories::InsertPosition::Before
+        );
+        assert_eq!(
+            after_domain,
+            crate::domain::repositories::InsertPosition::After
+        );
     }
 
     #[test]
@@ -285,5 +364,182 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("list1"));
         assert!(json.contains("10"));
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use validator::Validate;
+
+    #[test]
+    fn blocking_pop_empty_keys_fails() {
+        let req = BlockingPopRequest {
+            keys: vec![],
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blocking_pop_timeout_zero_fails() {
+        let req = BlockingPopRequest {
+            keys: vec!["k1".into()],
+            timeout_seconds: 0,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blocking_pop_timeout_31_fails() {
+        let req = BlockingPopRequest {
+            keys: vec!["k1".into()],
+            timeout_seconds: 31,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blocking_pop_valid_passes() {
+        let req = BlockingPopRequest {
+            keys: vec!["k1".into()],
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn blocking_move_empty_source_fails() {
+        let req = BlockingMoveRequest {
+            source: "".into(),
+            destination: "dst".into(),
+            src_direction: ListDirectionParam::Left,
+            dst_direction: ListDirectionParam::Right,
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blocking_move_empty_destination_fails() {
+        let req = BlockingMoveRequest {
+            source: "src".into(),
+            destination: "".into(),
+            src_direction: ListDirectionParam::Left,
+            dst_direction: ListDirectionParam::Right,
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blocking_move_valid_passes() {
+        let req = BlockingMoveRequest {
+            source: "src".into(),
+            destination: "dst".into(),
+            src_direction: ListDirectionParam::Left,
+            dst_direction: ListDirectionParam::Right,
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    // ========== LMPOP validation ==========
+
+    #[test]
+    fn lmpop_empty_keys_fails() {
+        let req = LMPopRequest {
+            keys: vec![],
+            direction: ListDirectionParam::Left,
+            count: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn lmpop_count_zero_fails() {
+        let req = LMPopRequest {
+            keys: vec!["k".into()],
+            direction: ListDirectionParam::Left,
+            count: Some(0),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn lmpop_valid_passes() {
+        let req = LMPopRequest {
+            keys: vec!["k".into()],
+            direction: ListDirectionParam::Right,
+            count: Some(5),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn lmpop_no_count_passes() {
+        let req = LMPopRequest {
+            keys: vec!["k".into()],
+            direction: ListDirectionParam::Left,
+            count: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    // ========== BLMPOP validation ==========
+
+    #[test]
+    fn blmpop_empty_keys_fails() {
+        let req = BLMPopRequest {
+            keys: vec![],
+            direction: ListDirectionParam::Left,
+            timeout_seconds: 5,
+            count: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blmpop_timeout_zero_fails() {
+        let req = BLMPopRequest {
+            keys: vec!["k".into()],
+            direction: ListDirectionParam::Left,
+            timeout_seconds: 0,
+            count: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blmpop_timeout_31_fails() {
+        let req = BLMPopRequest {
+            keys: vec!["k".into()],
+            direction: ListDirectionParam::Left,
+            timeout_seconds: 31,
+            count: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blmpop_count_zero_fails() {
+        let req = BLMPopRequest {
+            keys: vec!["k".into()],
+            direction: ListDirectionParam::Left,
+            timeout_seconds: 5,
+            count: Some(0),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn blmpop_valid_passes() {
+        let req = BLMPopRequest {
+            keys: vec!["k".into()],
+            direction: ListDirectionParam::Right,
+            timeout_seconds: 10,
+            count: Some(3),
+        };
+        assert!(req.validate().is_ok());
     }
 }

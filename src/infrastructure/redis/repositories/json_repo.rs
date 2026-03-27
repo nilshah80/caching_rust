@@ -38,10 +38,8 @@ impl RedisJsonRepository {
             }
             redis::Value::SimpleString(s) => serde_json::from_str(&s).ok(),
             redis::Value::Array(arr) => {
-                let parsed: Vec<Value> = arr
-                    .into_iter()
-                    .filter_map(Self::parse_json_value)
-                    .collect();
+                let parsed: Vec<Value> =
+                    arr.into_iter().filter_map(Self::parse_json_value).collect();
                 if parsed.is_empty() {
                     None
                 } else {
@@ -113,10 +111,7 @@ impl RedisJsonRepository {
     /// Parse optional JSON value results from Redis array
     fn parse_optional_json_array(value: redis::Value) -> Vec<Option<Value>> {
         match value {
-            redis::Value::Array(arr) => arr
-                .into_iter()
-                .map(|v| Self::parse_json_value(v))
-                .collect(),
+            redis::Value::Array(arr) => arr.into_iter().map(Self::parse_json_value).collect(),
             _ => vec![Self::parse_json_value(value)],
         }
     }
@@ -254,7 +249,7 @@ impl JsonRepository for RedisJsonRepository {
 
         let results: Vec<JsonMGetItem> = keys
             .iter()
-            .zip(values.into_iter())
+            .zip(values)
             .map(|(key, v)| JsonMGetItem {
                 key: key.clone(),
                 value: Self::parse_json_value(v),

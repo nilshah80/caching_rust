@@ -4,8 +4,8 @@
 //! These connections are NOT from the command pool - each subscription
 //! gets its own dedicated connection to support the blocking nature of SUBSCRIBE.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use redis::aio::PubSub;
@@ -58,8 +58,12 @@ pub struct PubSubManager {
 impl PubSubManager {
     /// Create a new PubSubManager
     pub fn new(redis_url: &str, config: PubSubConfig) -> Result<Self, CacheError> {
-        let client = Client::open(redis_url)
-            .map_err(|e| CacheError::ConnectionFailed(format!("Failed to create Redis client for Pub/Sub: {}", e)))?;
+        let client = Client::open(redis_url).map_err(|e| {
+            CacheError::ConnectionFailed(format!(
+                "Failed to create Redis client for Pub/Sub: {}",
+                e
+            ))
+        })?;
 
         let stats = Arc::new(PubSubStats::new(config.max_subscriptions));
 
@@ -102,10 +106,15 @@ impl PubSubManager {
     /// Returns a PubSubConnection wrapper that decrements the counter on drop.
     pub async fn create_subscription(&self) -> Result<PubSubConnection, CacheError> {
         // Check limit before creating connection
-        let current = self.stats.active_subscriptions.fetch_add(1, Ordering::SeqCst);
+        let current = self
+            .stats
+            .active_subscriptions
+            .fetch_add(1, Ordering::SeqCst);
         if current >= self.config.max_subscriptions {
             // Revert the increment
-            self.stats.active_subscriptions.fetch_sub(1, Ordering::SeqCst);
+            self.stats
+                .active_subscriptions
+                .fetch_sub(1, Ordering::SeqCst);
             return Err(CacheError::SubscriptionLimitReached);
         }
 
@@ -114,7 +123,9 @@ impl PubSubManager {
         let pubsub = tokio::time::timeout(connect_timeout, self.client.get_async_pubsub())
             .await
             .map_err(|_| {
-                self.stats.active_subscriptions.fetch_sub(1, Ordering::SeqCst);
+                self.stats
+                    .active_subscriptions
+                    .fetch_sub(1, Ordering::SeqCst);
                 self.stats.errors.fetch_add(1, Ordering::Relaxed);
                 CacheError::ConnectionFailed(format!(
                     "Pub/Sub connection timed out after {}ms",
@@ -122,7 +133,9 @@ impl PubSubManager {
                 ))
             })?
             .map_err(|e| {
-                self.stats.active_subscriptions.fetch_sub(1, Ordering::SeqCst);
+                self.stats
+                    .active_subscriptions
+                    .fetch_sub(1, Ordering::SeqCst);
                 self.stats.errors.fetch_add(1, Ordering::Relaxed);
                 CacheError::ConnectionFailed(format!("Failed to create Pub/Sub connection: {}", e))
             })?;
@@ -187,7 +200,10 @@ impl PubSubConnection {
     }
 
     /// Subscribe to multiple channels
-    pub async fn subscribe_many<'a>(&mut self, channels: impl IntoIterator<Item = &'a str>) -> RedisResult<()> {
+    pub async fn subscribe_many<'a>(
+        &mut self,
+        channels: impl IntoIterator<Item = &'a str>,
+    ) -> RedisResult<()> {
         if let Some(ref mut pubsub) = self.inner {
             for channel in channels {
                 pubsub.subscribe(channel).await?;
@@ -214,7 +230,10 @@ impl PubSubConnection {
     }
 
     /// Subscribe to multiple patterns
-    pub async fn psubscribe_many<'a>(&mut self, patterns: impl IntoIterator<Item = &'a str>) -> RedisResult<()> {
+    pub async fn psubscribe_many<'a>(
+        &mut self,
+        patterns: impl IntoIterator<Item = &'a str>,
+    ) -> RedisResult<()> {
         if let Some(ref mut pubsub) = self.inner {
             for pattern in patterns {
                 pubsub.psubscribe(pattern).await?;
@@ -257,11 +276,9 @@ impl PubSubConnection {
     /// Returns a stream that yields messages. The stats counter will be
     /// decremented when the returned stream is dropped.
     pub fn into_on_message(mut self) -> Option<PubSubMessageStream> {
-        self.inner.take().map(|pubsub| {
-            PubSubMessageStream {
-                inner: pubsub.into_on_message(),
-                stats: self.stats.clone(),
-            }
+        self.inner.take().map(|pubsub| PubSubMessageStream {
+            inner: pubsub.into_on_message(),
+            stats: self.stats.clone(),
         })
     }
 
@@ -282,7 +299,9 @@ impl Drop for PubSubConnection {
     fn drop(&mut self) {
         // Only decrement if inner is still present (not consumed by into_on_message)
         if self.inner.is_some() {
-            self.stats.active_subscriptions.fetch_sub(1, Ordering::SeqCst);
+            self.stats
+                .active_subscriptions
+                .fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -306,7 +325,9 @@ impl futures::Stream for PubSubMessageStream {
 
 impl Drop for PubSubMessageStream {
     fn drop(&mut self) {
-        self.stats.active_subscriptions.fetch_sub(1, Ordering::SeqCst);
+        self.stats
+            .active_subscriptions
+            .fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -316,8 +337,8 @@ mod tests {
     use futures::StreamExt;
     use testcontainers::ContainerAsync;
     use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{Redis, REDIS_PORT};
-    use tokio::time::{timeout, Duration};
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use tokio::time::{Duration, timeout};
 
     async fn start_redis() -> (ContainerAsync<Redis>, String) {
         let container = Redis::default().start().await.unwrap();
@@ -380,7 +401,10 @@ mod tests {
         };
         let manager = PubSubManager::new("redis://127.0.0.1/", config).unwrap();
 
-        manager.stats.active_subscriptions.store(1, Ordering::Relaxed);
+        manager
+            .stats
+            .active_subscriptions
+            .store(1, Ordering::Relaxed);
         assert_eq!(manager.active_subscriptions(), 1);
         assert!(!manager.can_subscribe());
     }
@@ -393,7 +417,10 @@ mod tests {
         };
         let manager = PubSubManager::new("redis://127.0.0.1/", config).unwrap();
 
-        manager.stats.active_subscriptions.store(1, Ordering::SeqCst);
+        manager
+            .stats
+            .active_subscriptions
+            .store(1, Ordering::SeqCst);
 
         let err = manager.create_subscription().await.unwrap_err();
         assert!(matches!(err, CacheError::SubscriptionLimitReached));
@@ -403,10 +430,7 @@ mod tests {
     #[tokio::test]
     async fn test_pubsub_connection_errors_without_inner() {
         let stats = Arc::new(PubSubStats::new(1));
-        let mut conn = PubSubConnection {
-            inner: None,
-            stats,
-        };
+        let mut conn = PubSubConnection { inner: None, stats };
 
         let err = conn.subscribe("chan").await.unwrap_err();
         assert_eq!(err.kind(), redis::ErrorKind::IoError);

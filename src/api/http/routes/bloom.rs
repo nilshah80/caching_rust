@@ -3,11 +3,11 @@
 //! HTTP routes for Bloom filter and Cuckoo filter operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, post},
-    Json, Router,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use validator::Validate;
 
 use crate::api::http::schemas::bloom::{
@@ -170,7 +170,10 @@ async fn bf_exists(
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
     let result = if request.items.len() == 1 {
-        state.bloom_service.bf_exists(&key, &request.items[0]).await?
+        state
+            .bloom_service
+            .bf_exists(&key, &request.items[0])
+            .await?
     } else {
         state.bloom_service.bf_mexists(&key, request.items).await?
     };
@@ -257,7 +260,10 @@ async fn bf_scandump(
     Path(key): Path<String>,
     Query(params): Query<BloomScanDumpParams>,
 ) -> Result<Json<ApiResponse<BloomScanDumpResponse>>, CacheError> {
-    let result = state.bloom_service.bf_scandump(&key, params.iterator).await?;
+    let result = state
+        .bloom_service
+        .bf_scandump(&key, params.iterator)
+        .await?;
     Ok(Json(ApiResponse::new(result.into())))
 }
 
@@ -444,7 +450,10 @@ async fn cf_exists(
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
     let result = if request.items.len() == 1 {
-        state.bloom_service.cf_exists(&key, &request.items[0]).await?
+        state
+            .bloom_service
+            .cf_exists(&key, &request.items[0])
+            .await?
     } else {
         state.bloom_service.cf_mexists(&key, request.items).await?
     };
@@ -513,7 +522,10 @@ async fn cf_insertnx(
 
     let items = request.items.clone();
     let options = request.into();
-    let result = state.bloom_service.cf_insertnx(&key, options, items).await?;
+    let result = state
+        .bloom_service
+        .cf_insertnx(&key, options, items)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -600,7 +612,10 @@ async fn cf_scandump(
     Path(key): Path<String>,
     Query(params): Query<CuckooScanDumpParams>,
 ) -> Result<Json<ApiResponse<CuckooScanDumpResponse>>, CacheError> {
-    let result = state.bloom_service.cf_scandump(&key, params.iterator).await?;
+    let result = state
+        .bloom_service
+        .cf_scandump(&key, params.iterator)
+        .await?;
     Ok(Json(ApiResponse::new(result.into())))
 }
 
@@ -645,9 +660,9 @@ async fn cf_loadchunk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_state_with_bloom_repo;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use crate::test_support::test_state_with_bloom_repo;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -953,7 +968,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/bloom/myfilter/loadchunk")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"iterator":0,"data":"!!!invalid base64!!!"}"#))
+                    .body(Body::from(
+                        r#"{"iterator":0,"data":"!!!invalid base64!!!"}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -1015,7 +1032,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/cuckoo/myfilter/loadchunk")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"iterator":0,"data":"!!!invalid base64!!!"}"#))
+                    .body(Body::from(
+                        r#"{"iterator":0,"data":"!!!invalid base64!!!"}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -1057,7 +1076,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/bloom/myfilter/insert")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"items":["item1"],"nonscaling":true,"expansion":2}"#))
+                    .body(Body::from(
+                        r#"{"items":["item1"],"nonscaling":true,"expansion":2}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -1108,7 +1129,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/bloom/myfilter")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"error_rate":0.01,"capacity":1000,"nonscaling":true,"expansion":2}"#))
+                    .body(Body::from(
+                        r#"{"error_rate":0.01,"capacity":1000,"nonscaling":true,"expansion":2}"#,
+                    ))
                     .unwrap(),
             )
             .await

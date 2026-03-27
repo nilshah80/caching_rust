@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::entities::{
-    AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent, MemoryStats,
+    MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -65,7 +65,11 @@ impl AdminService {
     }
 
     /// Get memory usage for a key
-    pub async fn get_memory_usage(&self, key: &str, samples: Option<u32>) -> Result<MemoryUsage, CacheError> {
+    pub async fn get_memory_usage(
+        &self,
+        key: &str,
+        samples: Option<u32>,
+    ) -> Result<MemoryUsage, CacheError> {
         let samples = samples.unwrap_or(5);
         self.repository.get_memory_usage(key, samples).await
     }
@@ -105,10 +109,14 @@ impl AdminService {
         replace: bool,
     ) -> Result<bool, CacheError> {
         if source.is_empty() {
-            return Err(CacheError::InvalidInput("Source key cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Source key cannot be empty".to_string(),
+            ));
         }
         if destination.is_empty() {
-            return Err(CacheError::InvalidInput("Destination key cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Destination key cannot be empty".to_string(),
+            ));
         }
 
         let options = CopyKeyOptions {
@@ -142,7 +150,9 @@ impl AdminService {
     /// Get configuration parameters
     pub async fn config_get(&self, pattern: &str) -> Result<HashMap<String, String>, CacheError> {
         if pattern.is_empty() {
-            return Err(CacheError::InvalidInput("Pattern cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Pattern cannot be empty".to_string(),
+            ));
         }
         self.repository.config_get(pattern).await
     }
@@ -150,7 +160,9 @@ impl AdminService {
     /// Set configuration parameter
     pub async fn config_set(&self, parameter: &str, value: &str) -> Result<(), CacheError> {
         if parameter.is_empty() {
-            return Err(CacheError::InvalidInput("Parameter name cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Parameter name cannot be empty".to_string(),
+            ));
         }
         self.repository.config_set(parameter, value).await
     }
@@ -209,7 +221,11 @@ impl AdminService {
     }
 
     /// Pause client processing
-    pub async fn client_pause(&self, timeout_ms: u64, mode: Option<String>) -> Result<(), CacheError> {
+    pub async fn client_pause(
+        &self,
+        timeout_ms: u64,
+        mode: Option<String>,
+    ) -> Result<(), CacheError> {
         let options = ClientPauseOptions {
             timeout_ms,
             mode: mode.unwrap_or_else(|| "write".to_string()),
@@ -269,7 +285,9 @@ impl AdminService {
     /// Get latency history for an event
     pub async fn latency_history(&self, event: &str) -> Result<Vec<LatencyEvent>, CacheError> {
         if event.is_empty() {
-            return Err(CacheError::InvalidInput("Event name cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Event name cannot be empty".to_string(),
+            ));
         }
         self.repository.latency_history(event).await
     }
@@ -315,16 +333,39 @@ impl AdminService {
     }
 
     /// Get ACL log entries
-    pub async fn acl_log(&self, count: Option<i64>, reset: bool) -> Result<Vec<AclLogEntry>, CacheError> {
+    pub async fn acl_log(
+        &self,
+        count: Option<i64>,
+        reset: bool,
+    ) -> Result<Vec<AclLogEntry>, CacheError> {
         self.repository.acl_log(count, reset).await
+    }
+
+    /// Test if a user has permission to run a command (ACL DRYRUN)
+    pub async fn acl_dryrun(
+        &self,
+        username: &str,
+        command: &[String],
+    ) -> Result<AclDryrunResult, CacheError> {
+        if username.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Username cannot be empty".to_string(),
+            ));
+        }
+        if command.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Command cannot be empty".to_string(),
+            ));
+        }
+        self.repository.acl_dryrun(username, command).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::infrastructure::redis::connection::InstrumentedPool;
+    use async_trait::async_trait;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -341,7 +382,10 @@ mod tests {
             Ok(ServerInfo::default())
         }
         async fn get_server_time(&self) -> Result<ServerTime, CacheError> {
-            Ok(ServerTime { timestamp: 1, microseconds: 2 })
+            Ok(ServerTime {
+                timestamp: 1,
+                microseconds: 2,
+            })
         }
         async fn get_db_size(&self) -> Result<i64, CacheError> {
             Ok(0)
@@ -352,9 +396,16 @@ mod tests {
         async fn get_memory_stats(&self) -> Result<MemoryStats, CacheError> {
             Ok(MemoryStats::default())
         }
-        async fn get_memory_usage(&self, key: &str, samples: u32) -> Result<MemoryUsage, CacheError> {
+        async fn get_memory_usage(
+            &self,
+            key: &str,
+            samples: u32,
+        ) -> Result<MemoryUsage, CacheError> {
             *self.samples.lock().expect("lock") = Some(samples);
-            Ok(MemoryUsage { key: key.to_string(), bytes: Some(1) })
+            Ok(MemoryUsage {
+                key: key.to_string(),
+                bytes: Some(1),
+            })
         }
         async fn memory_doctor(&self) -> Result<String, CacheError> {
             Ok("OK".to_string())
@@ -363,10 +414,16 @@ mod tests {
             Ok(())
         }
         async fn flush_db(&self, options: FlushOptions) -> Result<FlushResult, CacheError> {
-            Ok(FlushResult { success: true, mode: if options.async_mode { "ASYNC" } else { "SYNC" }.to_string() })
+            Ok(FlushResult {
+                success: true,
+                mode: if options.async_mode { "ASYNC" } else { "SYNC" }.to_string(),
+            })
         }
         async fn flush_all(&self, options: FlushOptions) -> Result<FlushResult, CacheError> {
-            Ok(FlushResult { success: true, mode: if options.async_mode { "ASYNC" } else { "SYNC" }.to_string() })
+            Ok(FlushResult {
+                success: true,
+                mode: if options.async_mode { "ASYNC" } else { "SYNC" }.to_string(),
+            })
         }
         async fn copy_key(&self, _options: CopyKeyOptions) -> Result<bool, CacheError> {
             Ok(true)
@@ -393,10 +450,16 @@ mod tests {
             Ok(())
         }
         async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
-            Ok(BgSaveResult { started: true, message: "OK".to_string() })
+            Ok(BgSaveResult {
+                started: true,
+                message: "OK".to_string(),
+            })
         }
         async fn bgrewriteaof(&self) -> Result<BgRewriteAofResult, CacheError> {
-            Ok(BgRewriteAofResult { started: true, message: "OK".to_string() })
+            Ok(BgRewriteAofResult {
+                started: true,
+                message: "OK".to_string(),
+            })
         }
         async fn client_list(&self) -> Result<Vec<ClientInfo>, CacheError> {
             Ok(vec![])
@@ -434,7 +497,11 @@ mod tests {
             Ok(vec![])
         }
         async fn latency_history(&self, event: &str) -> Result<Vec<LatencyEvent>, CacheError> {
-            Ok(vec![LatencyEvent { event: event.to_string(), timestamp: 1, latency_ms: 1 }])
+            Ok(vec![LatencyEvent {
+                event: event.to_string(),
+                timestamp: 1,
+                latency_ms: 1,
+            }])
         }
         async fn latency_doctor(&self) -> Result<String, CacheError> {
             Ok("OK".to_string())
@@ -458,8 +525,22 @@ mod tests {
             *self.genpass_bits.lock().expect("lock") = Some(bits);
             Ok("pass".to_string())
         }
-        async fn acl_log(&self, _count: Option<i64>, _reset: bool) -> Result<Vec<AclLogEntry>, CacheError> {
+        async fn acl_log(
+            &self,
+            _count: Option<i64>,
+            _reset: bool,
+        ) -> Result<Vec<AclLogEntry>, CacheError> {
             Ok(vec![])
+        }
+        async fn acl_dryrun(
+            &self,
+            _username: &str,
+            _command: &[String],
+        ) -> Result<AclDryrunResult, CacheError> {
+            Ok(AclDryrunResult {
+                allowed: true,
+                reason: None,
+            })
         }
     }
 
@@ -468,10 +549,16 @@ mod tests {
         let repo = Arc::new(CaptureAdminRepo::default());
         let service = AdminService::new_with_repository(repo);
 
-        let err = service.copy_key("".to_string(), "dest".to_string(), None, false).await.unwrap_err();
+        let err = service
+            .copy_key("".to_string(), "dest".to_string(), None, false)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
-        let err = service.copy_key("src".to_string(), "".to_string(), None, false).await.unwrap_err();
+        let err = service
+            .copy_key("src".to_string(), "".to_string(), None, false)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let err = service.move_key("".to_string(), 1).await.unwrap_err();
@@ -485,6 +572,15 @@ mod tests {
 
         let err = service.latency_history("").await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .acl_dryrun("", &["GET".to_string()])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.acl_dryrun("default", &[]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 
     #[tokio::test]
@@ -492,11 +588,17 @@ mod tests {
         let repo = Arc::new(CaptureAdminRepo::default());
         let service = AdminService::new_with_repository(repo.clone());
 
-        service.get_memory_usage("k", None).await.expect("memory usage");
+        service
+            .get_memory_usage("k", None)
+            .await
+            .expect("memory usage");
         assert_eq!(*repo.samples.lock().expect("lock"), Some(5));
 
         service.client_pause(100, None).await.expect("pause");
-        assert_eq!(repo.pause.lock().expect("lock").as_ref().unwrap().mode, "write");
+        assert_eq!(
+            repo.pause.lock().expect("lock").as_ref().unwrap().mode,
+            "write"
+        );
 
         service.slowlog_get(None).await.expect("slowlog");
         assert_eq!(*repo.slowlog_count.lock().expect("lock"), Some(10));

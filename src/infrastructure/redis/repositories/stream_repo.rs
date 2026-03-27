@@ -17,9 +17,10 @@ use crate::domain::entities::{
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StreamRepository;
 use crate::infrastructure::redis::connection::InstrumentedPool;
+use crate::shared::blocking::MAX_BLOCKING_TIMEOUT_SECS;
 
-/// Maximum blocking timeout in seconds (Architecture Decision 3)
-const MAX_BLOCKING_TIMEOUT_SECS: u64 = 30;
+/// Type alias for Redis stream read results: Vec of (stream_key, Vec of (entry_id, Vec of (field, value)))
+type RedisStreamReadResult = Vec<(String, Vec<(String, Vec<(String, String)>)>)>;
 
 /// Redis implementation of StreamRepository
 #[derive(Clone)]
@@ -43,7 +44,7 @@ impl RedisStreamRepository {
     }
 
     /// Parse stream read results from Redis response
-    fn parse_read_results(results: Vec<(String, Vec<(String, Vec<(String, String)>)>)>) -> Vec<StreamReadResult> {
+    fn parse_read_results(results: RedisStreamReadResult) -> Vec<StreamReadResult> {
         results
             .into_iter()
             .map(|(key, entries)| {
@@ -59,14 +60,12 @@ impl RedisStreamRepository {
             .collect()
     }
 
-    /// Enforce maximum blocking timeout (Architecture Decision 3)
+    /// Enforce blocking timeout bounds (min 1s, max 30s)
     fn enforce_max_timeout(timeout: Duration) -> Duration {
-        let max = Duration::from_secs(MAX_BLOCKING_TIMEOUT_SECS);
-        if timeout > max {
-            max
-        } else {
-            timeout
-        }
+        timeout.clamp(
+            Duration::from_secs(1),
+            Duration::from_secs(MAX_BLOCKING_TIMEOUT_SECS),
+        )
     }
 }
 
@@ -128,10 +127,7 @@ impl StreamRepository for RedisStreamRepository {
 
     async fn xlen(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("XLEN")
-            .arg(key)
-            .query_async(&mut *conn)
-            .await?;
+        let result: i64 = redis::cmd("XLEN").arg(key).query_async(&mut *conn).await?;
         Ok(result)
     }
 
@@ -550,12 +546,14 @@ impl StreamRepository for RedisStreamRepository {
 
         Ok(result
             .into_iter()
-            .map(|(id, consumer, idle_time_ms, delivery_count)| PendingEntry {
-                id,
-                consumer,
-                idle_time_ms,
-                delivery_count,
-            })
+            .map(
+                |(id, consumer, idle_time_ms, delivery_count)| PendingEntry {
+                    id,
+                    consumer,
+                    idle_time_ms,
+                    delivery_count,
+                },
+            )
             .collect())
     }
 
@@ -770,7 +768,8 @@ impl RedisStreamRepository {
                             "consumers" => info.consumers = Self::value_to_i64(&val).unwrap_or(0),
                             "pending" => info.pending = Self::value_to_i64(&val).unwrap_or(0),
                             "last-delivered-id" => {
-                                info.last_delivered_id = Self::value_to_string(&val).unwrap_or_default()
+                                info.last_delivered_id =
+                                    Self::value_to_string(&val).unwrap_or_default()
                             }
                             "entries-read" => info.entries_read = Self::value_to_i64(&val),
                             "lag" => info.lag = Self::value_to_i64(&val),
@@ -825,17 +824,15 @@ impl RedisStreamRepository {
                 let mut consumers = HashMap::new();
                 if let Value::Array(consumer_arr) = &arr[3] {
                     for item in consumer_arr {
-                        if let Value::Array(pair) = item {
-                            if pair.len() >= 2 {
-                                if let (Some(name), Some(pending)) = (
-                                    Self::value_to_string(&pair[0]),
-                                    Self::value_to_string(&pair[1]),
-                                ) {
-                                    if let Ok(p) = pending.parse::<i64>() {
-                                        consumers.insert(name, p);
-                                    }
-                                }
-                            }
+                        if let Value::Array(pair) = item
+                            && pair.len() >= 2
+                            && let (Some(name), Some(pending)) = (
+                                Self::value_to_string(&pair[0]),
+                                Self::value_to_string(&pair[1]),
+                            )
+                            && let Ok(p) = pending.parse::<i64>()
+                        {
+                            consumers.insert(name, p);
                         }
                     }
                 }
@@ -866,7 +863,7 @@ impl RedisStreamRepository {
                     match &arr[1] {
                         Value::Array(ids) => ids
                             .iter()
-                            .filter_map(|v| Self::value_to_string(v))
+                            .filter_map(Self::value_to_string)
                             .map(|id| StreamEntry {
                                 id,
                                 fields: HashMap::new(),
@@ -880,13 +877,13 @@ impl RedisStreamRepository {
                         Value::Array(entry_arr) => entry_arr
                             .iter()
                             .filter_map(|e| {
-                                if let Value::Array(pair) = e {
-                                    if pair.len() >= 2 {
-                                        let id = Self::value_to_string(&pair[0])?;
-                                        if let Value::Array(fields_arr) = &pair[1] {
-                                            let fields = Self::parse_fields_array(fields_arr);
-                                            return Some(StreamEntry { id, fields });
-                                        }
+                                if let Value::Array(pair) = e
+                                    && pair.len() >= 2
+                                {
+                                    let id = Self::value_to_string(&pair[0])?;
+                                    if let Value::Array(fields_arr) = &pair[1] {
+                                        let fields = Self::parse_fields_array(fields_arr);
+                                        return Some(StreamEntry { id, fields });
                                     }
                                 }
                                 None
@@ -899,10 +896,7 @@ impl RedisStreamRepository {
                 // Deleted IDs (Redis 7.0+)
                 let deleted_ids = if arr.len() >= 3 {
                     match &arr[2] {
-                        Value::Array(ids) => ids
-                            .iter()
-                            .filter_map(|v| Self::value_to_string(v))
-                            .collect(),
+                        Value::Array(ids) => ids.iter().filter_map(Self::value_to_string).collect(),
                         _ => vec![],
                     }
                 } else {
@@ -960,9 +954,7 @@ impl RedisStreamRepository {
     fn value_to_i64(value: &Value) -> Option<i64> {
         match value {
             Value::Int(i) => Some(*i),
-            Value::BulkString(bytes) => {
-                String::from_utf8(bytes.clone()).ok()?.parse().ok()
-            }
+            Value::BulkString(bytes) => String::from_utf8(bytes.clone()).ok()?.parse().ok(),
             _ => None,
         }
     }

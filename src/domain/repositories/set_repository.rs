@@ -53,7 +53,12 @@ pub trait SetRepository: Send + Sync {
 
     /// SMOVE - Move a member from one set to another
     /// Returns true if the member was moved, false if it didn't exist in source
-    async fn smove(&self, source: &str, destination: &str, member: &str) -> Result<bool, CacheError>;
+    async fn smove(
+        &self,
+        source: &str,
+        destination: &str,
+        member: &str,
+    ) -> Result<bool, CacheError>;
 
     // ========== Set algebra operations ==========
 

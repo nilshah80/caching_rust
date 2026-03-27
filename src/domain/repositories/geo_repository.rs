@@ -11,7 +11,7 @@ use crate::domain::errors::CacheError;
 pub struct GeoPosition {
     /// Longitude (-180 to 180)
     pub longitude: f64,
-    /// Latitude (-85.05112878 to 85.05112878)
+    /// Latitude (-85.051_128_78 to 85.051_128_78)
     pub latitude: f64,
 }
 
@@ -28,8 +28,8 @@ impl GeoPosition {
     pub fn is_valid(&self) -> bool {
         self.longitude >= -180.0
             && self.longitude <= 180.0
-            && self.latitude >= -85.05112878
-            && self.latitude <= 85.05112878
+            && self.latitude >= -85.051_128_78
+            && self.latitude <= 85.051_128_78
     }
 }
 

@@ -2,12 +2,12 @@
 //!
 //! Domain-specific error types with HTTP status code mapping.
 
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use thiserror::Error;
-use chrono::{DateTime, Utc};
 use utoipa::ToSchema;
 
 /// Domain error type for caching operations
@@ -258,7 +258,10 @@ mod tests {
             CacheError::ScriptError("x".into()).status_code(),
             StatusCode::BAD_REQUEST
         );
-        assert_eq!(CacheError::Timeout.status_code(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            CacheError::Timeout.status_code(),
+            StatusCode::GATEWAY_TIMEOUT
+        );
         assert_eq!(
             CacheError::RedisError(redis::RedisError::from((ErrorKind::TypeError, "err")))
                 .status_code(),
@@ -283,9 +286,13 @@ mod tests {
             .error_code(),
             "TYPE_MISMATCH"
         );
-        assert_eq!(CacheError::ScriptError("x".into()).error_code(), "SCRIPT_ERROR");
         assert_eq!(
-            CacheError::RedisError(redis::RedisError::from((ErrorKind::TypeError, "err"))).error_code(),
+            CacheError::ScriptError("x".into()).error_code(),
+            "SCRIPT_ERROR"
+        );
+        assert_eq!(
+            CacheError::RedisError(redis::RedisError::from((ErrorKind::TypeError, "err")))
+                .error_code(),
             "REDIS_ERROR"
         );
     }
@@ -306,7 +313,10 @@ mod tests {
             "TRANSACTION_FAILED"
         );
         assert_eq!(CacheError::Unauthorized.error_code(), "UNAUTHORIZED");
-        assert_eq!(CacheError::Internal("x".into()).error_code(), "INTERNAL_ERROR");
+        assert_eq!(
+            CacheError::Internal("x".into()).error_code(),
+            "INTERNAL_ERROR"
+        );
     }
 
     #[test]

@@ -15,9 +15,7 @@ use validator::Validate;
 pub enum RedisCommand {
     // ========== String Commands ==========
     /// GET - Get the value of a key
-    Get {
-        key: String,
-    },
+    Get { key: String },
     /// SET - Set the value of a key with optional TTL
     Set {
         key: String,
@@ -27,42 +25,21 @@ pub enum RedisCommand {
         ttl_seconds: Option<u64>,
     },
     /// INCR - Increment the integer value of a key by one
-    Incr {
-        key: String,
-    },
+    Incr { key: String },
     /// INCRBY - Increment the integer value of a key by the given amount
-    IncrBy {
-        key: String,
-        delta: i64,
-    },
+    IncrBy { key: String, delta: i64 },
     /// DECR - Decrement the integer value of a key by one
-    Decr {
-        key: String,
-    },
+    Decr { key: String },
     /// DECRBY - Decrement the integer value of a key by the given amount
-    DecrBy {
-        key: String,
-        delta: i64,
-    },
+    DecrBy { key: String, delta: i64 },
     /// APPEND - Append a value to a key
-    Append {
-        key: String,
-        value: String,
-    },
+    Append { key: String, value: String },
     /// SETNX - Set the value of a key, only if the key does not exist
-    SetNx {
-        key: String,
-        value: String,
-    },
+    SetNx { key: String, value: String },
     /// GETSET - Set the string value of a key and return its old value
-    GetSet {
-        key: String,
-        value: String,
-    },
+    GetSet { key: String, value: String },
     /// MGET - Get the values of all specified keys
-    MGet {
-        keys: Vec<String>,
-    },
+    MGet { keys: Vec<String> },
     /// MSET - Set multiple keys to multiple values
     MSet {
         /// Key-value pairs to set
@@ -71,10 +48,7 @@ pub enum RedisCommand {
 
     // ========== Hash Commands ==========
     /// HGET - Get the value of a hash field
-    HGet {
-        key: String,
-        field: String,
-    },
+    HGet { key: String, field: String },
     /// HSET - Set the value of a hash field
     HSet {
         key: String,
@@ -88,10 +62,7 @@ pub enum RedisCommand {
         fields: Vec<FieldValue>,
     },
     /// HMGET - Get values of multiple hash fields
-    HMGet {
-        key: String,
-        fields: Vec<String>,
-    },
+    HMGet { key: String, fields: Vec<String> },
     /// HINCRBY - Increment the integer value of a hash field
     HIncrBy {
         key: String,
@@ -105,31 +76,17 @@ pub enum RedisCommand {
         delta: f64,
     },
     /// HDEL - Delete one or more hash fields
-    HDel {
-        key: String,
-        fields: Vec<String>,
-    },
+    HDel { key: String, fields: Vec<String> },
     /// HEXISTS - Check if a hash field exists
-    HExists {
-        key: String,
-        field: String,
-    },
+    HExists { key: String, field: String },
     /// HGETALL - Get all fields and values in a hash
-    HGetAll {
-        key: String,
-    },
+    HGetAll { key: String },
     /// HKEYS - Get all field names in a hash
-    HKeys {
-        key: String,
-    },
+    HKeys { key: String },
     /// HVALS - Get all values in a hash
-    HVals {
-        key: String,
-    },
+    HVals { key: String },
     /// HLEN - Get the number of fields in a hash
-    HLen {
-        key: String,
-    },
+    HLen { key: String },
     /// HSETNX - Set the value of a hash field, only if it doesn't exist
     HSetNx {
         key: String,
@@ -139,15 +96,9 @@ pub enum RedisCommand {
 
     // ========== List Commands ==========
     /// LPUSH - Insert all values at the head of the list
-    LPush {
-        key: String,
-        values: Vec<String>,
-    },
+    LPush { key: String, values: Vec<String> },
     /// RPUSH - Insert all values at the tail of the list
-    RPush {
-        key: String,
-        values: Vec<String>,
-    },
+    RPush { key: String, values: Vec<String> },
     /// LPOP - Remove and return elements from the head of the list
     LPop {
         key: String,
@@ -161,20 +112,11 @@ pub enum RedisCommand {
         count: Option<u32>,
     },
     /// LLEN - Get the length of a list
-    LLen {
-        key: String,
-    },
+    LLen { key: String },
     /// LINDEX - Get an element from a list by its index
-    LIndex {
-        key: String,
-        index: i64,
-    },
+    LIndex { key: String, index: i64 },
     /// LRANGE - Get a range of elements from a list
-    LRange {
-        key: String,
-        start: i64,
-        stop: i64,
-    },
+    LRange { key: String, start: i64, stop: i64 },
     /// LSET - Set the value of an element by its index
     LSet {
         key: String,
@@ -182,11 +124,7 @@ pub enum RedisCommand {
         value: String,
     },
     /// LTRIM - Trim a list to the specified range
-    LTrim {
-        key: String,
-        start: i64,
-        stop: i64,
-    },
+    LTrim { key: String, start: i64, stop: i64 },
     /// LREM - Remove elements from a list
     LRem {
         key: String,
@@ -196,28 +134,15 @@ pub enum RedisCommand {
 
     // ========== Set Commands ==========
     /// SADD - Add one or more members to a set
-    SAdd {
-        key: String,
-        members: Vec<String>,
-    },
+    SAdd { key: String, members: Vec<String> },
     /// SREM - Remove one or more members from a set
-    SRem {
-        key: String,
-        members: Vec<String>,
-    },
+    SRem { key: String, members: Vec<String> },
     /// SISMEMBER - Check if a member exists in a set
-    SIsMember {
-        key: String,
-        member: String,
-    },
+    SIsMember { key: String, member: String },
     /// SMEMBERS - Get all members of a set
-    SMembers {
-        key: String,
-    },
+    SMembers { key: String },
     /// SCARD - Get the number of members in a set
-    SCard {
-        key: String,
-    },
+    SCard { key: String },
     /// SPOP - Remove and return random members from a set
     SPop {
         key: String,
@@ -238,10 +163,7 @@ pub enum RedisCommand {
         members: Vec<ScoredMember>,
     },
     /// ZREM - Remove one or more members from a sorted set
-    ZRem {
-        key: String,
-        members: Vec<String>,
-    },
+    ZRem { key: String, members: Vec<String> },
     /// ZINCRBY - Increment the score of a member in a sorted set
     ZIncrBy {
         key: String,
@@ -249,24 +171,13 @@ pub enum RedisCommand {
         member: String,
     },
     /// ZSCORE - Get the score of a member in a sorted set
-    ZScore {
-        key: String,
-        member: String,
-    },
+    ZScore { key: String, member: String },
     /// ZRANK - Get the rank of a member in a sorted set (lowest to highest)
-    ZRank {
-        key: String,
-        member: String,
-    },
+    ZRank { key: String, member: String },
     /// ZREVRANK - Get the rank of a member (highest to lowest)
-    ZRevRank {
-        key: String,
-        member: String,
-    },
+    ZRevRank { key: String, member: String },
     /// ZCARD - Get the number of members in a sorted set
-    ZCard {
-        key: String,
-    },
+    ZCard { key: String },
     /// ZCOUNT - Count members in a score range
     ZCount {
         key: String,
@@ -292,49 +203,25 @@ pub enum RedisCommand {
 
     // ========== Key Commands ==========
     /// DEL - Delete one or more keys
-    Del {
-        keys: Vec<String>,
-    },
+    Del { keys: Vec<String> },
     /// EXISTS - Check if keys exist
-    Exists {
-        keys: Vec<String>,
-    },
+    Exists { keys: Vec<String> },
     /// EXPIRE - Set a timeout on a key (in seconds)
-    Expire {
-        key: String,
-        seconds: u64,
-    },
+    Expire { key: String, seconds: u64 },
     /// PEXPIRE - Set a timeout on a key (in milliseconds)
-    PExpire {
-        key: String,
-        milliseconds: u64,
-    },
+    PExpire { key: String, milliseconds: u64 },
     /// TTL - Get the time to live for a key (in seconds)
-    Ttl {
-        key: String,
-    },
+    Ttl { key: String },
     /// PTTL - Get the time to live for a key (in milliseconds)
-    PTtl {
-        key: String,
-    },
+    PTtl { key: String },
     /// PERSIST - Remove the expiration from a key
-    Persist {
-        key: String,
-    },
+    Persist { key: String },
     /// RENAME - Rename a key
-    Rename {
-        key: String,
-        new_key: String,
-    },
+    Rename { key: String, new_key: String },
     /// RENAMENX - Rename a key, only if the new key does not exist
-    RenameNx {
-        key: String,
-        new_key: String,
-    },
+    RenameNx { key: String, new_key: String },
     /// TYPE - Get the type of a key
-    Type {
-        key: String,
-    },
+    Type { key: String },
 }
 
 /// Key-value pair for MSET command

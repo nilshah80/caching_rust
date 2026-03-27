@@ -1928,20 +1928,20 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-### 5.8 Redis 7.0+ List Operations (MISSING)
-- [ ] **Task 5.8.1**: Implement LMPOP/BLMPOP operations
+### 5.8 Redis 7.0+ List Operations ✅ COMPLETED
+- [x] **Task 5.8.1**: Implement LMPOP/BLMPOP operations
   | Command | Method | Priority | Redis Version |
   |---------|--------|----------|---------------|
   | LMPOP | `lmpop` | High | 7.0+ |
   | BLMPOP | `blmpop` | High | 7.0+ |
 
-- [ ] **Task 5.8.2**: Create LMPOP/BLMPOP API routes
+- [x] **Task 5.8.2**: Create LMPOP/BLMPOP API routes
   ```
   POST   /api/v1/lists/mpop           # Atomic multi-key pop
-  POST   /api/v1/lists/blmpop         # Blocking multi-key pop (SSE)
+  POST   /api/v1/lists/blmpop         # Blocking multi-key pop (204 on timeout)
   ```
 
-- [ ] **Task 5.8.3**: Create LMPOP/BLMPOP request/response schemas
+- [x] **Task 5.8.3**: Create LMPOP/BLMPOP request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct LMPopRequest {
@@ -2031,18 +2031,18 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-### 5.10 Redis 7.0+ SORT_RO Operation (MISSING)
-- [ ] **Task 5.10.1**: Implement SORT_RO operation
+### 5.10 Redis 7.0+ SORT_RO Operation ✅ COMPLETED (merged into 5.15)
+- [x] **Task 5.10.1**: Implement SORT_RO operation (implemented as part of 5.15)
   | Command | Method | Priority | Redis Version |
   |---------|--------|----------|---------------|
   | SORT_RO | `sort_ro` | Medium | 7.0+ |
 
-- [ ] **Task 5.10.2**: Create SORT_RO API route
+- [x] **Task 5.10.2**: Create SORT_RO API route
   ```
   POST   /api/v1/keys/:key/sort/readonly   # Read-only SORT (safe for replicas)
   ```
 
-- [ ] **Task 5.10.3**: Update existing SORT implementation to add SORT_RO
+- [x] **Task 5.10.3**: Update existing SORT implementation to add SORT_RO
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct SortRequest {
@@ -2069,18 +2069,18 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-### 5.11 Redis 7.0+ ACL Enhancements (MISSING)
-- [ ] **Task 5.11.1**: Implement ACL DRYRUN operation
+### 5.11 Redis 7.0+ ACL Enhancements ✅ COMPLETED
+- [x] **Task 5.11.1**: Implement ACL DRYRUN operation
   | Command | Method | Priority | Redis Version |
   |---------|--------|----------|---------------|
   | ACL DRYRUN | `acl_dryrun` | Low | 7.0+ |
 
-- [ ] **Task 5.11.2**: Create ACL DRYRUN API route
+- [x] **Task 5.11.2**: Create ACL DRYRUN API route
   ```
   POST   /api/v1/admin/acl/dryrun   # Test ACL without executing
   ```
 
-- [ ] **Task 5.11.3**: Create ACL DRYRUN request/response schemas
+- [x] **Task 5.11.3**: Create ACL DRYRUN request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct AclDryrunRequest {
@@ -2125,8 +2125,8 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 #### High Priority (Essential for advanced operations)
 | Feature | Task | Notes |
 |---------|------|-------|
-| LMPOP | 5.8 | Atomic multi-key list pop |
-| BLMPOP | 5.8 | Blocking multi-key list pop |
+| LMPOP | 5.8 | ✅ Implemented |
+| BLMPOP | 5.8 | ✅ Implemented |
 | Redis Functions | 5.6 | Full function library system (FCALL, FUNCTION LOAD, etc.) |
 
 #### Medium Priority (Good for API discoverability/safety)
@@ -2134,12 +2134,12 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 |---------|------|-------|
 | COMMAND DOCS | 5.9 | Command documentation |
 | COMMAND LIST | 5.9 | List all commands |
-| SORT_RO | 5.10 | Read-only SORT (replica safe) |
+| SORT_RO | 5.10 | ✅ Completed |
 
 #### Low Priority (Nice to have)
 | Feature | Task | Notes |
 |---------|------|-------|
-| ACL DRYRUN | 5.11 | ACL testing without execution |
+| ACL DRYRUN | 5.11 | ✅ Completed |
 | COMMAND GETKEYS | 5.9 | Extract keys from command |
 
 ### ❌ Not Planned (Cluster-specific or Easter Eggs)
@@ -2461,11 +2461,11 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 
 ---
 
-### 5.15 SORT / SORT_RO Operations (NEW - Low Priority)
+### 5.15 SORT / SORT_RO Operations ✅ COMPLETED
 
 > **Note**: SORT allows sorting lists, sets, and sorted sets with optional external key lookups. SORT_RO is the read-only variant safe for replicas (Redis 7.0+).
 
-- [ ] **Task 5.15.1**: Implement SORT repository methods
+- [x] **Task 5.15.1**: Implement SORT repository methods
   ```rust
   #[async_trait]
   pub trait SortRepository: Send + Sync {
@@ -2499,21 +2499,21 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   }
   ```
 
-- [ ] **Task 5.15.2**: Implement SORT operations
+- [x] **Task 5.15.2**: Implement SORT operations
   | Command | Method | Priority | Redis Version |
   |---------|--------|----------|---------------|
   | SORT | `sort` | Medium | Always |
   | SORT ... STORE | `sort_store` | Low | Always |
   | SORT_RO | `sort_ro` | Medium | 7.0+ |
 
-- [ ] **Task 5.15.3**: Create SORT API routes
+- [x] **Task 5.15.3**: Create SORT API routes
   ```
   POST   /api/v1/keys/{key}/sort           # SORT with options
   POST   /api/v1/keys/{key}/sort/store     # SORT ... STORE destination
   POST   /api/v1/keys/{key}/sort/readonly  # SORT_RO (Redis 7.0+)
   ```
 
-- [ ] **Task 5.15.4**: Create SORT request/response schemas
+- [x] **Task 5.15.4**: Create SORT request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct SortRequest {
@@ -2568,39 +2568,29 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 
 ---
 
-### 5.16 Blocking Command Policy Enforcement (PARTIAL - Needs Completion)
+### 5.16 Blocking Command Policy Enforcement ✅ COMPLETED (5.16.1, 5.16.2)
 
-> **Note**: Task 2.4.1a defines the blocking command policy but was marked as pending. This task completes the implementation.
+> **Note**: Task 2.4.1a defines the blocking command policy. Tasks 5.16.1 and 5.16.2 complete the enforcement.
 
-- [ ] **Task 5.16.1**: Implement blocking timeout enforcement middleware
-  ```rust
-  /// Middleware to enforce maximum blocking timeout for all blocking endpoints
-  pub struct BlockingTimeoutEnforcer {
-      max_timeout: Duration,
-  }
+- [x] **Task 5.16.1**: Implement shared blocking timeout enforcer
+  - **Design decision**: Implemented as a shared service-level enforcer (`src/shared/blocking.rs`) rather than HTTP middleware, because timeout values are embedded in request bodies (not headers/query params), making middleware the wrong abstraction layer. Each service delegates to `BlockingTimeoutEnforcer` which provides consistent `clamp(1s, max)` behavior across Duration, f64, and u32 inputs.
+  - Replaces 4 duplicated `MAX_BLOCKING_TIMEOUT` constants with single `MAX_BLOCKING_TIMEOUT_SECS`
+  - `ListService`, `SortedSetService`, `StreamService`, and `stream_repo` all use the shared enforcer
+  - All blocking handlers call `request.validate()` at the HTTP boundary (9 handlers total)
+  - 8 unit tests for the enforcer itself
+  - **Acceptance**: All blocking endpoints enforce timeout bounds consistently via shared logic
 
-  impl BlockingTimeoutEnforcer {
-      pub fn new(max_timeout_seconds: u32) -> Self {
-          Self {
-              max_timeout: Duration::from_secs(max_timeout_seconds as u64),
-          }
-      }
-
-      /// Clamp timeout to maximum allowed value
-      pub fn enforce(&self, requested: Duration) -> Duration {
-          requested.min(self.max_timeout)
-      }
-  }
-  ```
-
-- [ ] **Task 5.16.2**: Standardize blocking endpoint response codes
+- [x] **Task 5.16.2**: Standardize blocking endpoint response codes
+  - All 9 blocking handlers validated and standardized:
   | Status Code | Meaning |
   |-------------|---------|
   | 200 OK | Data returned successfully |
   | 204 No Content | Timeout reached, no data available |
+  | 400 Bad Request | Invalid request (timeout out of range, empty keys) |
   | 504 Gateway Timeout | Internal timeout (unexpected) |
+  - **Acceptance**: Blocking endpoints return consistent status codes
 
-- [ ] **Task 5.16.3**: Add SSE endpoints for streaming blocking operations
+- [x] **Task 5.16.3**: Add SSE endpoints for streaming blocking operations
   ```
   GET    /api/v1/lists/{key}/blpop/stream     # SSE stream for BLPOP
   GET    /api/v1/lists/{key}/brpop/stream     # SSE stream for BRPOP
@@ -2626,7 +2616,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 | Hash Field Expiration | 5.12 | Critical | 7.4+ |
 | Redis 8.0 Hash Commands | 5.13 | High | 8.0+ |
 | LCS Command | 5.14 | Medium | 7.0+ |
-| SORT / SORT_RO | 5.15 | Low | Always / 7.0+ |
+| SORT / SORT_RO | 5.15 | ✅ Completed |
 
 ### 🟢 Recently Completed
 | Feature | Task | Status |
@@ -2636,14 +2626,14 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 ### 🟡 Pending Implementation (Already in tasks.md)
 | Feature | Task | Priority |
 |---------|------|----------|
-| Lua Scripting | 5.5 | High |
+| Lua Scripting | 5.5 | ✅ Completed |
 | Redis Functions | 5.6 | High |
 | RedisTimeSeries | 5.7 | High |
-| LMPOP/BLMPOP | 5.8 | High |
+| LMPOP/BLMPOP | 5.8 | ✅ Completed |
 | Command Introspection | 5.9 | Medium |
-| SORT_RO (merged into 5.15) | 5.10 | Medium |
-| ACL DRYRUN | 5.11 | Low |
-| Blocking Policy | 5.16 | Medium |
+| SORT_RO (merged into 5.15) | 5.10 | ✅ Completed |
+| ACL DRYRUN | 5.11 | ✅ Completed |
+| Blocking Policy | 5.16 | ✅ Completed |
 
 ### ❌ Not Planned
 | Feature | Reason |

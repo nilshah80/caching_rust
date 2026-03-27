@@ -70,13 +70,13 @@
 
 use std::sync::Arc;
 #[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(test)]
 use std::sync::Mutex;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::time::Instant;
 #[cfg(test)]
 use tokio::sync::Notify;
+use tokio::time::Instant;
 
 use crate::api::http::schemas::transactions::{
     CommandResult, CompareAndSetRequest, CompareAndSetResponse, HCompareAndSetRequest,
@@ -143,13 +143,14 @@ impl TransactionService {
                 CacheError::ScriptError("Script not found in cache".to_string())
             }
             // Extension errors include Lua runtime errors
-            ErrorKind::ExtensionError => {
-                CacheError::ScriptError(format!("Script error: {}", e))
-            }
+            ErrorKind::ExtensionError => CacheError::ScriptError(format!("Script error: {}", e)),
             // Response errors from Redis (including Lua errors)
             ErrorKind::ResponseError => {
                 let msg = e.to_string();
-                if msg.contains("NOSCRIPT") || msg.contains("ERR Error") || msg.contains("@user_script") {
+                if msg.contains("NOSCRIPT")
+                    || msg.contains("ERR Error")
+                    || msg.contains("@user_script")
+                {
                     CacheError::ScriptError(format!("Script error: {}", e))
                 } else {
                     CacheError::RedisError(e)
@@ -213,14 +214,14 @@ impl TransactionService {
         }
 
         // Validate watch keys
-        if let Some(ref keys) = request.watch_keys {
-            if keys.len() > MAX_WATCH_KEYS {
-                return Err(CacheError::InvalidInput(format!(
-                    "Cannot watch more than {} keys (got {})",
-                    MAX_WATCH_KEYS,
-                    keys.len()
-                )));
-            }
+        if let Some(ref keys) = request.watch_keys
+            && keys.len() > MAX_WATCH_KEYS
+        {
+            return Err(CacheError::InvalidInput(format!(
+                "Cannot watch more than {} keys (got {})",
+                MAX_WATCH_KEYS,
+                keys.len()
+            )));
         }
 
         // Check timeout before acquiring connection
@@ -260,33 +261,33 @@ impl TransactionService {
         let mut watched = false;
 
         // Optional WATCH for optimistic locking
-        if let Some(ref keys) = request.watch_keys {
-            if !keys.is_empty() {
-                // Validate watch keys before issuing WATCH
-                for key in keys {
-                    if key.is_empty() {
-                        return Err(CacheError::InvalidInput(
-                            "Watch key cannot be empty".to_string(),
-                        ));
-                    }
+        if let Some(ref keys) = request.watch_keys
+            && !keys.is_empty()
+        {
+            // Validate watch keys before issuing WATCH
+            for key in keys {
+                if key.is_empty() {
+                    return Err(CacheError::InvalidInput(
+                        "Watch key cannot be empty".to_string(),
+                    ));
                 }
-                redis::cmd("WATCH")
-                    .arg(keys)
-                    .query_async::<()>(&mut *conn)
-                    .await?;
-                watched = true;
+            }
+            redis::cmd("WATCH")
+                .arg(keys)
+                .query_async::<()>(&mut *conn)
+                .await?;
+            watched = true;
 
-                #[cfg(test)]
-                {
-                    let hooks = WATCH_HOOKS
-                        .lock()
-                        .expect("watch hooks lock")
-                        .as_ref()
-                        .map(|h| (h.started.clone(), h.proceed.clone()));
-                    if let Some((started, proceed)) = hooks {
-                        started.notify_one();
-                        proceed.notified().await;
-                    }
+            #[cfg(test)]
+            {
+                let hooks = WATCH_HOOKS
+                    .lock()
+                    .expect("watch hooks lock")
+                    .as_ref()
+                    .map(|h| (h.started.clone(), h.proceed.clone()));
+                if let Some((started, proceed)) = hooks {
+                    started.notify_one();
+                    proceed.notified().await;
                 }
             }
         }
@@ -299,9 +300,7 @@ impl TransactionService {
             if let Err(e) = Self::add_command_to_pipe(&mut pipe, cmd) {
                 // Clear WATCH state before returning error to prevent state leak
                 if watched {
-                    let _ = redis::cmd("UNWATCH")
-                        .query_async::<()>(&mut *conn)
-                        .await;
+                    let _ = redis::cmd("UNWATCH").query_async::<()>(&mut *conn).await;
                 }
                 return Err(e);
             }
@@ -338,9 +337,7 @@ impl TransactionService {
         let err_str = err.to_string();
         if err_str.contains("nil") || err_str.contains("EXECABORT") {
             // Clear WATCH state before returning connection to pool
-            let _ = redis::cmd("UNWATCH")
-                .query_async::<()>(&mut *conn)
-                .await;
+            let _ = redis::cmd("UNWATCH").query_async::<()>(&mut *conn).await;
             return Err(CacheError::TransactionAborted);
         }
 
@@ -398,7 +395,9 @@ impl TransactionService {
             return Err(CacheError::InvalidInput("Key cannot be empty".to_string()));
         }
         if request.field.is_empty() {
-            return Err(CacheError::InvalidInput("Field cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Field cannot be empty".to_string(),
+            ));
         }
 
         let mut conn = self.pool.get().await?;
@@ -761,14 +760,12 @@ impl TransactionService {
                             error: None,
                         }
                     }
-                    Some(redis::Value::Double(d)) => {
-                        CommandResult {
-                            index,
-                            success: true,
-                            value: Some(serde_json::json!(d)),
-                            error: None,
-                        }
-                    }
+                    Some(redis::Value::Double(d)) => CommandResult {
+                        index,
+                        success: true,
+                        value: Some(serde_json::json!(d)),
+                        error: None,
+                    },
                     Some(redis::Value::Boolean(b)) => CommandResult {
                         index,
                         success: true,
@@ -833,7 +830,7 @@ mod tests {
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use testcontainers::ContainerAsync;
     use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{Redis, REDIS_PORT};
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
     use tokio::sync::Notify;
 
     async fn start_redis() -> (ContainerAsync<Redis>, String) {
@@ -904,12 +901,24 @@ mod tests {
     #[test]
     fn test_parse_results_additional_types() {
         let commands = vec![
-            RedisCommand::Get { key: "a".to_string() },
-            RedisCommand::Get { key: "b".to_string() },
-            RedisCommand::Get { key: "c".to_string() },
-            RedisCommand::Get { key: "d".to_string() },
-            RedisCommand::Get { key: "e".to_string() },
-            RedisCommand::Get { key: "f".to_string() },
+            RedisCommand::Get {
+                key: "a".to_string(),
+            },
+            RedisCommand::Get {
+                key: "b".to_string(),
+            },
+            RedisCommand::Get {
+                key: "c".to_string(),
+            },
+            RedisCommand::Get {
+                key: "d".to_string(),
+            },
+            RedisCommand::Get {
+                key: "e".to_string(),
+            },
+            RedisCommand::Get {
+                key: "f".to_string(),
+            },
         ];
 
         let server_error = redis::parse_redis_value(b"-ERR oops\r\n").unwrap();
@@ -936,8 +945,12 @@ mod tests {
     #[test]
     fn test_parse_results_array_and_unknown() {
         let commands = vec![
-            RedisCommand::Get { key: "a".to_string() },
-            RedisCommand::Get { key: "b".to_string() },
+            RedisCommand::Get {
+                key: "a".to_string(),
+            },
+            RedisCommand::Get {
+                key: "b".to_string(),
+            },
         ];
 
         let results = vec![
@@ -965,94 +978,298 @@ mod tests {
         ];
 
         let parsed = TransactionService::parse_array_value(&arr);
-        assert_eq!(
-            parsed,
-            serde_json::json!(["ok", 1.5, true, [3], "OK"])
-        );
+        assert_eq!(parsed, serde_json::json!(["ok", 1.5, true, [3], "OK"]));
     }
 
     #[test]
     fn test_add_command_to_pipe_all_variants() {
         let mut pipe = redis::pipe();
         let commands = vec![
-            RedisCommand::Get { key: "k".to_string() },
-            RedisCommand::Set { key: "k".to_string(), value: "v".to_string(), ttl_seconds: Some(5) },
-            RedisCommand::Set { key: "k2".to_string(), value: "v2".to_string(), ttl_seconds: None },
-            RedisCommand::Incr { key: "k".to_string() },
-            RedisCommand::IncrBy { key: "k".to_string(), delta: 2 },
-            RedisCommand::Decr { key: "k".to_string() },
-            RedisCommand::DecrBy { key: "k".to_string(), delta: 3 },
-            RedisCommand::Append { key: "k".to_string(), value: "v".to_string() },
-            RedisCommand::SetNx { key: "k".to_string(), value: "v".to_string() },
-            RedisCommand::GetSet { key: "k".to_string(), value: "v".to_string() },
-            RedisCommand::MGet { keys: vec!["k1".to_string(), "k2".to_string()] },
+            RedisCommand::Get {
+                key: "k".to_string(),
+            },
+            RedisCommand::Set {
+                key: "k".to_string(),
+                value: "v".to_string(),
+                ttl_seconds: Some(5),
+            },
+            RedisCommand::Set {
+                key: "k2".to_string(),
+                value: "v2".to_string(),
+                ttl_seconds: None,
+            },
+            RedisCommand::Incr {
+                key: "k".to_string(),
+            },
+            RedisCommand::IncrBy {
+                key: "k".to_string(),
+                delta: 2,
+            },
+            RedisCommand::Decr {
+                key: "k".to_string(),
+            },
+            RedisCommand::DecrBy {
+                key: "k".to_string(),
+                delta: 3,
+            },
+            RedisCommand::Append {
+                key: "k".to_string(),
+                value: "v".to_string(),
+            },
+            RedisCommand::SetNx {
+                key: "k".to_string(),
+                value: "v".to_string(),
+            },
+            RedisCommand::GetSet {
+                key: "k".to_string(),
+                value: "v".to_string(),
+            },
+            RedisCommand::MGet {
+                keys: vec!["k1".to_string(), "k2".to_string()],
+            },
             RedisCommand::MSet {
                 entries: vec![
-                    KeyValue { key: "k1".to_string(), value: "v1".to_string() },
-                    KeyValue { key: "k2".to_string(), value: "v2".to_string() },
+                    KeyValue {
+                        key: "k1".to_string(),
+                        value: "v1".to_string(),
+                    },
+                    KeyValue {
+                        key: "k2".to_string(),
+                        value: "v2".to_string(),
+                    },
                 ],
             },
-            RedisCommand::HGet { key: "h".to_string(), field: "f".to_string() },
-            RedisCommand::HSet { key: "h".to_string(), field: "f".to_string(), value: "v".to_string() },
+            RedisCommand::HGet {
+                key: "h".to_string(),
+                field: "f".to_string(),
+            },
+            RedisCommand::HSet {
+                key: "h".to_string(),
+                field: "f".to_string(),
+                value: "v".to_string(),
+            },
             RedisCommand::HMSet {
                 key: "h".to_string(),
-                fields: vec![FieldValue { field: "f".to_string(), value: "v".to_string() }],
+                fields: vec![FieldValue {
+                    field: "f".to_string(),
+                    value: "v".to_string(),
+                }],
             },
-            RedisCommand::HMGet { key: "h".to_string(), fields: vec!["f".to_string()] },
-            RedisCommand::HIncrBy { key: "h".to_string(), field: "f".to_string(), delta: 1 },
-            RedisCommand::HIncrByFloat { key: "h".to_string(), field: "f".to_string(), delta: 1.5 },
-            RedisCommand::HDel { key: "h".to_string(), fields: vec!["f".to_string()] },
-            RedisCommand::HExists { key: "h".to_string(), field: "f".to_string() },
-            RedisCommand::HGetAll { key: "h".to_string() },
-            RedisCommand::HKeys { key: "h".to_string() },
-            RedisCommand::HVals { key: "h".to_string() },
-            RedisCommand::HLen { key: "h".to_string() },
-            RedisCommand::HSetNx { key: "h".to_string(), field: "f".to_string(), value: "v".to_string() },
-            RedisCommand::LPush { key: "l".to_string(), values: vec!["v".to_string()] },
-            RedisCommand::RPush { key: "l".to_string(), values: vec!["v".to_string()] },
-            RedisCommand::LPop { key: "l".to_string(), count: None },
-            RedisCommand::LPop { key: "l".to_string(), count: Some(1) },
-            RedisCommand::RPop { key: "l".to_string(), count: None },
-            RedisCommand::RPop { key: "l".to_string(), count: Some(1) },
-            RedisCommand::LLen { key: "l".to_string() },
-            RedisCommand::LIndex { key: "l".to_string(), index: 0 },
-            RedisCommand::LRange { key: "l".to_string(), start: 0, stop: -1 },
-            RedisCommand::LSet { key: "l".to_string(), index: 0, value: "v".to_string() },
-            RedisCommand::LTrim { key: "l".to_string(), start: 0, stop: 1 },
-            RedisCommand::LRem { key: "l".to_string(), count: 1, value: "v".to_string() },
-            RedisCommand::SAdd { key: "s".to_string(), members: vec!["m".to_string()] },
-            RedisCommand::SRem { key: "s".to_string(), members: vec!["m".to_string()] },
-            RedisCommand::SIsMember { key: "s".to_string(), member: "m".to_string() },
-            RedisCommand::SMembers { key: "s".to_string() },
-            RedisCommand::SCard { key: "s".to_string() },
-            RedisCommand::SPop { key: "s".to_string(), count: None },
-            RedisCommand::SPop { key: "s".to_string(), count: Some(2) },
-            RedisCommand::SMove { source: "s1".to_string(), destination: "s2".to_string(), member: "m".to_string() },
+            RedisCommand::HMGet {
+                key: "h".to_string(),
+                fields: vec!["f".to_string()],
+            },
+            RedisCommand::HIncrBy {
+                key: "h".to_string(),
+                field: "f".to_string(),
+                delta: 1,
+            },
+            RedisCommand::HIncrByFloat {
+                key: "h".to_string(),
+                field: "f".to_string(),
+                delta: 1.5,
+            },
+            RedisCommand::HDel {
+                key: "h".to_string(),
+                fields: vec!["f".to_string()],
+            },
+            RedisCommand::HExists {
+                key: "h".to_string(),
+                field: "f".to_string(),
+            },
+            RedisCommand::HGetAll {
+                key: "h".to_string(),
+            },
+            RedisCommand::HKeys {
+                key: "h".to_string(),
+            },
+            RedisCommand::HVals {
+                key: "h".to_string(),
+            },
+            RedisCommand::HLen {
+                key: "h".to_string(),
+            },
+            RedisCommand::HSetNx {
+                key: "h".to_string(),
+                field: "f".to_string(),
+                value: "v".to_string(),
+            },
+            RedisCommand::LPush {
+                key: "l".to_string(),
+                values: vec!["v".to_string()],
+            },
+            RedisCommand::RPush {
+                key: "l".to_string(),
+                values: vec!["v".to_string()],
+            },
+            RedisCommand::LPop {
+                key: "l".to_string(),
+                count: None,
+            },
+            RedisCommand::LPop {
+                key: "l".to_string(),
+                count: Some(1),
+            },
+            RedisCommand::RPop {
+                key: "l".to_string(),
+                count: None,
+            },
+            RedisCommand::RPop {
+                key: "l".to_string(),
+                count: Some(1),
+            },
+            RedisCommand::LLen {
+                key: "l".to_string(),
+            },
+            RedisCommand::LIndex {
+                key: "l".to_string(),
+                index: 0,
+            },
+            RedisCommand::LRange {
+                key: "l".to_string(),
+                start: 0,
+                stop: -1,
+            },
+            RedisCommand::LSet {
+                key: "l".to_string(),
+                index: 0,
+                value: "v".to_string(),
+            },
+            RedisCommand::LTrim {
+                key: "l".to_string(),
+                start: 0,
+                stop: 1,
+            },
+            RedisCommand::LRem {
+                key: "l".to_string(),
+                count: 1,
+                value: "v".to_string(),
+            },
+            RedisCommand::SAdd {
+                key: "s".to_string(),
+                members: vec!["m".to_string()],
+            },
+            RedisCommand::SRem {
+                key: "s".to_string(),
+                members: vec!["m".to_string()],
+            },
+            RedisCommand::SIsMember {
+                key: "s".to_string(),
+                member: "m".to_string(),
+            },
+            RedisCommand::SMembers {
+                key: "s".to_string(),
+            },
+            RedisCommand::SCard {
+                key: "s".to_string(),
+            },
+            RedisCommand::SPop {
+                key: "s".to_string(),
+                count: None,
+            },
+            RedisCommand::SPop {
+                key: "s".to_string(),
+                count: Some(2),
+            },
+            RedisCommand::SMove {
+                source: "s1".to_string(),
+                destination: "s2".to_string(),
+                member: "m".to_string(),
+            },
             RedisCommand::ZAdd {
                 key: "z".to_string(),
-                members: vec![ScoredMember { score: 1.0, member: "m".to_string() }],
+                members: vec![ScoredMember {
+                    score: 1.0,
+                    member: "m".to_string(),
+                }],
             },
-            RedisCommand::ZRem { key: "z".to_string(), members: vec!["m".to_string()] },
-            RedisCommand::ZIncrBy { key: "z".to_string(), delta: 1.0, member: "m".to_string() },
-            RedisCommand::ZScore { key: "z".to_string(), member: "m".to_string() },
-            RedisCommand::ZRank { key: "z".to_string(), member: "m".to_string() },
-            RedisCommand::ZRevRank { key: "z".to_string(), member: "m".to_string() },
-            RedisCommand::ZCard { key: "z".to_string() },
-            RedisCommand::ZCount { key: "z".to_string(), min: "-inf".to_string(), max: "+inf".to_string() },
-            RedisCommand::ZRange { key: "z".to_string(), start: 0, stop: -1, with_scores: false },
-            RedisCommand::ZRange { key: "z".to_string(), start: 0, stop: -1, with_scores: true },
-            RedisCommand::ZRevRange { key: "z".to_string(), start: 0, stop: -1, with_scores: false },
-            RedisCommand::ZRevRange { key: "z".to_string(), start: 0, stop: -1, with_scores: true },
-            RedisCommand::Del { keys: vec!["k".to_string()] },
-            RedisCommand::Exists { keys: vec!["k".to_string()] },
-            RedisCommand::Expire { key: "k".to_string(), seconds: 10 },
-            RedisCommand::PExpire { key: "k".to_string(), milliseconds: 1000 },
-            RedisCommand::Ttl { key: "k".to_string() },
-            RedisCommand::PTtl { key: "k".to_string() },
-            RedisCommand::Persist { key: "k".to_string() },
-            RedisCommand::Rename { key: "k".to_string(), new_key: "k2".to_string() },
-            RedisCommand::RenameNx { key: "k".to_string(), new_key: "k3".to_string() },
-            RedisCommand::Type { key: "k".to_string() },
+            RedisCommand::ZRem {
+                key: "z".to_string(),
+                members: vec!["m".to_string()],
+            },
+            RedisCommand::ZIncrBy {
+                key: "z".to_string(),
+                delta: 1.0,
+                member: "m".to_string(),
+            },
+            RedisCommand::ZScore {
+                key: "z".to_string(),
+                member: "m".to_string(),
+            },
+            RedisCommand::ZRank {
+                key: "z".to_string(),
+                member: "m".to_string(),
+            },
+            RedisCommand::ZRevRank {
+                key: "z".to_string(),
+                member: "m".to_string(),
+            },
+            RedisCommand::ZCard {
+                key: "z".to_string(),
+            },
+            RedisCommand::ZCount {
+                key: "z".to_string(),
+                min: "-inf".to_string(),
+                max: "+inf".to_string(),
+            },
+            RedisCommand::ZRange {
+                key: "z".to_string(),
+                start: 0,
+                stop: -1,
+                with_scores: false,
+            },
+            RedisCommand::ZRange {
+                key: "z".to_string(),
+                start: 0,
+                stop: -1,
+                with_scores: true,
+            },
+            RedisCommand::ZRevRange {
+                key: "z".to_string(),
+                start: 0,
+                stop: -1,
+                with_scores: false,
+            },
+            RedisCommand::ZRevRange {
+                key: "z".to_string(),
+                start: 0,
+                stop: -1,
+                with_scores: true,
+            },
+            RedisCommand::Del {
+                keys: vec!["k".to_string()],
+            },
+            RedisCommand::Exists {
+                keys: vec!["k".to_string()],
+            },
+            RedisCommand::Expire {
+                key: "k".to_string(),
+                seconds: 10,
+            },
+            RedisCommand::PExpire {
+                key: "k".to_string(),
+                milliseconds: 1000,
+            },
+            RedisCommand::Ttl {
+                key: "k".to_string(),
+            },
+            RedisCommand::PTtl {
+                key: "k".to_string(),
+            },
+            RedisCommand::Persist {
+                key: "k".to_string(),
+            },
+            RedisCommand::Rename {
+                key: "k".to_string(),
+                new_key: "k2".to_string(),
+            },
+            RedisCommand::RenameNx {
+                key: "k".to_string(),
+                new_key: "k3".to_string(),
+            },
+            RedisCommand::Type {
+                key: "k".to_string(),
+            },
         ];
 
         for cmd in commands {
@@ -1063,8 +1280,14 @@ mod tests {
     #[test]
     fn test_add_command_to_pipe_invalid_pop_counts() {
         let mut pipe = redis::pipe();
-        let lpop = RedisCommand::LPop { key: "l".to_string(), count: Some(0) };
-        let rpop = RedisCommand::RPop { key: "l".to_string(), count: Some(0) };
+        let lpop = RedisCommand::LPop {
+            key: "l".to_string(),
+            count: Some(0),
+        };
+        let rpop = RedisCommand::RPop {
+            key: "l".to_string(),
+            count: Some(0),
+        };
         let err = TransactionService::add_command_to_pipe(&mut pipe, &lpop).unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
         let err = TransactionService::add_command_to_pipe(&mut pipe, &rpop).unwrap_err();
@@ -1212,7 +1435,9 @@ mod tests {
         let service = TransactionService::new(pool);
         let request = TransactionRequest {
             watch_keys: None,
-            commands: vec![RedisCommand::Get { key: "k".to_string() }],
+            commands: vec![RedisCommand::Get {
+                key: "k".to_string(),
+            }],
         };
         let result = service
             .execute_with_deadline(request, Instant::now() - Duration::from_secs(1))
@@ -1226,7 +1451,9 @@ mod tests {
         set_test_execute_delay_ms(20);
         let request = TransactionRequest {
             watch_keys: None,
-            commands: vec![RedisCommand::Get { key: "k".to_string() }],
+            commands: vec![RedisCommand::Get {
+                key: "k".to_string(),
+            }],
         };
         let result = service
             .execute_with_deadline(request, Instant::now() + Duration::from_millis(5))
@@ -1240,7 +1467,9 @@ mod tests {
         let (_container, service, _client) = service_with_redis().await;
         let request = TransactionRequest {
             watch_keys: Some(vec!["".to_string()]),
-            commands: vec![RedisCommand::Get { key: "k".to_string() }],
+            commands: vec![RedisCommand::Get {
+                key: "k".to_string(),
+            }],
         };
         let result = service.execute(request).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
@@ -1251,7 +1480,10 @@ mod tests {
         let (_container, service, _client) = service_with_redis().await;
         let request = TransactionRequest {
             watch_keys: Some(vec!["watched".to_string()]),
-            commands: vec![RedisCommand::LPop { key: "list".to_string(), count: Some(0) }],
+            commands: vec![RedisCommand::LPop {
+                key: "list".to_string(),
+                count: Some(0),
+            }],
         };
         let result = service.execute(request).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
@@ -1274,7 +1506,9 @@ mod tests {
 
         let request = TransactionRequest {
             watch_keys: Some(vec!["watched".to_string()]),
-            commands: vec![RedisCommand::Get { key: "watched".to_string() }],
+            commands: vec![RedisCommand::Get {
+                key: "watched".to_string(),
+            }],
         };
         let service = Arc::new(service);
         let handle = tokio::spawn({
@@ -1447,5 +1681,242 @@ mod tests {
         };
         let result = service.hcompare_and_set(request).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::api::http::schemas::transactions::{
+        CompareAndSetRequest, HCompareAndSetRequest, RedisCommand, TransactionRequest,
+    };
+    use crate::infrastructure::redis::connection::InstrumentedPool;
+    use testcontainers::ContainerAsync;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+
+    async fn start_redis() -> (ContainerAsync<Redis>, String) {
+        let container = Redis::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
+        let url = format!("redis://{host}:{port}");
+        (container, url)
+    }
+
+    async fn service_with_redis() -> (ContainerAsync<Redis>, TransactionService, redis::Client) {
+        let (container, redis_url) = start_redis().await;
+        let pool = InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap();
+        let service = TransactionService::new(Arc::new(pool));
+        let client = redis::Client::open(redis_url.as_str()).unwrap();
+        (container, service, client)
+    }
+
+    #[tokio::test]
+    async fn test_execute_simple_transaction() {
+        let (_container, service, _client) = service_with_redis().await;
+
+        let request = TransactionRequest {
+            commands: vec![
+                RedisCommand::Set {
+                    key: "txn_key".to_string(),
+                    value: "hello".to_string(),
+                    ttl_seconds: None,
+                },
+                RedisCommand::Get {
+                    key: "txn_key".to_string(),
+                },
+            ],
+            watch_keys: None,
+        };
+
+        let response = service.execute(request).await.unwrap();
+        assert!(response.success);
+        assert_eq!(response.results.len(), 2);
+
+        // SET returns OK
+        assert!(response.results[0].success);
+
+        // GET returns the value we set
+        assert!(response.results[1].success);
+        assert_eq!(response.results[1].value, Some(serde_json::json!("hello")));
+    }
+
+    #[tokio::test]
+    async fn test_compare_and_set_success() {
+        let (_container, service, client) = service_with_redis().await;
+
+        // Pre-set the key using a direct Redis connection
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let _: () = redis::cmd("SET")
+            .arg("cas_key")
+            .arg("old_value")
+            .query_async(&mut conn)
+            .await
+            .unwrap();
+
+        // CAS with matching expected value should succeed
+        let request = CompareAndSetRequest {
+            key: "cas_key".to_string(),
+            expected_value: "old_value".to_string(),
+            new_value: "new_value".to_string(),
+        };
+        let result = service.compare_and_set(request).await.unwrap();
+        assert!(result.swapped);
+        assert_eq!(result.current_value.as_deref(), Some("new_value"));
+    }
+
+    #[tokio::test]
+    async fn test_compare_and_set_mismatch() {
+        let (_container, service, client) = service_with_redis().await;
+
+        // Pre-set the key
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let _: () = redis::cmd("SET")
+            .arg("cas_key2")
+            .arg("actual_value")
+            .query_async(&mut conn)
+            .await
+            .unwrap();
+
+        // CAS with wrong expected value should fail
+        let request = CompareAndSetRequest {
+            key: "cas_key2".to_string(),
+            expected_value: "wrong_value".to_string(),
+            new_value: "new_value".to_string(),
+        };
+        let result = service.compare_and_set(request).await.unwrap();
+        assert!(!result.swapped);
+        assert_eq!(result.current_value.as_deref(), Some("actual_value"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_watch_keys_success() {
+        let (_container, service, client) = service_with_redis().await;
+
+        // Pre-set the key directly
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let _: () = redis::cmd("SET")
+            .arg("watched_key")
+            .arg("initial")
+            .query_async(&mut conn)
+            .await
+            .unwrap();
+
+        // Execute a transaction that WATCHes the key and does GET + SET.
+        // Since no one modifies the watched key between WATCH and EXEC,
+        // the transaction should succeed.
+        let request = TransactionRequest {
+            watch_keys: Some(vec!["watched_key".to_string()]),
+            commands: vec![
+                RedisCommand::Get {
+                    key: "watched_key".to_string(),
+                },
+                RedisCommand::Set {
+                    key: "watched_key".to_string(),
+                    value: "updated".to_string(),
+                    ttl_seconds: None,
+                },
+            ],
+        };
+
+        let response = service.execute(request).await.unwrap();
+        assert!(response.success);
+        assert_eq!(response.results.len(), 2);
+
+        // GET should return the initial value
+        assert!(response.results[0].success);
+        assert_eq!(
+            response.results[0].value,
+            Some(serde_json::json!("initial"))
+        );
+
+        // SET should succeed
+        assert!(response.results[1].success);
+    }
+
+    #[tokio::test]
+    async fn test_execute_multi_command_types() {
+        let (_container, service, _client) = service_with_redis().await;
+
+        // Execute a transaction with multiple command types: SET, LPUSH, SADD
+        let request = TransactionRequest {
+            watch_keys: None,
+            commands: vec![
+                RedisCommand::Set {
+                    key: "multi_str".to_string(),
+                    value: "hello".to_string(),
+                    ttl_seconds: None,
+                },
+                RedisCommand::LPush {
+                    key: "multi_list".to_string(),
+                    values: vec!["a".to_string(), "b".to_string()],
+                },
+                RedisCommand::SAdd {
+                    key: "multi_set".to_string(),
+                    members: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+                },
+            ],
+        };
+
+        let response = service.execute(request).await.unwrap();
+        assert!(response.success);
+        assert_eq!(response.results.len(), 3);
+
+        // All commands should succeed
+        assert!(response.results[0].success); // SET -> OK
+        assert!(response.results[1].success); // LPUSH -> count of elements
+        assert!(response.results[2].success); // SADD -> count of elements added
+    }
+
+    #[tokio::test]
+    async fn test_hcompare_and_set_success() {
+        let (_container, service, client) = service_with_redis().await;
+
+        // Pre-set a hash field directly
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let _: () = redis::cmd("HSET")
+            .arg("hcas_hash")
+            .arg("field1")
+            .arg("old_val")
+            .query_async(&mut conn)
+            .await
+            .unwrap();
+
+        // hcompare_and_set with matching expected value should succeed
+        let request = HCompareAndSetRequest {
+            key: "hcas_hash".to_string(),
+            field: "field1".to_string(),
+            expected_value: "old_val".to_string(),
+            new_value: "new_val".to_string(),
+        };
+        let result = service.hcompare_and_set(request).await.unwrap();
+        assert!(result.swapped);
+        assert_eq!(result.current_value.as_deref(), Some("new_val"));
+    }
+
+    #[tokio::test]
+    async fn test_hcompare_and_set_mismatch() {
+        let (_container, service, client) = service_with_redis().await;
+
+        // Pre-set a hash field directly
+        let mut conn = client.get_multiplexed_async_connection().await.unwrap();
+        let _: () = redis::cmd("HSET")
+            .arg("hcas_hash2")
+            .arg("field1")
+            .arg("actual_val")
+            .query_async(&mut conn)
+            .await
+            .unwrap();
+
+        // hcompare_and_set with wrong expected value should fail
+        let request = HCompareAndSetRequest {
+            key: "hcas_hash2".to_string(),
+            field: "field1".to_string(),
+            expected_value: "wrong_val".to_string(),
+            new_value: "new_val".to_string(),
+        };
+        let result = service.hcompare_and_set(request).await.unwrap();
+        assert!(!result.swapped);
+        assert_eq!(result.current_value.as_deref(), Some("actual_val"));
     }
 }

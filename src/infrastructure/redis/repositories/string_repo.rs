@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::domain::entities::{
-    AppendResult, GetExOptions, MGetResult,
-    RangeResult, SetOptions, SetRangeResult, SetResult, StringValue,
+    AppendResult, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult, SetResult,
+    StringValue,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StringRepository;
@@ -39,9 +39,13 @@ impl StringRepository for RedisStringRepository {
             Some(v) => {
                 // Get additional metadata in parallel
                 let (data_type, ttl, encoding): (String, i64, Option<String>) = redis::pipe()
-                    .cmd("TYPE").arg(key)
-                    .cmd("TTL").arg(key)
-                    .cmd("OBJECT").arg("ENCODING").arg(key)
+                    .cmd("TYPE")
+                    .arg(key)
+                    .cmd("TTL")
+                    .arg(key)
+                    .cmd("OBJECT")
+                    .arg("ENCODING")
+                    .arg(key)
                     .query_async(&mut conn)
                     .await
                     .unwrap_or(("string".to_string(), -1, None));
@@ -59,7 +63,12 @@ impl StringRepository for RedisStringRepository {
         }
     }
 
-    async fn set(&self, key: &str, value: &str, options: SetOptions) -> Result<SetResult, CacheError> {
+    async fn set(
+        &self,
+        key: &str,
+        value: &str,
+        options: SetOptions,
+    ) -> Result<SetResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         // Build SET command with options
@@ -109,7 +118,12 @@ impl StringRepository for RedisStringRepository {
         })
     }
 
-    async fn set_nx(&self, key: &str, value: &str, ttl: Option<Duration>) -> Result<bool, CacheError> {
+    async fn set_nx(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: Option<Duration>,
+    ) -> Result<bool, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let result: bool = if let Some(ttl) = ttl {
@@ -255,7 +269,12 @@ impl StringRepository for RedisStringRepository {
         })
     }
 
-    async fn set_range(&self, key: &str, offset: i64, value: &str) -> Result<SetRangeResult, CacheError> {
+    async fn set_range(
+        &self,
+        key: &str,
+        offset: i64,
+        value: &str,
+    ) -> Result<SetRangeResult, CacheError> {
         let mut conn = self.pool.get().await?;
         let new_length: i64 = conn.setrange(key, offset as isize, value).await?;
 
@@ -283,10 +302,7 @@ impl StringRepository for RedisStringRepository {
 
     async fn get_del(&self, key: &str) -> Result<Option<String>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: Option<String> = redis::cmd("GETDEL")
-            .arg(key)
-            .query_async(&mut conn)
-            .await?;
+        let result: Option<String> = redis::cmd("GETDEL").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 }

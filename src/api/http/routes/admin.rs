@@ -4,19 +4,18 @@
 //! These endpoints require API key authentication and use the AdminService.
 
 use axum::{
+    Json, Router,
     extract::State,
     http::{HeaderMap, StatusCode},
     routing::{delete, get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::api::http::middleware::admin_auth::ADMIN_API_KEY_HEADER;
 use crate::domain::entities::{
-    AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo as DomainClientInfo,
-    FlushResult, LatencyEvent, MemoryStats, MemoryUsage, ServerInfo, ServerTime,
-    SlowlogEntry,
+    AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo as DomainClientInfo, FlushResult,
+    LatencyEvent, MemoryStats, MemoryUsage, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -352,6 +351,25 @@ pub struct AclLogResponse {
     pub entries: Vec<AclLogEntry>,
 }
 
+/// ACL dryrun request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AclDryrunRequest {
+    /// Username to test
+    pub username: String,
+    /// Command to test (as array, e.g., ["SET", "key", "value"])
+    pub command: Vec<String>,
+}
+
+/// ACL dryrun response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AclDryrunResponse {
+    /// Whether the command would be allowed
+    pub allowed: bool,
+    /// Reason for denial, if not allowed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -411,6 +429,7 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/acl/cat", post(acl_cat))
         .route("/api/v1/admin/acl/genpass", post(acl_genpass))
         .route("/api/v1/admin/acl/log", post(acl_log))
+        .route("/api/v1/admin/acl/dryrun", post(acl_dryrun))
 }
 
 // ============================================================================
@@ -452,9 +471,7 @@ fn to_status_code(err: CacheError) -> StatusCode {
     ),
     tag = "Admin"
 )]
-pub async fn get_pool_stats(
-    State(state): State<AppState>,
-) -> ApiResponse<PoolStats> {
+pub async fn get_pool_stats(State(state): State<AppState>) -> ApiResponse<PoolStats> {
     ApiResponse::success(state.pool.get_stats())
 }
 
@@ -467,9 +484,7 @@ pub async fn get_pool_stats(
     ),
     tag = "Admin"
 )]
-pub async fn get_capabilities(
-    State(state): State<AppState>,
-) -> ApiResponse<RedisCapabilities> {
+pub async fn get_capabilities(State(state): State<AppState>) -> ApiResponse<RedisCapabilities> {
     ApiResponse::success((*state.capabilities).clone())
 }
 
@@ -493,7 +508,10 @@ pub async fn get_server_info(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ServerInfo>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.get_server_info().await
+    state
+        .admin_service
+        .get_server_info()
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -514,7 +532,10 @@ pub async fn get_server_time(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ServerTime>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.get_server_time().await
+    state
+        .admin_service
+        .get_server_time()
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -535,7 +556,10 @@ pub async fn get_db_size(
     headers: HeaderMap,
 ) -> Result<ApiResponse<DbSizeResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.get_db_size().await
+    state
+        .admin_service
+        .get_db_size()
+        .await
         .map(|keys| ApiResponse::success(DbSizeResponse { keys }))
         .map_err(to_status_code)
 }
@@ -556,7 +580,10 @@ pub async fn get_lastsave(
     headers: HeaderMap,
 ) -> Result<ApiResponse<LastSaveResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.get_last_save().await
+    state
+        .admin_service
+        .get_last_save()
+        .await
         .map(|timestamp| ApiResponse::success(LastSaveResponse { timestamp }))
         .map_err(to_status_code)
 }
@@ -581,7 +608,10 @@ pub async fn get_memory_stats(
     headers: HeaderMap,
 ) -> Result<ApiResponse<MemoryStats>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.get_memory_stats().await
+    state
+        .admin_service
+        .get_memory_stats()
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -604,7 +634,10 @@ pub async fn get_memory_usage(
     Json(request): Json<MemoryUsageRequest>,
 ) -> Result<ApiResponse<MemoryUsage>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.get_memory_usage(&request.key, Some(request.samples)).await
+    state
+        .admin_service
+        .get_memory_usage(&request.key, Some(request.samples))
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -625,7 +658,10 @@ pub async fn memory_doctor(
     headers: HeaderMap,
 ) -> Result<ApiResponse<MemoryDoctorResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.memory_doctor().await
+    state
+        .admin_service
+        .memory_doctor()
+        .await
         .map(|report| ApiResponse::success(MemoryDoctorResponse { report }))
         .map_err(to_status_code)
 }
@@ -646,7 +682,10 @@ pub async fn memory_purge(
     headers: HeaderMap,
 ) -> Result<ApiResponse<MemoryPurgeResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.memory_purge().await
+    state
+        .admin_service
+        .memory_purge()
+        .await
         .map(|_| ApiResponse::success(MemoryPurgeResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -673,7 +712,10 @@ pub async fn flush_db(
     Json(request): Json<FlushDbRequest>,
 ) -> Result<ApiResponse<FlushResult>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.flush_db(request.async_mode).await
+    state
+        .admin_service
+        .flush_db(request.async_mode)
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -696,7 +738,10 @@ pub async fn flush_all(
     Json(request): Json<FlushDbRequest>,
 ) -> Result<ApiResponse<FlushResult>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.flush_all(request.async_mode).await
+    state
+        .admin_service
+        .flush_all(request.async_mode)
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -719,7 +764,15 @@ pub async fn copy_key(
     Json(request): Json<CopyKeyRequest>,
 ) -> Result<ApiResponse<CopyKeyResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.copy_key(request.source, request.destination, request.db, request.replace).await
+    state
+        .admin_service
+        .copy_key(
+            request.source,
+            request.destination,
+            request.db,
+            request.replace,
+        )
+        .await
         .map(|copied| ApiResponse::success(CopyKeyResponse { copied }))
         .map_err(to_status_code)
 }
@@ -742,7 +795,10 @@ pub async fn move_key(
     Json(request): Json<MoveKeyRequest>,
 ) -> Result<ApiResponse<MoveKeyResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.move_key(request.key, request.db).await
+    state
+        .admin_service
+        .move_key(request.key, request.db)
+        .await
         .map(|moved| ApiResponse::success(MoveKeyResponse { moved }))
         .map_err(to_status_code)
 }
@@ -765,7 +821,10 @@ pub async fn swap_db(
     Json(request): Json<SwapDbRequest>,
 ) -> Result<ApiResponse<SwapDbResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.swap_db(request.db1, request.db2).await
+    state
+        .admin_service
+        .swap_db(request.db1, request.db2)
+        .await
         .map(|_| ApiResponse::success(SwapDbResponse { swapped: true }))
         .map_err(to_status_code)
 }
@@ -792,7 +851,10 @@ pub async fn config_get(
     Json(request): Json<ConfigGetRequest>,
 ) -> Result<ApiResponse<ConfigGetResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.config_get(&request.pattern).await
+    state
+        .admin_service
+        .config_get(&request.pattern)
+        .await
         .map(|config| ApiResponse::success(ConfigGetResponse { config }))
         .map_err(to_status_code)
 }
@@ -815,7 +877,10 @@ pub async fn config_set(
     Json(request): Json<ConfigSetRequest>,
 ) -> Result<ApiResponse<ConfigSetResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.config_set(&request.parameter, &request.value).await
+    state
+        .admin_service
+        .config_set(&request.parameter, &request.value)
+        .await
         .map(|_| ApiResponse::success(ConfigSetResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -836,7 +901,10 @@ pub async fn config_rewrite(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ConfigRewriteResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.config_rewrite().await
+    state
+        .admin_service
+        .config_rewrite()
+        .await
         .map(|_| ApiResponse::success(ConfigRewriteResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -857,7 +925,10 @@ pub async fn config_resetstat(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ConfigResetStatResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.config_resetstat().await
+    state
+        .admin_service
+        .config_resetstat()
+        .await
         .map(|_| ApiResponse::success(ConfigResetStatResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -882,8 +953,16 @@ pub async fn save(
     headers: HeaderMap,
 ) -> Result<ApiResponse<SaveResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.save().await
-        .map(|_| ApiResponse::success(SaveResponse { success: true, mode: "sync".to_string() }))
+    state
+        .admin_service
+        .save()
+        .await
+        .map(|_| {
+            ApiResponse::success(SaveResponse {
+                success: true,
+                mode: "sync".to_string(),
+            })
+        })
         .map_err(to_status_code)
 }
 
@@ -903,7 +982,10 @@ pub async fn bgsave(
     headers: HeaderMap,
 ) -> Result<ApiResponse<BgSaveResult>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.bgsave().await
+    state
+        .admin_service
+        .bgsave()
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -924,7 +1006,10 @@ pub async fn bgrewriteaof(
     headers: HeaderMap,
 ) -> Result<ApiResponse<BgRewriteAofResult>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.bgrewriteaof().await
+    state
+        .admin_service
+        .bgrewriteaof()
+        .await
         .map(ApiResponse::success)
         .map_err(to_status_code)
 }
@@ -949,7 +1034,10 @@ pub async fn client_list(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ClientListResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.client_list().await
+    state
+        .admin_service
+        .client_list()
+        .await
         .map(|clients| ApiResponse::success(ClientListResponse { clients }))
         .map_err(to_status_code)
 }
@@ -972,7 +1060,10 @@ pub async fn client_kill(
     Json(request): Json<ClientKillRequest>,
 ) -> Result<ApiResponse<ClientKillResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.client_kill(request.id, request.addr, request.client_type).await
+    state
+        .admin_service
+        .client_kill(request.id, request.addr, request.client_type)
+        .await
         .map(|killed| ApiResponse::success(ClientKillResponse { killed }))
         .map_err(to_status_code)
 }
@@ -995,7 +1086,10 @@ pub async fn client_pause(
     Json(request): Json<ClientPauseRequest>,
 ) -> Result<ApiResponse<ClientPauseResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.client_pause(request.timeout_ms, Some(request.mode)).await
+    state
+        .admin_service
+        .client_pause(request.timeout_ms, Some(request.mode))
+        .await
         .map(|_| ApiResponse::success(ClientPauseResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -1016,7 +1110,10 @@ pub async fn client_unpause(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ClientUnpauseResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.client_unpause().await
+    state
+        .admin_service
+        .client_unpause()
+        .await
         .map(|_| ApiResponse::success(ClientUnpauseResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -1039,7 +1136,10 @@ pub async fn client_setname(
     Json(request): Json<ClientSetNameRequest>,
 ) -> Result<ApiResponse<ClientSetNameResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.client_setname(&request.name).await
+    state
+        .admin_service
+        .client_setname(&request.name)
+        .await
         .map(|_| ApiResponse::success(ClientSetNameResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -1060,7 +1160,10 @@ pub async fn client_getname(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ClientGetNameResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.client_getname().await
+    state
+        .admin_service
+        .client_getname()
+        .await
         .map(|name| ApiResponse::success(ClientGetNameResponse { name }))
         .map_err(to_status_code)
 }
@@ -1081,7 +1184,10 @@ pub async fn client_id(
     headers: HeaderMap,
 ) -> Result<ApiResponse<ClientIdResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.client_id().await
+    state
+        .admin_service
+        .client_id()
+        .await
         .map(|id| ApiResponse::success(ClientIdResponse { id }))
         .map_err(to_status_code)
 }
@@ -1108,7 +1214,10 @@ pub async fn slowlog_get(
     Json(request): Json<SlowlogGetRequest>,
 ) -> Result<ApiResponse<SlowlogGetResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.slowlog_get(Some(request.count)).await
+    state
+        .admin_service
+        .slowlog_get(Some(request.count))
+        .await
         .map(|entries| ApiResponse::success(SlowlogGetResponse { entries }))
         .map_err(to_status_code)
 }
@@ -1129,7 +1238,10 @@ pub async fn slowlog_len(
     headers: HeaderMap,
 ) -> Result<ApiResponse<SlowlogLenResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.slowlog_len().await
+    state
+        .admin_service
+        .slowlog_len()
+        .await
         .map(|length| ApiResponse::success(SlowlogLenResponse { length }))
         .map_err(to_status_code)
 }
@@ -1150,7 +1262,10 @@ pub async fn slowlog_reset(
     headers: HeaderMap,
 ) -> Result<ApiResponse<SlowlogResetResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.slowlog_reset().await
+    state
+        .admin_service
+        .slowlog_reset()
+        .await
         .map(|_| ApiResponse::success(SlowlogResetResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -1175,7 +1290,10 @@ pub async fn latency_latest(
     headers: HeaderMap,
 ) -> Result<ApiResponse<LatencyLatestResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.latency_latest().await
+    state
+        .admin_service
+        .latency_latest()
+        .await
         .map(|events| ApiResponse::success(LatencyLatestResponse { events }))
         .map_err(to_status_code)
 }
@@ -1198,7 +1316,10 @@ pub async fn latency_history(
     Json(request): Json<LatencyHistoryRequest>,
 ) -> Result<ApiResponse<LatencyHistoryResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.latency_history(&request.event).await
+    state
+        .admin_service
+        .latency_history(&request.event)
+        .await
         .map(|samples| ApiResponse::success(LatencyHistoryResponse { samples }))
         .map_err(to_status_code)
 }
@@ -1219,7 +1340,10 @@ pub async fn latency_doctor(
     headers: HeaderMap,
 ) -> Result<ApiResponse<LatencyDoctorResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.latency_doctor().await
+    state
+        .admin_service
+        .latency_doctor()
+        .await
         .map(|report| ApiResponse::success(LatencyDoctorResponse { report }))
         .map_err(to_status_code)
 }
@@ -1242,7 +1366,10 @@ pub async fn latency_reset(
     Json(request): Json<LatencyResetRequest>,
 ) -> Result<ApiResponse<LatencyResetResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.latency_reset(request.events).await
+    state
+        .admin_service
+        .latency_reset(request.events)
+        .await
         .map(|_| ApiResponse::success(LatencyResetResponse { success: true }))
         .map_err(to_status_code)
 }
@@ -1267,7 +1394,10 @@ pub async fn acl_list(
     headers: HeaderMap,
 ) -> Result<ApiResponse<AclListResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.acl_list().await
+    state
+        .admin_service
+        .acl_list()
+        .await
         .map(|rules| ApiResponse::success(AclListResponse { rules }))
         .map_err(to_status_code)
 }
@@ -1288,7 +1418,10 @@ pub async fn acl_users(
     headers: HeaderMap,
 ) -> Result<ApiResponse<AclUsersResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.acl_users().await
+    state
+        .admin_service
+        .acl_users()
+        .await
         .map(|users| ApiResponse::success(AclUsersResponse { users }))
         .map_err(to_status_code)
 }
@@ -1309,7 +1442,10 @@ pub async fn acl_whoami(
     headers: HeaderMap,
 ) -> Result<ApiResponse<AclWhoamiResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.acl_whoami().await
+    state
+        .admin_service
+        .acl_whoami()
+        .await
         .map(|username| ApiResponse::success(AclWhoamiResponse { username }))
         .map_err(to_status_code)
 }
@@ -1332,7 +1468,10 @@ pub async fn acl_cat(
     Json(request): Json<AclCatRequest>,
 ) -> Result<ApiResponse<AclCatResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.acl_cat(request.category.as_deref()).await
+    state
+        .admin_service
+        .acl_cat(request.category.as_deref())
+        .await
         .map(|items| ApiResponse::success(AclCatResponse { items }))
         .map_err(to_status_code)
 }
@@ -1355,7 +1494,10 @@ pub async fn acl_genpass(
     Json(request): Json<AclGenPassRequest>,
 ) -> Result<ApiResponse<AclGenPassResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.acl_genpass(Some(request.bits)).await
+    state
+        .admin_service
+        .acl_genpass(Some(request.bits))
+        .await
         .map(|password| ApiResponse::success(AclGenPassResponse { password }))
         .map_err(to_status_code)
 }
@@ -1378,8 +1520,43 @@ pub async fn acl_log(
     Json(request): Json<AclLogRequest>,
 ) -> Result<ApiResponse<AclLogResponse>, StatusCode> {
     verify_admin_key(&headers, &state)?;
-    state.admin_service.acl_log(request.count, request.reset).await
+    state
+        .admin_service
+        .acl_log(request.count, request.reset)
+        .await
         .map(|entries| ApiResponse::success(AclLogResponse { entries }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/acl/dryrun
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/acl/dryrun",
+    request_body = AclDryrunRequest,
+    responses(
+        (status = 200, description = "ACL dryrun result", body = AclDryrunResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn acl_dryrun(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<AclDryrunRequest>,
+) -> Result<ApiResponse<AclDryrunResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .acl_dryrun(&request.username, &request.command)
+        .await
+        .map(|result| {
+            ApiResponse::success(AclDryrunResponse {
+                allowed: result.allowed,
+                reason: result.reason,
+            })
+        })
         .map_err(to_status_code)
 }
 
@@ -1387,13 +1564,16 @@ pub async fn acl_log(
 mod tests {
     use super::*;
     use crate::test_support::test_state;
+    use axum::Json;
     use axum::extract::State;
     use axum::http::{HeaderMap, HeaderValue};
-    use axum::Json;
 
     fn auth_headers(key: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(ADMIN_API_KEY_HEADER, HeaderValue::from_str(key).expect("header"));
+        headers.insert(
+            ADMIN_API_KEY_HEADER,
+            HeaderValue::from_str(key).expect("header"),
+        );
         headers
     }
 
@@ -1410,10 +1590,22 @@ mod tests {
         let bad = verify_admin_key(&HeaderMap::new(), &state);
         assert!(bad.is_err());
 
-        assert_eq!(to_status_code(CacheError::InvalidInput("bad".to_string())), StatusCode::BAD_REQUEST);
-        assert_eq!(to_status_code(CacheError::KeyNotFound("k".to_string())), StatusCode::NOT_FOUND);
-        assert_eq!(to_status_code(CacheError::Unauthorized), StatusCode::UNAUTHORIZED);
-        assert_eq!(to_status_code(CacheError::Timeout), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            to_status_code(CacheError::InvalidInput("bad".to_string())),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            to_status_code(CacheError::KeyNotFound("k".to_string())),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            to_status_code(CacheError::Unauthorized),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            to_status_code(CacheError::Timeout),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[tokio::test]
@@ -1437,19 +1629,30 @@ mod tests {
         let _ = get_memory_usage(
             state.clone(),
             auth.clone(),
-            Json(MemoryUsageRequest { key: "k".to_string(), samples: 1 }),
+            Json(MemoryUsageRequest {
+                key: "k".to_string(),
+                samples: 1,
+            }),
         )
         .await
         .unwrap();
         let _ = memory_doctor(state.clone(), auth.clone()).await.unwrap();
         let _ = memory_purge(state.clone(), auth.clone()).await.unwrap();
 
-        let _ = flush_db(state.clone(), auth.clone(), Json(FlushDbRequest { async_mode: false }))
-            .await
-            .unwrap();
-        let _ = flush_all(state.clone(), auth.clone(), Json(FlushDbRequest { async_mode: true }))
-            .await
-            .unwrap();
+        let _ = flush_db(
+            state.clone(),
+            auth.clone(),
+            Json(FlushDbRequest { async_mode: false }),
+        )
+        .await
+        .unwrap();
+        let _ = flush_all(
+            state.clone(),
+            auth.clone(),
+            Json(FlushDbRequest { async_mode: true }),
+        )
+        .await
+        .unwrap();
         let _ = copy_key(
             state.clone(),
             auth.clone(),
@@ -1465,7 +1668,10 @@ mod tests {
         let _ = move_key(
             state.clone(),
             auth.clone(),
-            Json(MoveKeyRequest { key: "a".to_string(), db: 1 }),
+            Json(MoveKeyRequest {
+                key: "a".to_string(),
+                db: 1,
+            }),
         )
         .await
         .unwrap();
@@ -1480,14 +1686,19 @@ mod tests {
         let _ = config_get(
             state.clone(),
             auth.clone(),
-            Json(ConfigGetRequest { pattern: "*".to_string() }),
+            Json(ConfigGetRequest {
+                pattern: "*".to_string(),
+            }),
         )
         .await
         .unwrap();
         let _ = config_set(
             state.clone(),
             auth.clone(),
-            Json(ConfigSetRequest { parameter: "maxmemory".to_string(), value: "1".to_string() }),
+            Json(ConfigSetRequest {
+                parameter: "maxmemory".to_string(),
+                value: "1".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -1502,14 +1713,21 @@ mod tests {
         let _ = client_kill(
             state.clone(),
             auth.clone(),
-            Json(ClientKillRequest { id: None, addr: None, client_type: None }),
+            Json(ClientKillRequest {
+                id: None,
+                addr: None,
+                client_type: None,
+            }),
         )
         .await
         .unwrap();
         let _ = client_pause(
             state.clone(),
             auth.clone(),
-            Json(ClientPauseRequest { timeout_ms: 1, mode: "write".to_string() }),
+            Json(ClientPauseRequest {
+                timeout_ms: 1,
+                mode: "write".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -1517,7 +1735,9 @@ mod tests {
         let _ = client_setname(
             state.clone(),
             auth.clone(),
-            Json(ClientSetNameRequest { name: "client".to_string() }),
+            Json(ClientSetNameRequest {
+                name: "client".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -1538,7 +1758,9 @@ mod tests {
         let _ = latency_history(
             state.clone(),
             auth.clone(),
-            Json(LatencyHistoryRequest { event: "command".to_string() }),
+            Json(LatencyHistoryRequest {
+                event: "command".to_string(),
+            }),
         )
         .await
         .unwrap();
@@ -1546,7 +1768,9 @@ mod tests {
         let _ = latency_reset(
             state.clone(),
             auth.clone(),
-            Json(LatencyResetRequest { events: vec!["command".to_string()] }),
+            Json(LatencyResetRequest {
+                events: vec!["command".to_string()],
+            }),
         )
         .await
         .unwrap();
@@ -1557,7 +1781,9 @@ mod tests {
         let _ = acl_cat(
             state.clone(),
             auth.clone(),
-            Json(AclCatRequest { category: Some("string".to_string()) }),
+            Json(AclCatRequest {
+                category: Some("string".to_string()),
+            }),
         )
         .await
         .unwrap();
@@ -1569,11 +1795,27 @@ mod tests {
         .await
         .unwrap();
         let _ = acl_log(
-            state,
-            auth,
-            Json(AclLogRequest { count: Some(1), reset: false }),
+            state.clone(),
+            auth.clone(),
+            Json(AclLogRequest {
+                count: Some(1),
+                reset: false,
+            }),
         )
         .await
         .unwrap();
+        let result = acl_dryrun(
+            state,
+            auth,
+            Json(AclDryrunRequest {
+                username: "default".to_string(),
+                command: vec!["GET".to_string(), "key".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let dryrun_data = result.data.unwrap();
+        assert!(dryrun_data.allowed);
+        assert!(dryrun_data.reason.is_none());
     }
 }

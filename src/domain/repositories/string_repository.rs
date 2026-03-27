@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use std::time::Duration;
 
 use crate::domain::entities::{
-    AppendResult, GetExOptions, MGetResult, RangeResult,
-    SetOptions, SetRangeResult, SetResult, StringValue,
+    AppendResult, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult, SetResult,
+    StringValue,
 };
 use crate::domain::errors::CacheError;
 
@@ -18,10 +18,20 @@ pub trait StringRepository: Send + Sync {
     async fn get(&self, key: &str) -> Result<Option<StringValue>, CacheError>;
 
     /// SET - Set the value of a key with options
-    async fn set(&self, key: &str, value: &str, options: SetOptions) -> Result<SetResult, CacheError>;
+    async fn set(
+        &self,
+        key: &str,
+        value: &str,
+        options: SetOptions,
+    ) -> Result<SetResult, CacheError>;
 
     /// SETNX - Set key only if it does not exist
-    async fn set_nx(&self, key: &str, value: &str, ttl: Option<Duration>) -> Result<bool, CacheError>;
+    async fn set_nx(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: Option<Duration>,
+    ) -> Result<bool, CacheError>;
 
     /// SETEX - Set key with expiration in seconds
     async fn set_ex(&self, key: &str, value: &str, ttl: Duration) -> Result<(), CacheError>;
@@ -60,7 +70,12 @@ pub trait StringRepository: Send + Sync {
     async fn get_range(&self, key: &str, start: i64, end: i64) -> Result<RangeResult, CacheError>;
 
     /// SETRANGE - Overwrite part of string at offset
-    async fn set_range(&self, key: &str, offset: i64, value: &str) -> Result<SetRangeResult, CacheError>;
+    async fn set_range(
+        &self,
+        key: &str,
+        offset: i64,
+        value: &str,
+    ) -> Result<SetRangeResult, CacheError>;
 
     /// GETEX - Get value and optionally set expiration
     async fn get_ex(&self, key: &str, options: GetExOptions) -> Result<Option<String>, CacheError>;

@@ -11,14 +11,12 @@ use crate::domain::repositories::{
 };
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisSortedSetRepository;
-
-/// Maximum allowed timeout for blocking operations (30 seconds)
-const MAX_BLOCKING_TIMEOUT_SECONDS: f64 = 30.0;
+use crate::shared::blocking::BlockingTimeoutEnforcer;
 
 /// Service for sorted set operations
 pub struct SortedSetService {
     repository: Arc<dyn SortedSetRepository>,
-    max_blocking_timeout: f64,
+    timeout_enforcer: BlockingTimeoutEnforcer,
 }
 
 impl SortedSetService {
@@ -31,13 +29,13 @@ impl SortedSetService {
     pub fn new_with_repository(repository: Arc<dyn SortedSetRepository>) -> Self {
         Self {
             repository,
-            max_blocking_timeout: MAX_BLOCKING_TIMEOUT_SECONDS,
+            timeout_enforcer: BlockingTimeoutEnforcer::new(),
         }
     }
 
-    /// Enforce timeout bounds for blocking operations (min 1s, max 30s)
+    /// Enforce timeout bounds for blocking operations
     fn enforce_timeout(&self, requested: f64) -> f64 {
-        requested.clamp(1.0, self.max_blocking_timeout)
+        self.timeout_enforcer.enforce_secs_f64(requested)
     }
 
     // ========== Basic operations ==========
@@ -216,11 +214,7 @@ impl SortedSetService {
     }
 
     /// ZREMRANGEBYSCORE - Remove members by score range
-    pub async fn zremrangebyscore(
-        &self,
-        key: &str,
-        range: ScoreRange,
-    ) -> Result<i64, CacheError> {
+    pub async fn zremrangebyscore(&self, key: &str, range: ScoreRange) -> Result<i64, CacheError> {
         self.repository.zremrangebyscore(key, &range).await
     }
 
@@ -256,9 +250,7 @@ impl SortedSetService {
         timeout_seconds: u32,
     ) -> Result<Option<ZPopResult>, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         let timeout = self.enforce_timeout(timeout_seconds as f64);
         self.repository.bzpopmin(&keys, timeout).await
@@ -271,9 +263,7 @@ impl SortedSetService {
         timeout_seconds: u32,
     ) -> Result<Option<ZPopResult>, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         let timeout = self.enforce_timeout(timeout_seconds as f64);
         self.repository.bzpopmax(&keys, timeout).await
@@ -287,9 +277,7 @@ impl SortedSetService {
         count: Option<i64>,
     ) -> Result<Option<ZPopResult>, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         self.repository.zmpop(&keys, direction, count).await
     }
@@ -303,12 +291,12 @@ impl SortedSetService {
         count: Option<i64>,
     ) -> Result<Option<ZPopResult>, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         let timeout = self.enforce_timeout(timeout_seconds as f64);
-        self.repository.bzmpop(&keys, direction, timeout, count).await
+        self.repository
+            .bzmpop(&keys, direction, timeout, count)
+            .await
     }
 
     // ========== Random access ==========
@@ -332,9 +320,7 @@ impl SortedSetService {
         options: Option<ZSetAlgebraOptions>,
     ) -> Result<Vec<ScoredMember>, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         self.validate_algebra_options(&keys, &options)?;
         self.repository.zunion(&keys, options).await
@@ -348,14 +334,12 @@ impl SortedSetService {
         options: Option<ZSetAlgebraOptions>,
     ) -> Result<i64, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
-        if let Err(err) = self.validate_algebra_options(&keys, &options) {
-            return Err(err);
-        }
-        self.repository.zunionstore(destination, &keys, options).await
+        self.validate_algebra_options(&keys, &options)?;
+        self.repository
+            .zunionstore(destination, &keys, options)
+            .await
     }
 
     /// ZINTER - Get the intersection of multiple sorted sets
@@ -365,13 +349,9 @@ impl SortedSetService {
         options: Option<ZSetAlgebraOptions>,
     ) -> Result<Vec<ScoredMember>, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
-        if let Err(err) = self.validate_algebra_options(&keys, &options) {
-            return Err(err);
-        }
+        self.validate_algebra_options(&keys, &options)?;
         self.repository.zinter(&keys, options).await
     }
 
@@ -383,14 +363,12 @@ impl SortedSetService {
         options: Option<ZSetAlgebraOptions>,
     ) -> Result<i64, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
-        if let Err(err) = self.validate_algebra_options(&keys, &options) {
-            return Err(err);
-        }
-        self.repository.zinterstore(destination, &keys, options).await
+        self.validate_algebra_options(&keys, &options)?;
+        self.repository
+            .zinterstore(destination, &keys, options)
+            .await
     }
 
     /// ZINTERCARD - Get the cardinality of the intersection
@@ -400,9 +378,7 @@ impl SortedSetService {
         limit: Option<u64>,
     ) -> Result<i64, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         self.repository.zintercard(&keys, limit).await
     }
@@ -414,9 +390,7 @@ impl SortedSetService {
         with_scores: bool,
     ) -> Result<Vec<ScoredMember>, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         self.repository.zdiff(&keys, with_scores).await
     }
@@ -428,9 +402,7 @@ impl SortedSetService {
         keys: Vec<String>,
     ) -> Result<i64, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Keys cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
         }
         self.repository.zdiffstore(destination, &keys).await
     }
@@ -456,16 +428,15 @@ impl SortedSetService {
         keys: &[String],
         options: &Option<ZSetAlgebraOptions>,
     ) -> Result<(), CacheError> {
-        if let Some(opts) = options {
-            if let Some(weights) = &opts.weights {
-                if weights.len() != keys.len() {
-                    return Err(CacheError::InvalidInput(format!(
-                        "Number of weights ({}) must match number of keys ({})",
-                        weights.len(),
-                        keys.len()
-                    )));
-                }
-            }
+        if let Some(opts) = options
+            && let Some(weights) = &opts.weights
+            && weights.len() != keys.len()
+        {
+            return Err(CacheError::InvalidInput(format!(
+                "Number of weights ({}) must match number of keys ({})",
+                weights.len(),
+                keys.len()
+            )));
         }
         Ok(())
     }
@@ -474,8 +445,8 @@ impl SortedSetService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::MockSortedSetRepository;
     use crate::domain::repositories::ZAggregate;
+    use crate::test_support::MockSortedSetRepository;
 
     #[tokio::test]
     async fn test_zadd_validation() {
@@ -493,7 +464,11 @@ mod tests {
             ..Default::default()
         };
         let err = service
-            .zadd("zset", vec![ScoredMember::new("a".to_string(), 1.0)], Some(options))
+            .zadd(
+                "zset",
+                vec![ScoredMember::new("a".to_string(), 1.0)],
+                Some(options),
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
@@ -505,7 +480,11 @@ mod tests {
             ..Default::default()
         };
         let err = service
-            .zadd("zset", vec![ScoredMember::new("a".to_string(), 1.0)], Some(options))
+            .zadd(
+                "zset",
+                vec![ScoredMember::new("a".to_string(), 1.0)],
+                Some(options),
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
@@ -517,7 +496,11 @@ mod tests {
             ..Default::default()
         };
         let err = service
-            .zadd("zset", vec![ScoredMember::new("a".to_string(), 1.0)], Some(options))
+            .zadd(
+                "zset",
+                vec![ScoredMember::new("a".to_string(), 1.0)],
+                Some(options),
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
@@ -553,7 +536,10 @@ mod tests {
         let err = service.bzpopmax(Vec::new(), 1).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
-        let err = service.bzmpop(Vec::new(), ZPopDirection::Min, 1, None).await.unwrap_err();
+        let err = service
+            .bzmpop(Vec::new(), ZPopDirection::Min, 1, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 
@@ -562,7 +548,10 @@ mod tests {
         let repo = Arc::new(MockSortedSetRepository::new());
         let service = SortedSetService::new_with_repository(repo);
 
-        let err = service.zmpop(Vec::new(), ZPopDirection::Min, None).await.unwrap_err();
+        let err = service
+            .zmpop(Vec::new(), ZPopDirection::Min, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 
@@ -575,13 +564,19 @@ mod tests {
         let err = service.zunion(Vec::new(), None).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
-        let err = service.zunionstore("dest", Vec::new(), None).await.unwrap_err();
+        let err = service
+            .zunionstore("dest", Vec::new(), None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let err = service.zinter(Vec::new(), None).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
-        let err = service.zinterstore("dest", Vec::new(), None).await.unwrap_err();
+        let err = service
+            .zinterstore("dest", Vec::new(), None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let err = service.zintercard(Vec::new(), None).await.unwrap_err();
@@ -599,7 +594,10 @@ mod tests {
             ..Default::default()
         };
         let err = service
-            .zunion(vec!["key1".to_string(), "key2".to_string()], Some(options.clone()))
+            .zunion(
+                vec!["key1".to_string(), "key2".to_string()],
+                Some(options.clone()),
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
@@ -615,7 +613,10 @@ mod tests {
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let err = service
-            .zinter(vec!["key1".to_string(), "key2".to_string()], Some(options.clone()))
+            .zinter(
+                vec!["key1".to_string(), "key2".to_string()],
+                Some(options.clone()),
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
@@ -746,19 +747,11 @@ mod tests {
         let service = SortedSetService::new_with_repository(repo.clone());
 
         service
-            .zadd(
-                "zset1",
-                vec![ScoredMember::new("a".to_string(), 1.0)],
-                None,
-            )
+            .zadd("zset1", vec![ScoredMember::new("a".to_string(), 1.0)], None)
             .await
             .unwrap();
         service
-            .zadd(
-                "zset2",
-                vec![ScoredMember::new("a".to_string(), 2.0)],
-                None,
-            )
+            .zadd("zset2", vec![ScoredMember::new("a".to_string(), 2.0)], None)
             .await
             .unwrap();
 
@@ -769,19 +762,30 @@ mod tests {
         });
 
         let count = service
-            .zunionstore("dest", vec!["zset1".to_string(), "zset2".to_string()], options.clone())
+            .zunionstore(
+                "dest",
+                vec!["zset1".to_string(), "zset2".to_string()],
+                options.clone(),
+            )
             .await
             .unwrap();
         assert_eq!(count, 1);
 
         let members = service
-            .zinter(vec!["zset1".to_string(), "zset2".to_string()], options.clone())
+            .zinter(
+                vec!["zset1".to_string(), "zset2".to_string()],
+                options.clone(),
+            )
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
 
         let count = service
-            .zinterstore("dest2", vec!["zset1".to_string(), "zset2".to_string()], options)
+            .zinterstore(
+                "dest2",
+                vec!["zset1".to_string(), "zset2".to_string()],
+                options,
+            )
             .await
             .unwrap();
         assert_eq!(count, 1);
@@ -791,5 +795,97 @@ mod tests {
     fn test_sorted_set_service_new() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let _service = SortedSetService::new(pool);
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::sync::Arc;
+    use testcontainers::ContainerAsync;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+
+    async fn start_redis() -> (ContainerAsync<Redis>, String) {
+        let container = Redis::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
+        let url = format!("redis://{host}:{port}");
+        (container, url)
+    }
+
+    async fn pool_with_redis() -> (ContainerAsync<Redis>, Arc<InstrumentedPool>) {
+        let (container, redis_url) = start_redis().await;
+        let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap());
+        (container, pool)
+    }
+
+    /// Test BZPOPMIN on a non-existent key with a 1-second timeout.
+    ///
+    /// The testcontainers Redis module uses Redis 5.0 which only accepts
+    /// integer timeouts for BZPOPMIN. We call the command directly through
+    /// the pool to verify blocking behavior, since the service layer passes
+    /// f64 timeouts via enforce_timeout.
+    #[tokio::test]
+    async fn test_bzpopmin_returns_none_on_timeout() {
+        let (_container, pool) = pool_with_redis().await;
+
+        let mut conn = pool.get().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let result: Option<(String, String, f64)> = redis::cmd("BZPOPMIN")
+            .arg("nonexistent_key")
+            .arg(1u32) // integer timeout for Redis 5.0 compatibility
+            .query_async(&mut *conn)
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.is_none());
+        assert!(
+            elapsed.as_millis() >= 900,
+            "Expected ~1s wait, got {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    /// Test BZPOPMIN returns data immediately when the sorted set has members.
+    ///
+    /// Uses the service for ZADD (which works on all Redis versions) and then
+    /// calls BZPOPMIN directly through the pool with an integer timeout for
+    /// Redis 5.0 compatibility.
+    #[tokio::test]
+    async fn test_bzpopmin_returns_data_when_available() {
+        let (_container, pool) = pool_with_redis().await;
+        let service = SortedSetService::new(pool.clone());
+
+        // Add members to a sorted set via the service
+        service
+            .zadd(
+                "myzset",
+                vec![
+                    ScoredMember::new("alice".to_string(), 1.0),
+                    ScoredMember::new("bob".to_string(), 2.0),
+                    ScoredMember::new("charlie".to_string(), 3.0),
+                ],
+                None,
+            )
+            .await
+            .unwrap();
+
+        // BZPOPMIN should immediately return the member with the lowest score
+        let mut conn = pool.get().await.unwrap();
+        let result: Option<(String, String, f64)> = redis::cmd("BZPOPMIN")
+            .arg("myzset")
+            .arg(1u32) // integer timeout for Redis 5.0 compatibility
+            .query_async(&mut *conn)
+            .await
+            .unwrap();
+
+        assert!(result.is_some());
+        let (key, member, score) = result.unwrap();
+        assert_eq!(key, "myzset");
+        assert_eq!(member, "alice");
+        assert_eq!(score, 1.0);
     }
 }

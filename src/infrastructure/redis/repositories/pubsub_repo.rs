@@ -3,9 +3,9 @@
 //! Implements Pub/Sub command operations using the command pool.
 //! SUBSCRIBE operations are handled by PubSubManager with dedicated connections.
 
-use std::sync::Arc;
 use async_trait::async_trait;
 use redis::AsyncCommands;
+use std::sync::Arc;
 
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{NumSubResult, PubSubRepository, PublishResult};
@@ -90,7 +90,10 @@ impl PubSubRepository for RedisPubSubRepository {
                     redis::Value::Int(n) => n,
                     _ => 0,
                 };
-                results.push(NumSubResult { channel, subscribers });
+                results.push(NumSubResult {
+                    channel,
+                    subscribers,
+                });
             }
         }
 
@@ -122,7 +125,10 @@ impl PubSubRepository for RedisPubSubRepository {
         Ok(channels)
     }
 
-    async fn pubsub_shardnumsub(&self, channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+    async fn pubsub_shardnumsub(
+        &self,
+        channels: &[String],
+    ) -> Result<Vec<NumSubResult>, CacheError> {
         let mut conn = self.pool.get().await?;
 
         // PUBSUB SHARDNUMSUB [channel ...] - Redis 7.0+ for cluster
@@ -149,7 +155,10 @@ impl PubSubRepository for RedisPubSubRepository {
                     redis::Value::Int(n) => n,
                     _ => 0,
                 };
-                results.push(NumSubResult { channel, subscribers });
+                results.push(NumSubResult {
+                    channel,
+                    subscribers,
+                });
             }
         }
 

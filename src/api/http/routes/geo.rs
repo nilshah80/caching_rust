@@ -3,9 +3,9 @@
 //! HTTP endpoints for Redis geospatial operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{get, post},
-    Json, Router,
 };
 
 use crate::api::http::schemas::geo::{
@@ -86,8 +86,10 @@ pub async fn geo_pos(
     Json(request): Json<GeoPosRequest>,
 ) -> Result<Json<ApiResponse<GeoPosResponse>>, CacheError> {
     let positions = state.geo_service.geo_pos(&key, request.members).await?;
-    let positions: Vec<Option<GeoPositionSchema>> =
-        positions.into_iter().map(|p| p.map(|pos| pos.into())).collect();
+    let positions: Vec<Option<GeoPositionSchema>> = positions
+        .into_iter()
+        .map(|p| p.map(|pos| pos.into()))
+        .collect();
     Ok(Json(ApiResponse::success(GeoPosResponse { positions })))
 }
 
@@ -243,7 +245,13 @@ pub async fn geo_radius(
     let position = GeoPosition::new(query.longitude, query.latitude);
     let results = state
         .geo_service
-        .geo_radius(&key, position, query.radius, query.unit.clone().into(), query.to_options())
+        .geo_radius(
+            &key,
+            position,
+            query.radius,
+            query.unit.clone().into(),
+            query.to_options(),
+        )
         .await?;
     let results: Vec<GeoSearchResultItem> = results.into_iter().map(|r| r.into()).collect();
     Ok(Json(ApiResponse::success(GeoSearchResponse { results })))
@@ -277,7 +285,13 @@ pub async fn geo_radius_by_member(
 ) -> Result<Json<ApiResponse<GeoSearchResponse>>, CacheError> {
     let results = state
         .geo_service
-        .geo_radius_by_member(&key, &member, query.radius, query.unit.clone().into(), query.to_options())
+        .geo_radius_by_member(
+            &key,
+            &member,
+            query.radius,
+            query.unit.clone().into(),
+            query.to_options(),
+        )
         .await?;
     let results: Vec<GeoSearchResultItem> = results.into_iter().map(|r| r.into()).collect();
     Ok(Json(ApiResponse::success(GeoSearchResponse { results })))
@@ -286,11 +300,11 @@ pub async fn geo_radius_by_member(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::repositories::{GeoAddOptions, GeoMember};
     use crate::test_support::test_state_with_geo_repo;
-    use axum::body::{to_bytes, Body};
+    use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
-    use crate::domain::repositories::{GeoAddOptions, GeoMember};
 
     #[test]
     fn test_geo_routes_structure() {

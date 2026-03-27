@@ -171,10 +171,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
     async fn zcard(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("ZCARD")
-            .arg(key)
-            .query_async(&mut *conn)
-            .await?;
+        let result: i64 = redis::cmd("ZCARD").arg(key).query_async(&mut *conn).await?;
         Ok(result)
     }
 
@@ -393,7 +390,11 @@ impl SortedSetRepository for RedisSortedSetRepository {
         Ok(result)
     }
 
-    async fn zpopmin(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError> {
+    async fn zpopmin(
+        &self,
+        key: &str,
+        count: Option<i64>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
         let mut conn = self.pool.get().await?;
         let mut cmd = redis::cmd("ZPOPMIN");
         cmd.arg(key);
@@ -406,7 +407,11 @@ impl SortedSetRepository for RedisSortedSetRepository {
         Ok(Self::parse_members_with_scores(result))
     }
 
-    async fn zpopmax(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError> {
+    async fn zpopmax(
+        &self,
+        key: &str,
+        count: Option<i64>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
         let mut conn = self.pool.get().await?;
         let mut cmd = redis::cmd("ZPOPMAX");
         cmd.arg(key);

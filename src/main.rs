@@ -1,9 +1,9 @@
 //! Redis Caching Service - Entry Point
 
+use redis_caching_service::api::http::server;
 use redis_caching_service::infrastructure::config::Settings;
 use redis_caching_service::infrastructure::logging;
 use redis_caching_service::infrastructure::redis::connection::InstrumentedPool;
-use redis_caching_service::api::http::server;
 use redis_caching_service::shared::app_state::AppState;
 
 use std::sync::Arc;

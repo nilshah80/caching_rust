@@ -42,9 +42,7 @@ impl RedisSearchRepository {
     fn extract_i64(value: &redis::Value) -> Option<i64> {
         match value {
             redis::Value::Int(i) => Some(*i),
-            redis::Value::BulkString(bytes) => {
-                String::from_utf8_lossy(bytes).parse().ok()
-            }
+            redis::Value::BulkString(bytes) => String::from_utf8_lossy(bytes).parse().ok(),
             _ => None,
         }
     }
@@ -53,9 +51,7 @@ impl RedisSearchRepository {
     fn extract_f64(value: &redis::Value) -> Option<f64> {
         match value {
             redis::Value::Int(i) => Some(*i as f64),
-            redis::Value::BulkString(bytes) => {
-                String::from_utf8_lossy(bytes).parse().ok()
-            }
+            redis::Value::BulkString(bytes) => String::from_utf8_lossy(bytes).parse().ok(),
             redis::Value::Double(d) => Some(*d),
             _ => None,
         }
@@ -66,11 +62,9 @@ impl RedisSearchRepository {
         match value {
             redis::Value::Nil => serde_json::Value::Null,
             redis::Value::Int(i) => serde_json::Value::Number(i.into()),
-            redis::Value::Double(d) => {
-                serde_json::Number::from_f64(d)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null)
-            }
+            redis::Value::Double(d) => serde_json::Number::from_f64(d)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
             redis::Value::BulkString(bytes) => {
                 let s = String::from_utf8_lossy(&bytes).to_string();
                 // Try to parse as JSON first
@@ -139,7 +133,9 @@ impl RedisSearchRepository {
             SearchFieldType::Vector => {
                 if let Some(opts) = &field.vector_options {
                     // Algorithm is required for VECTOR fields
-                    let algo = opts.algorithm.unwrap_or(crate::domain::entities::VectorAlgorithm::Flat);
+                    let algo = opts
+                        .algorithm
+                        .unwrap_or(crate::domain::entities::VectorAlgorithm::Flat);
                     args.push(algo.to_string());
 
                     // Count parameters: TYPE is mandatory, DIM and DISTANCE_METRIC are required
@@ -179,9 +175,12 @@ impl RedisSearchRepository {
 
                     // DISTANCE_METRIC is required - use provided or default to L2
                     args.push("DISTANCE_METRIC".to_string());
-                    args.push(opts.distance_metric.as_ref()
-                        .map(|m| m.to_string())
-                        .unwrap_or_else(|| "L2".to_string()));
+                    args.push(
+                        opts.distance_metric
+                            .as_ref()
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| "L2".to_string()),
+                    );
 
                     if let Some(cap) = opts.initial_cap {
                         args.push("INITIAL_CAP".to_string());
@@ -535,20 +534,18 @@ impl RedisSearchRepository {
                         }
                         "index_options" => {
                             if let redis::Value::Array(opts) = val {
-                                info.index_options = opts
-                                    .iter()
-                                    .filter_map(Self::extract_string)
-                                    .collect();
+                                info.index_options =
+                                    opts.iter().filter_map(Self::extract_string).collect();
                             }
                         }
                         "index_definition" => {
                             if let redis::Value::Array(def) = val {
                                 let mut def_iter = def.into_iter();
                                 while let Some(k) = def_iter.next() {
-                                    if let Some(v) = def_iter.next() {
-                                        if let Some(key) = Self::extract_string(&k) {
-                                            info.index_definition.insert(key, Self::to_json_value(v));
-                                        }
+                                    if let Some(v) = def_iter.next()
+                                        && let Some(key) = Self::extract_string(&k)
+                                    {
+                                        info.index_definition.insert(key, Self::to_json_value(v));
                                     }
                                 }
                             }
@@ -560,10 +557,10 @@ impl RedisSearchRepository {
                                         let mut attr_map = HashMap::new();
                                         let mut attr_iter = attr_arr.into_iter();
                                         while let Some(k) = attr_iter.next() {
-                                            if let Some(v) = attr_iter.next() {
-                                                if let Some(key) = Self::extract_string(&k) {
-                                                    attr_map.insert(key, Self::to_json_value(v));
-                                                }
+                                            if let Some(v) = attr_iter.next()
+                                                && let Some(key) = Self::extract_string(&k)
+                                            {
+                                                attr_map.insert(key, Self::to_json_value(v));
                                             }
                                         }
                                         info.attributes.push(attr_map);
@@ -583,15 +580,21 @@ impl RedisSearchRepository {
                             info.total_inverted_index_blocks =
                                 Self::extract_i64(&val).map(|v| v as u64)
                         }
-                        "offset_vectors_sz_mb" => info.offset_vectors_sz_mb = Self::extract_f64(&val),
+                        "offset_vectors_sz_mb" => {
+                            info.offset_vectors_sz_mb = Self::extract_f64(&val)
+                        }
                         "doc_table_size_mb" => info.doc_table_size_mb = Self::extract_f64(&val),
                         "sortable_values_size_mb" => {
                             info.sortable_values_size_mb = Self::extract_f64(&val)
                         }
                         "key_table_size_mb" => info.key_table_size_mb = Self::extract_f64(&val),
                         "records_per_doc_avg" => info.records_per_doc_avg = Self::extract_f64(&val),
-                        "bytes_per_record_avg" => info.bytes_per_record_avg = Self::extract_f64(&val),
-                        "offsets_per_term_avg" => info.offsets_per_term_avg = Self::extract_f64(&val),
+                        "bytes_per_record_avg" => {
+                            info.bytes_per_record_avg = Self::extract_f64(&val)
+                        }
+                        "offsets_per_term_avg" => {
+                            info.offsets_per_term_avg = Self::extract_f64(&val)
+                        }
                         "offset_bits_per_record_avg" => {
                             info.offset_bits_per_record_avg = Self::extract_f64(&val)
                         }
@@ -606,10 +609,10 @@ impl RedisSearchRepository {
                             if let redis::Value::Array(stats) = val {
                                 let mut stats_iter = stats.into_iter();
                                 while let Some(k) = stats_iter.next() {
-                                    if let Some(v) = stats_iter.next() {
-                                        if let Some(key) = Self::extract_string(&k) {
-                                            info.gc_stats.insert(key, Self::to_json_value(v));
-                                        }
+                                    if let Some(v) = stats_iter.next()
+                                        && let Some(key) = Self::extract_string(&k)
+                                    {
+                                        info.gc_stats.insert(key, Self::to_json_value(v));
                                     }
                                 }
                             }
@@ -618,10 +621,10 @@ impl RedisSearchRepository {
                             if let redis::Value::Array(stats) = val {
                                 let mut stats_iter = stats.into_iter();
                                 while let Some(k) = stats_iter.next() {
-                                    if let Some(v) = stats_iter.next() {
-                                        if let Some(key) = Self::extract_string(&k) {
-                                            info.cursor_stats.insert(key, Self::to_json_value(v));
-                                        }
+                                    if let Some(v) = stats_iter.next()
+                                        && let Some(key) = Self::extract_string(&k)
+                                    {
+                                        info.cursor_stats.insert(key, Self::to_json_value(v));
                                     }
                                 }
                             }
@@ -664,24 +667,24 @@ impl RedisSearchRepository {
                 };
 
                 // Score (if WITHSCORES) - comes after ID regardless of NOCONTENT
-                if options.withscores {
-                    if let Some(score_val) = iter.next() {
-                        doc.score = Self::extract_f64(&score_val);
-                    }
+                if options.withscores
+                    && let Some(score_val) = iter.next()
+                {
+                    doc.score = Self::extract_f64(&score_val);
                 }
 
                 // Payload (if WITHPAYLOADS) - comes after score regardless of NOCONTENT
-                if options.withpayloads {
-                    if let Some(payload_val) = iter.next() {
-                        doc.payload = Self::extract_string(&payload_val);
-                    }
+                if options.withpayloads
+                    && let Some(payload_val) = iter.next()
+                {
+                    doc.payload = Self::extract_string(&payload_val);
                 }
 
                 // Sort key (if WITHSORTKEYS) - comes after payload regardless of NOCONTENT
-                if options.withsortkeys {
-                    if let Some(sortkey_val) = iter.next() {
-                        doc.sortkey = Self::extract_string(&sortkey_val);
-                    }
+                if options.withsortkeys
+                    && let Some(sortkey_val) = iter.next()
+                {
+                    doc.sortkey = Self::extract_string(&sortkey_val);
                 }
 
                 // Handle NOCONTENT - no fields array, just ID + optional score/payload/sortkey
@@ -691,15 +694,15 @@ impl RedisSearchRepository {
                 }
 
                 // Fields array (only present when NOT nocontent)
-                if let Some(fields_val) = iter.next() {
-                    if let redis::Value::Array(fields_arr) = fields_val {
-                        let mut fields_iter = fields_arr.into_iter();
-                        while let Some(k) = fields_iter.next() {
-                            if let Some(v) = fields_iter.next() {
-                                if let Some(key) = Self::extract_string(&k) {
-                                    doc.fields.insert(key, Self::to_json_value(v));
-                                }
-                            }
+                if let Some(fields_val) = iter.next()
+                    && let redis::Value::Array(fields_arr) = fields_val
+                {
+                    let mut fields_iter = fields_arr.into_iter();
+                    while let Some(k) = fields_iter.next() {
+                        if let Some(v) = fields_iter.next()
+                            && let Some(key) = Self::extract_string(&k)
+                        {
+                            doc.fields.insert(key, Self::to_json_value(v));
                         }
                     }
                 }
@@ -732,10 +735,10 @@ impl RedisSearchRepository {
                     let mut row = HashMap::new();
                     let mut row_iter = row_arr.into_iter();
                     while let Some(k) = row_iter.next() {
-                        if let Some(v) = row_iter.next() {
-                            if let Some(key) = Self::extract_string(&k) {
-                                row.insert(key, Self::to_json_value(v));
-                            }
+                        if let Some(v) = row_iter.next()
+                            && let Some(key) = Self::extract_string(&k)
+                        {
+                            row.insert(key, Self::to_json_value(v));
                         }
                     }
                     agg_result.rows.push(row);
@@ -761,16 +764,16 @@ impl RedisSearchRepository {
                     payload: None,
                 };
 
-                if options.withscores {
-                    if let Some(score_val) = iter.next() {
-                        suggestion.score = Self::extract_f64(&score_val);
-                    }
+                if options.withscores
+                    && let Some(score_val) = iter.next()
+                {
+                    suggestion.score = Self::extract_f64(&score_val);
                 }
 
-                if options.withpayloads {
-                    if let Some(payload_val) = iter.next() {
-                        suggestion.payload = Self::extract_string(&payload_val);
-                    }
+                if options.withpayloads
+                    && let Some(payload_val) = iter.next()
+                {
+                    suggestion.payload = Self::extract_string(&payload_val);
                 }
 
                 suggestions.push(suggestion);
@@ -819,7 +822,10 @@ impl RedisSearchRepository {
                     iter.next();
 
                     // Get term
-                    let term = iter.next().and_then(|v| Self::extract_string(&v)).unwrap_or_default();
+                    let term = iter
+                        .next()
+                        .and_then(|v| Self::extract_string(&v))
+                        .unwrap_or_default();
 
                     // Get suggestions
                     let mut suggestions = vec![];
@@ -827,14 +833,22 @@ impl RedisSearchRepository {
                         for sugg in sugg_arr {
                             if let redis::Value::Array(sugg_pair) = sugg {
                                 let mut sugg_iter = sugg_pair.into_iter();
-                                let score = sugg_iter.next().and_then(|v| Self::extract_f64(&v)).unwrap_or(0.0);
-                                let suggestion = sugg_iter.next().and_then(|v| Self::extract_string(&v)).unwrap_or_default();
+                                let score = sugg_iter
+                                    .next()
+                                    .and_then(|v| Self::extract_f64(&v))
+                                    .unwrap_or(0.0);
+                                let suggestion = sugg_iter
+                                    .next()
+                                    .and_then(|v| Self::extract_string(&v))
+                                    .unwrap_or_default();
                                 suggestions.push(SpellcheckSuggestion { score, suggestion });
                             }
                         }
                     }
 
-                    spellcheck_result.results.push(SpellcheckTerm { term, suggestions });
+                    spellcheck_result
+                        .results
+                        .push(SpellcheckTerm { term, suggestions });
                 }
             }
         }
@@ -995,15 +1009,10 @@ impl SearchRepository for RedisSearchRepository {
     async fn ft_list(&self) -> Result<Vec<String>, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let result: redis::Value = redis::cmd("FT._LIST")
-            .query_async(&mut conn)
-            .await?;
+        let result: redis::Value = redis::cmd("FT._LIST").query_async(&mut conn).await?;
 
         let indices = match result {
-            redis::Value::Array(arr) => arr
-                .iter()
-                .filter_map(Self::extract_string)
-                .collect(),
+            redis::Value::Array(arr) => arr.iter().filter_map(Self::extract_string).collect(),
             _ => vec![],
         };
 
@@ -1139,17 +1148,20 @@ impl SearchRepository for RedisSearchRepository {
         // Parse profile result - it's typically [results, profile_info]
         let (results, profile) = if let redis::Value::Array(arr) = result {
             let mut iter = arr.into_iter();
-            let results = iter.next().map(Self::to_json_value).unwrap_or(serde_json::Value::Null);
+            let results = iter
+                .next()
+                .map(Self::to_json_value)
+                .unwrap_or(serde_json::Value::Null);
             let profile_val = iter.next().unwrap_or(redis::Value::Nil);
 
             let mut profile_map = HashMap::new();
             if let redis::Value::Array(prof_arr) = profile_val {
                 let mut prof_iter = prof_arr.into_iter();
                 while let Some(k) = prof_iter.next() {
-                    if let Some(v) = prof_iter.next() {
-                        if let Some(key) = Self::extract_string(&k) {
-                            profile_map.insert(key, Self::to_json_value(v));
-                        }
+                    if let Some(v) = prof_iter.next()
+                        && let Some(key) = Self::extract_string(&k)
+                    {
+                        profile_map.insert(key, Self::to_json_value(v));
                     }
                 }
             }
@@ -1424,10 +1436,7 @@ impl SearchRepository for RedisSearchRepository {
             .await?;
 
         let terms = match result {
-            redis::Value::Array(arr) => arr
-                .iter()
-                .filter_map(Self::extract_string)
-                .collect(),
+            redis::Value::Array(arr) => arr.iter().filter_map(Self::extract_string).collect(),
             _ => vec![],
         };
 

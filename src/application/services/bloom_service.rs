@@ -42,7 +42,11 @@ impl BloomService {
     // ==================== Bloom Filter Operations ====================
 
     /// Create a new Bloom filter (BF.RESERVE)
-    pub async fn bf_reserve(&self, key: &str, options: BloomReserveOptions) -> Result<BloomReserveResult, CacheError> {
+    pub async fn bf_reserve(
+        &self,
+        key: &str,
+        options: BloomReserveOptions,
+    ) -> Result<BloomReserveResult, CacheError> {
         self.validate_key(key)?;
         self.validate_bloom_reserve_options(&options)?;
         self.repository.bf_reserve(key, options).await
@@ -56,7 +60,11 @@ impl BloomService {
     }
 
     /// Add multiple items to a Bloom filter (BF.MADD)
-    pub async fn bf_madd(&self, key: &str, items: Vec<String>) -> Result<BloomAddResult, CacheError> {
+    pub async fn bf_madd(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<BloomAddResult, CacheError> {
         self.validate_key(key)?;
         self.validate_items(&items)?;
         self.repository.bf_madd(key, items).await
@@ -70,14 +78,23 @@ impl BloomService {
     }
 
     /// Check if multiple items exist in a Bloom filter (BF.MEXISTS)
-    pub async fn bf_mexists(&self, key: &str, items: Vec<String>) -> Result<BloomExistsResult, CacheError> {
+    pub async fn bf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<BloomExistsResult, CacheError> {
         self.validate_key(key)?;
         self.validate_items(&items)?;
         self.repository.bf_mexists(key, items).await
     }
 
     /// Insert items with options (BF.INSERT)
-    pub async fn bf_insert(&self, key: &str, options: BloomInsertOptions, items: Vec<String>) -> Result<BloomInsertResult, CacheError> {
+    pub async fn bf_insert(
+        &self,
+        key: &str,
+        options: BloomInsertOptions,
+        items: Vec<String>,
+    ) -> Result<BloomInsertResult, CacheError> {
         self.validate_key(key)?;
         self.validate_items(&items)?;
         self.validate_bloom_insert_options(&options)?;
@@ -97,13 +114,22 @@ impl BloomService {
     }
 
     /// Begin incremental save of a Bloom filter (BF.SCANDUMP)
-    pub async fn bf_scandump(&self, key: &str, iterator: u64) -> Result<BloomScanDumpResult, CacheError> {
+    pub async fn bf_scandump(
+        &self,
+        key: &str,
+        iterator: u64,
+    ) -> Result<BloomScanDumpResult, CacheError> {
         self.validate_key(key)?;
         self.repository.bf_scandump(key, iterator).await
     }
 
     /// Restore a Bloom filter from a dump (BF.LOADCHUNK)
-    pub async fn bf_loadchunk(&self, key: &str, iterator: u64, data: &[u8]) -> Result<BloomLoadChunkResult, CacheError> {
+    pub async fn bf_loadchunk(
+        &self,
+        key: &str,
+        iterator: u64,
+        data: &[u8],
+    ) -> Result<BloomLoadChunkResult, CacheError> {
         self.validate_key(key)?;
         self.repository.bf_loadchunk(key, iterator, data).await
     }
@@ -111,7 +137,11 @@ impl BloomService {
     // ==================== Cuckoo Filter Operations ====================
 
     /// Create a new Cuckoo filter (CF.RESERVE)
-    pub async fn cf_reserve(&self, key: &str, options: CuckooReserveOptions) -> Result<CuckooReserveResult, CacheError> {
+    pub async fn cf_reserve(
+        &self,
+        key: &str,
+        options: CuckooReserveOptions,
+    ) -> Result<CuckooReserveResult, CacheError> {
         self.validate_key(key)?;
         self.validate_cuckoo_reserve_options(&options)?;
         self.repository.cf_reserve(key, options).await
@@ -132,7 +162,12 @@ impl BloomService {
     }
 
     /// Insert items with options (CF.INSERT)
-    pub async fn cf_insert(&self, key: &str, options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+    pub async fn cf_insert(
+        &self,
+        key: &str,
+        options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError> {
         self.validate_key(key)?;
         self.validate_items(&items)?;
         self.validate_cuckoo_insert_options(&options)?;
@@ -140,7 +175,12 @@ impl BloomService {
     }
 
     /// Insert items only if they don't exist (CF.INSERTNX)
-    pub async fn cf_insertnx(&self, key: &str, options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+    pub async fn cf_insertnx(
+        &self,
+        key: &str,
+        options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError> {
         self.validate_key(key)?;
         self.validate_items(&items)?;
         self.validate_cuckoo_insert_options(&options)?;
@@ -155,7 +195,11 @@ impl BloomService {
     }
 
     /// Check if multiple items exist (CF.MEXISTS)
-    pub async fn cf_mexists(&self, key: &str, items: Vec<String>) -> Result<CuckooExistsResult, CacheError> {
+    pub async fn cf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<CuckooExistsResult, CacheError> {
         self.validate_key(key)?;
         self.validate_items(&items)?;
         self.repository.cf_mexists(key, items).await
@@ -182,13 +226,22 @@ impl BloomService {
     }
 
     /// Begin incremental save of a Cuckoo filter (CF.SCANDUMP)
-    pub async fn cf_scandump(&self, key: &str, iterator: u64) -> Result<CuckooScanDumpResult, CacheError> {
+    pub async fn cf_scandump(
+        &self,
+        key: &str,
+        iterator: u64,
+    ) -> Result<CuckooScanDumpResult, CacheError> {
         self.validate_key(key)?;
         self.repository.cf_scandump(key, iterator).await
     }
 
     /// Restore a Cuckoo filter from a dump (CF.LOADCHUNK)
-    pub async fn cf_loadchunk(&self, key: &str, iterator: u64, data: &[u8]) -> Result<CuckooLoadChunkResult, CacheError> {
+    pub async fn cf_loadchunk(
+        &self,
+        key: &str,
+        iterator: u64,
+        data: &[u8],
+    ) -> Result<CuckooLoadChunkResult, CacheError> {
         self.validate_key(key)?;
         self.repository.cf_loadchunk(key, iterator, data).await
     }
@@ -200,7 +253,9 @@ impl BloomService {
             return Err(CacheError::InvalidInput("Key cannot be empty".to_string()));
         }
         if key.len() > MAX_KEY_LENGTH {
-            return Err(CacheError::InvalidInput("Key too long (max 512MB)".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Key too long (max 512MB)".to_string(),
+            ));
         }
         Ok(())
     }
@@ -214,7 +269,9 @@ impl BloomService {
 
     fn validate_items(&self, items: &[String]) -> Result<(), CacheError> {
         if items.is_empty() {
-            return Err(CacheError::InvalidInput("Items list cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Items list cannot be empty".to_string(),
+            ));
         }
         for item in items {
             if item.is_empty() {
@@ -224,69 +281,103 @@ impl BloomService {
         Ok(())
     }
 
-    fn validate_bloom_reserve_options(&self, options: &BloomReserveOptions) -> Result<(), CacheError> {
+    fn validate_bloom_reserve_options(
+        &self,
+        options: &BloomReserveOptions,
+    ) -> Result<(), CacheError> {
         if options.error_rate <= 0.0 || options.error_rate >= 1.0 {
-            return Err(CacheError::InvalidInput("Error rate must be between 0 and 1 (exclusive)".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Error rate must be between 0 and 1 (exclusive)".to_string(),
+            ));
         }
         if options.capacity == 0 {
-            return Err(CacheError::InvalidInput("Capacity must be greater than 0".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Capacity must be greater than 0".to_string(),
+            ));
         }
         // NONSCALING and EXPANSION are mutually exclusive
         if options.nonscaling && options.expansion.is_some() {
-            return Err(CacheError::InvalidInput("NONSCALING and EXPANSION options are mutually exclusive".to_string()));
+            return Err(CacheError::InvalidInput(
+                "NONSCALING and EXPANSION options are mutually exclusive".to_string(),
+            ));
         }
         Ok(())
     }
 
-    fn validate_bloom_insert_options(&self, options: &BloomInsertOptions) -> Result<(), CacheError> {
+    fn validate_bloom_insert_options(
+        &self,
+        options: &BloomInsertOptions,
+    ) -> Result<(), CacheError> {
         // Validate capacity if provided
-        if let Some(capacity) = options.capacity {
-            if capacity == 0 {
-                return Err(CacheError::InvalidInput("Capacity must be greater than 0".to_string()));
-            }
+        if let Some(capacity) = options.capacity
+            && capacity == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "Capacity must be greater than 0".to_string(),
+            ));
         }
         // Validate error rate if provided
-        if let Some(error_rate) = options.error_rate {
-            if error_rate <= 0.0 || error_rate >= 1.0 {
-                return Err(CacheError::InvalidInput("Error rate must be between 0 and 1 (exclusive)".to_string()));
-            }
+        if let Some(error_rate) = options.error_rate
+            && (error_rate <= 0.0 || error_rate >= 1.0)
+        {
+            return Err(CacheError::InvalidInput(
+                "Error rate must be between 0 and 1 (exclusive)".to_string(),
+            ));
         }
         // NONSCALING and EXPANSION are mutually exclusive
         if options.nonscaling && options.expansion.is_some() {
-            return Err(CacheError::InvalidInput("NONSCALING and EXPANSION options are mutually exclusive".to_string()));
+            return Err(CacheError::InvalidInput(
+                "NONSCALING and EXPANSION options are mutually exclusive".to_string(),
+            ));
         }
         Ok(())
     }
 
-    fn validate_cuckoo_reserve_options(&self, options: &CuckooReserveOptions) -> Result<(), CacheError> {
+    fn validate_cuckoo_reserve_options(
+        &self,
+        options: &CuckooReserveOptions,
+    ) -> Result<(), CacheError> {
         if options.capacity == 0 {
-            return Err(CacheError::InvalidInput("Capacity must be greater than 0".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Capacity must be greater than 0".to_string(),
+            ));
         }
         // Validate optional fields if provided
-        if let Some(bucket_size) = options.bucket_size {
-            if bucket_size == 0 {
-                return Err(CacheError::InvalidInput("Bucket size must be greater than 0".to_string()));
-            }
+        if let Some(bucket_size) = options.bucket_size
+            && bucket_size == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "Bucket size must be greater than 0".to_string(),
+            ));
         }
-        if let Some(max_iterations) = options.max_iterations {
-            if max_iterations == 0 {
-                return Err(CacheError::InvalidInput("Max iterations must be greater than 0".to_string()));
-            }
+        if let Some(max_iterations) = options.max_iterations
+            && max_iterations == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "Max iterations must be greater than 0".to_string(),
+            ));
         }
-        if let Some(expansion) = options.expansion {
-            if expansion == 0 {
-                return Err(CacheError::InvalidInput("Expansion must be greater than 0".to_string()));
-            }
+        if let Some(expansion) = options.expansion
+            && expansion == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "Expansion must be greater than 0".to_string(),
+            ));
         }
         Ok(())
     }
 
-    fn validate_cuckoo_insert_options(&self, options: &CuckooInsertOptions) -> Result<(), CacheError> {
+    fn validate_cuckoo_insert_options(
+        &self,
+        options: &CuckooInsertOptions,
+    ) -> Result<(), CacheError> {
         // Validate capacity if provided
-        if let Some(capacity) = options.capacity {
-            if capacity == 0 {
-                return Err(CacheError::InvalidInput("Capacity must be greater than 0".to_string()));
-            }
+        if let Some(capacity) = options.capacity
+            && capacity == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "Capacity must be greater than 0".to_string(),
+            ));
         }
         Ok(())
     }
@@ -316,30 +407,65 @@ mod tests {
 
     #[async_trait]
     impl BloomRepository for MockBloomRepository {
-        async fn bf_reserve(&self, key: &str, _options: BloomReserveOptions) -> Result<BloomReserveResult, CacheError> {
+        async fn bf_reserve(
+            &self,
+            key: &str,
+            _options: BloomReserveOptions,
+        ) -> Result<BloomReserveResult, CacheError> {
             *self.bf_reserve_called.lock().unwrap() = true;
-            Ok(BloomReserveResult { key: key.to_string(), success: true })
+            Ok(BloomReserveResult {
+                key: key.to_string(),
+                success: true,
+            })
         }
 
         async fn bf_add(&self, key: &str, _item: &str) -> Result<BloomAddResult, CacheError> {
             *self.bf_add_called.lock().unwrap() = true;
-            Ok(BloomAddResult { key: key.to_string(), results: vec![true] })
+            Ok(BloomAddResult {
+                key: key.to_string(),
+                results: vec![true],
+            })
         }
 
-        async fn bf_madd(&self, key: &str, items: Vec<String>) -> Result<BloomAddResult, CacheError> {
-            Ok(BloomAddResult { key: key.to_string(), results: vec![true; items.len()] })
+        async fn bf_madd(
+            &self,
+            key: &str,
+            items: Vec<String>,
+        ) -> Result<BloomAddResult, CacheError> {
+            Ok(BloomAddResult {
+                key: key.to_string(),
+                results: vec![true; items.len()],
+            })
         }
 
         async fn bf_exists(&self, key: &str, _item: &str) -> Result<BloomExistsResult, CacheError> {
-            Ok(BloomExistsResult { key: key.to_string(), results: vec![true] })
+            Ok(BloomExistsResult {
+                key: key.to_string(),
+                results: vec![true],
+            })
         }
 
-        async fn bf_mexists(&self, key: &str, items: Vec<String>) -> Result<BloomExistsResult, CacheError> {
-            Ok(BloomExistsResult { key: key.to_string(), results: vec![true; items.len()] })
+        async fn bf_mexists(
+            &self,
+            key: &str,
+            items: Vec<String>,
+        ) -> Result<BloomExistsResult, CacheError> {
+            Ok(BloomExistsResult {
+                key: key.to_string(),
+                results: vec![true; items.len()],
+            })
         }
 
-        async fn bf_insert(&self, key: &str, _options: BloomInsertOptions, items: Vec<String>) -> Result<BloomInsertResult, CacheError> {
-            Ok(BloomInsertResult { key: key.to_string(), results: vec![true; items.len()] })
+        async fn bf_insert(
+            &self,
+            key: &str,
+            _options: BloomInsertOptions,
+            items: Vec<String>,
+        ) -> Result<BloomInsertResult, CacheError> {
+            Ok(BloomInsertResult {
+                key: key.to_string(),
+                results: vec![true; items.len()],
+            })
         }
 
         async fn bf_info(&self, _key: &str) -> Result<BloomInfo, CacheError> {
@@ -353,52 +479,119 @@ mod tests {
         }
 
         async fn bf_card(&self, key: &str) -> Result<BloomCardResult, CacheError> {
-            Ok(BloomCardResult { key: key.to_string(), cardinality: 100 })
+            Ok(BloomCardResult {
+                key: key.to_string(),
+                cardinality: 100,
+            })
         }
 
-        async fn bf_scandump(&self, _key: &str, _iterator: u64) -> Result<BloomScanDumpResult, CacheError> {
-            Ok(BloomScanDumpResult { iterator: 0, data: None })
+        async fn bf_scandump(
+            &self,
+            _key: &str,
+            _iterator: u64,
+        ) -> Result<BloomScanDumpResult, CacheError> {
+            Ok(BloomScanDumpResult {
+                iterator: 0,
+                data: None,
+            })
         }
 
-        async fn bf_loadchunk(&self, key: &str, _iterator: u64, _data: &[u8]) -> Result<BloomLoadChunkResult, CacheError> {
-            Ok(BloomLoadChunkResult { key: key.to_string(), success: true })
+        async fn bf_loadchunk(
+            &self,
+            key: &str,
+            _iterator: u64,
+            _data: &[u8],
+        ) -> Result<BloomLoadChunkResult, CacheError> {
+            Ok(BloomLoadChunkResult {
+                key: key.to_string(),
+                success: true,
+            })
         }
 
-        async fn cf_reserve(&self, key: &str, _options: CuckooReserveOptions) -> Result<CuckooReserveResult, CacheError> {
-            Ok(CuckooReserveResult { key: key.to_string(), success: true })
+        async fn cf_reserve(
+            &self,
+            key: &str,
+            _options: CuckooReserveOptions,
+        ) -> Result<CuckooReserveResult, CacheError> {
+            Ok(CuckooReserveResult {
+                key: key.to_string(),
+                success: true,
+            })
         }
 
         async fn cf_add(&self, key: &str, _item: &str) -> Result<CuckooAddResult, CacheError> {
             *self.cf_add_called.lock().unwrap() = true;
-            Ok(CuckooAddResult { key: key.to_string(), added: true })
+            Ok(CuckooAddResult {
+                key: key.to_string(),
+                added: true,
+            })
         }
 
         async fn cf_addnx(&self, key: &str, _item: &str) -> Result<CuckooAddResult, CacheError> {
-            Ok(CuckooAddResult { key: key.to_string(), added: true })
+            Ok(CuckooAddResult {
+                key: key.to_string(),
+                added: true,
+            })
         }
 
-        async fn cf_insert(&self, key: &str, _options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
-            Ok(CuckooInsertResult { key: key.to_string(), results: vec![true; items.len()] })
+        async fn cf_insert(
+            &self,
+            key: &str,
+            _options: CuckooInsertOptions,
+            items: Vec<String>,
+        ) -> Result<CuckooInsertResult, CacheError> {
+            Ok(CuckooInsertResult {
+                key: key.to_string(),
+                results: vec![true; items.len()],
+            })
         }
 
-        async fn cf_insertnx(&self, key: &str, _options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
-            Ok(CuckooInsertResult { key: key.to_string(), results: vec![true; items.len()] })
+        async fn cf_insertnx(
+            &self,
+            key: &str,
+            _options: CuckooInsertOptions,
+            items: Vec<String>,
+        ) -> Result<CuckooInsertResult, CacheError> {
+            Ok(CuckooInsertResult {
+                key: key.to_string(),
+                results: vec![true; items.len()],
+            })
         }
 
-        async fn cf_exists(&self, key: &str, _item: &str) -> Result<CuckooExistsResult, CacheError> {
-            Ok(CuckooExistsResult { key: key.to_string(), results: vec![true] })
+        async fn cf_exists(
+            &self,
+            key: &str,
+            _item: &str,
+        ) -> Result<CuckooExistsResult, CacheError> {
+            Ok(CuckooExistsResult {
+                key: key.to_string(),
+                results: vec![true],
+            })
         }
 
-        async fn cf_mexists(&self, key: &str, items: Vec<String>) -> Result<CuckooExistsResult, CacheError> {
-            Ok(CuckooExistsResult { key: key.to_string(), results: vec![true; items.len()] })
+        async fn cf_mexists(
+            &self,
+            key: &str,
+            items: Vec<String>,
+        ) -> Result<CuckooExistsResult, CacheError> {
+            Ok(CuckooExistsResult {
+                key: key.to_string(),
+                results: vec![true; items.len()],
+            })
         }
 
         async fn cf_del(&self, key: &str, _item: &str) -> Result<CuckooDelResult, CacheError> {
-            Ok(CuckooDelResult { key: key.to_string(), deleted: true })
+            Ok(CuckooDelResult {
+                key: key.to_string(),
+                deleted: true,
+            })
         }
 
         async fn cf_count(&self, key: &str, _item: &str) -> Result<CuckooCountResult, CacheError> {
-            Ok(CuckooCountResult { key: key.to_string(), count: 1 })
+            Ok(CuckooCountResult {
+                key: key.to_string(),
+                count: 1,
+            })
         }
 
         async fn cf_info(&self, _key: &str) -> Result<CuckooInfo, CacheError> {
@@ -414,12 +607,27 @@ mod tests {
             })
         }
 
-        async fn cf_scandump(&self, _key: &str, _iterator: u64) -> Result<CuckooScanDumpResult, CacheError> {
-            Ok(CuckooScanDumpResult { iterator: 0, data: None })
+        async fn cf_scandump(
+            &self,
+            _key: &str,
+            _iterator: u64,
+        ) -> Result<CuckooScanDumpResult, CacheError> {
+            Ok(CuckooScanDumpResult {
+                iterator: 0,
+                data: None,
+            })
         }
 
-        async fn cf_loadchunk(&self, key: &str, _iterator: u64, _data: &[u8]) -> Result<CuckooLoadChunkResult, CacheError> {
-            Ok(CuckooLoadChunkResult { key: key.to_string(), success: true })
+        async fn cf_loadchunk(
+            &self,
+            key: &str,
+            _iterator: u64,
+            _data: &[u8],
+        ) -> Result<CuckooLoadChunkResult, CacheError> {
+            Ok(CuckooLoadChunkResult {
+                key: key.to_string(),
+                success: true,
+            })
         }
     }
 
@@ -428,35 +636,55 @@ mod tests {
         let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
 
         // Empty key should fail
-        let result = service.bf_reserve("", BloomReserveOptions {
-            error_rate: 0.01,
-            capacity: 1000,
-            ..Default::default()
-        }).await;
+        let result = service
+            .bf_reserve(
+                "",
+                BloomReserveOptions {
+                    error_rate: 0.01,
+                    capacity: 1000,
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_err());
 
         // Invalid error rate should fail
-        let result = service.bf_reserve("key", BloomReserveOptions {
-            error_rate: 0.0,
-            capacity: 1000,
-            ..Default::default()
-        }).await;
+        let result = service
+            .bf_reserve(
+                "key",
+                BloomReserveOptions {
+                    error_rate: 0.0,
+                    capacity: 1000,
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_err());
 
         // Zero capacity should fail
-        let result = service.bf_reserve("key", BloomReserveOptions {
-            error_rate: 0.01,
-            capacity: 0,
-            ..Default::default()
-        }).await;
+        let result = service
+            .bf_reserve(
+                "key",
+                BloomReserveOptions {
+                    error_rate: 0.01,
+                    capacity: 0,
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_err());
 
         // Valid options should succeed
-        let result = service.bf_reserve("key", BloomReserveOptions {
-            error_rate: 0.01,
-            capacity: 1000,
-            ..Default::default()
-        }).await;
+        let result = service
+            .bf_reserve(
+                "key",
+                BloomReserveOptions {
+                    error_rate: 0.01,
+                    capacity: 1000,
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -475,17 +703,27 @@ mod tests {
         let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
 
         // Zero capacity should fail
-        let result = service.cf_reserve("key", CuckooReserveOptions {
-            capacity: 0,
-            ..Default::default()
-        }).await;
+        let result = service
+            .cf_reserve(
+                "key",
+                CuckooReserveOptions {
+                    capacity: 0,
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_err());
 
         // Valid options should succeed
-        let result = service.cf_reserve("key", CuckooReserveOptions {
-            capacity: 1000,
-            ..Default::default()
-        }).await;
+        let result = service
+            .cf_reserve(
+                "key",
+                CuckooReserveOptions {
+                    capacity: 1000,
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -502,7 +740,9 @@ mod tests {
         assert!(result.is_err());
 
         // Valid items should succeed
-        let result = service.bf_madd("key", vec!["item1".to_string(), "item2".to_string()]).await;
+        let result = service
+            .bf_madd("key", vec!["item1".to_string(), "item2".to_string()])
+            .await;
         assert!(result.is_ok());
     }
 
@@ -511,12 +751,17 @@ mod tests {
         let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
 
         // NONSCALING + EXPANSION should fail
-        let result = service.bf_reserve("key", BloomReserveOptions {
-            error_rate: 0.01,
-            capacity: 1000,
-            nonscaling: true,
-            expansion: Some(2),
-        }).await;
+        let result = service
+            .bf_reserve(
+                "key",
+                BloomReserveOptions {
+                    error_rate: 0.01,
+                    capacity: 1000,
+                    nonscaling: true,
+                    expansion: Some(2),
+                },
+            )
+            .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
@@ -527,40 +772,70 @@ mod tests {
         let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
 
         // Zero capacity should fail
-        let result = service.bf_insert("key", BloomInsertOptions {
-            capacity: Some(0),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .bf_insert(
+                "key",
+                BloomInsertOptions {
+                    capacity: Some(0),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_err());
 
         // Invalid error rate should fail
-        let result = service.bf_insert("key", BloomInsertOptions {
-            error_rate: Some(0.0),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .bf_insert(
+                "key",
+                BloomInsertOptions {
+                    error_rate: Some(0.0),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_err());
 
         // Error rate >= 1.0 should fail
-        let result = service.bf_insert("key", BloomInsertOptions {
-            error_rate: Some(1.0),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .bf_insert(
+                "key",
+                BloomInsertOptions {
+                    error_rate: Some(1.0),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_err());
 
         // NONSCALING + EXPANSION should fail
-        let result = service.bf_insert("key", BloomInsertOptions {
-            nonscaling: true,
-            expansion: Some(2),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .bf_insert(
+                "key",
+                BloomInsertOptions {
+                    nonscaling: true,
+                    expansion: Some(2),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_err());
 
         // Valid options should succeed
-        let result = service.bf_insert("key", BloomInsertOptions {
-            capacity: Some(1000),
-            error_rate: Some(0.01),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .bf_insert(
+                "key",
+                BloomInsertOptions {
+                    capacity: Some(1000),
+                    error_rate: Some(0.01),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -569,36 +844,56 @@ mod tests {
         let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
 
         // Zero bucket_size should fail
-        let result = service.cf_reserve("key", CuckooReserveOptions {
-            capacity: 1000,
-            bucket_size: Some(0),
-            ..Default::default()
-        }).await;
+        let result = service
+            .cf_reserve(
+                "key",
+                CuckooReserveOptions {
+                    capacity: 1000,
+                    bucket_size: Some(0),
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_err());
 
         // Zero max_iterations should fail
-        let result = service.cf_reserve("key", CuckooReserveOptions {
-            capacity: 1000,
-            max_iterations: Some(0),
-            ..Default::default()
-        }).await;
+        let result = service
+            .cf_reserve(
+                "key",
+                CuckooReserveOptions {
+                    capacity: 1000,
+                    max_iterations: Some(0),
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_err());
 
         // Zero expansion should fail
-        let result = service.cf_reserve("key", CuckooReserveOptions {
-            capacity: 1000,
-            expansion: Some(0),
-            ..Default::default()
-        }).await;
+        let result = service
+            .cf_reserve(
+                "key",
+                CuckooReserveOptions {
+                    capacity: 1000,
+                    expansion: Some(0),
+                    ..Default::default()
+                },
+            )
+            .await;
         assert!(result.is_err());
 
         // Valid options should succeed
-        let result = service.cf_reserve("key", CuckooReserveOptions {
-            capacity: 1000,
-            bucket_size: Some(2),
-            max_iterations: Some(20),
-            expansion: Some(1),
-        }).await;
+        let result = service
+            .cf_reserve(
+                "key",
+                CuckooReserveOptions {
+                    capacity: 1000,
+                    bucket_size: Some(2),
+                    max_iterations: Some(20),
+                    expansion: Some(1),
+                },
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -635,17 +930,29 @@ mod tests {
         let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
 
         // Zero capacity should fail
-        let result = service.cf_insert("key", CuckooInsertOptions {
-            capacity: Some(0),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .cf_insert(
+                "key",
+                CuckooInsertOptions {
+                    capacity: Some(0),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_err());
 
         // Valid options should succeed
-        let result = service.cf_insert("key", CuckooInsertOptions {
-            capacity: Some(1000),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .cf_insert(
+                "key",
+                CuckooInsertOptions {
+                    capacity: Some(1000),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -654,17 +961,29 @@ mod tests {
         let service = BloomService::new_with_repository(Arc::new(MockBloomRepository::new()));
 
         // Zero capacity should fail
-        let result = service.cf_insertnx("key", CuckooInsertOptions {
-            capacity: Some(0),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .cf_insertnx(
+                "key",
+                CuckooInsertOptions {
+                    capacity: Some(0),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_err());
 
         // Valid options should succeed
-        let result = service.cf_insertnx("key", CuckooInsertOptions {
-            capacity: Some(1000),
-            ..Default::default()
-        }, vec!["item".to_string()]).await;
+        let result = service
+            .cf_insertnx(
+                "key",
+                CuckooInsertOptions {
+                    capacity: Some(1000),
+                    ..Default::default()
+                },
+                vec!["item".to_string()],
+            )
+            .await;
         assert!(result.is_ok());
     }
 }

@@ -2,12 +2,7 @@
 //!
 //! Adds unique request IDs to all requests for tracing.
 
-use axum::{
-    extract::Request,
-    http::HeaderValue,
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
 use uuid::Uuid;
 
 /// Header name for request ID
@@ -23,14 +18,18 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
         .map_or_else(|| Uuid::new_v4().to_string(), String::from);
 
     // Add to request extensions for handlers to access
-    request.extensions_mut().insert(RequestId(request_id.clone()));
+    request
+        .extensions_mut()
+        .insert(RequestId(request_id.clone()));
 
     // Process request
     let mut response = next.run(request).await;
 
     // Add request ID to response headers - UUID strings are always valid ASCII
     if let Ok(header_value) = HeaderValue::from_str(&request_id) {
-        response.headers_mut().insert(REQUEST_ID_HEADER, header_value);
+        response
+            .headers_mut()
+            .insert(REQUEST_ID_HEADER, header_value);
     }
 
     response
@@ -43,8 +42,8 @@ pub struct RequestId(pub String);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{middleware, routing::get, Router};
     use axum::http::{Request, StatusCode};
+    use axum::{Router, middleware, routing::get};
     use tower::ServiceExt;
 
     async fn ok_handler() -> StatusCode {
@@ -58,7 +57,12 @@ mod tests {
             .layer(middleware::from_fn(request_id_middleware));
 
         let response = app
-            .oneshot(Request::builder().uri("/").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .expect("response");
 
@@ -83,7 +87,10 @@ mod tests {
             .expect("response");
 
         assert_eq!(
-            response.headers().get(REQUEST_ID_HEADER).and_then(|v| v.to_str().ok()),
+            response
+                .headers()
+                .get(REQUEST_ID_HEADER)
+                .and_then(|v| v.to_str().ok()),
             Some("fixed-id")
         );
     }

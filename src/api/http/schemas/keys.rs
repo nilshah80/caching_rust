@@ -353,6 +353,95 @@ pub struct KeyInfoResponse {
     pub ref_count: Option<u64>,
 }
 
+/// Sort order for SORT command
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum SortOrderSchema {
+    #[default]
+    Asc,
+    Desc,
+}
+
+/// Request body for SORT / SORT_RO operations
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+pub struct SortRequest {
+    /// BY pattern for external key sorting
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+
+    /// GET patterns to retrieve external key values
+    #[serde(default)]
+    pub get: Vec<String>,
+
+    /// Offset for LIMIT
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i64>,
+
+    /// Count for LIMIT
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<i64>,
+
+    /// Sort order (ASC or DESC)
+    #[serde(default)]
+    pub order: SortOrderSchema,
+
+    /// Sort alphabetically instead of numerically
+    #[serde(default)]
+    pub alpha: bool,
+}
+
+/// Request body for SORT...STORE operation
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+pub struct SortStoreRequest {
+    /// Destination key to store sorted results
+    #[validate(length(min = 1, message = "Destination key is required"))]
+    pub destination: String,
+
+    /// Sort options
+    #[serde(flatten)]
+    pub options: SortRequest,
+}
+
+/// Response for SORT / SORT_RO operations
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SortResponse {
+    /// Sorted values (None for nil entries from GET patterns)
+    pub values: Vec<Option<String>>,
+}
+
+/// Response for SORT...STORE operation
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SortStoreResponse {
+    /// Number of elements stored
+    pub count: i64,
+}
+
+impl From<SortOrderSchema> for crate::domain::repositories::SortOrder {
+    fn from(schema: SortOrderSchema) -> Self {
+        match schema {
+            SortOrderSchema::Asc => crate::domain::repositories::SortOrder::Asc,
+            SortOrderSchema::Desc => crate::domain::repositories::SortOrder::Desc,
+        }
+    }
+}
+
+impl SortRequest {
+    /// Convert to domain SortOptions
+    pub fn into_sort_options(self) -> crate::domain::repositories::SortOptions {
+        let limit = match (self.offset, self.count) {
+            (Some(offset), Some(count)) => Some((offset, count)),
+            _ => None,
+        };
+        crate::domain::repositories::SortOptions {
+            by: self.by,
+            get: self.get,
+            limit,
+            order: self.order.into(),
+            alpha: self.alpha,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,5 +466,39 @@ mod tests {
             key_type: None,
         };
         assert_eq!(params.cursor, 0);
+    }
+
+    #[test]
+    fn test_sort_store_request_empty_destination_fails_validation() {
+        let req = SortStoreRequest {
+            destination: "".to_string(),
+            options: SortRequest {
+                by: None,
+                get: vec![],
+                offset: None,
+                count: None,
+                order: SortOrderSchema::Asc,
+                alpha: false,
+            },
+        };
+        let result = req.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sort_store_request_valid_passes_validation() {
+        let req = SortStoreRequest {
+            destination: "dest_key".to_string(),
+            options: SortRequest {
+                by: None,
+                get: vec![],
+                offset: None,
+                count: None,
+                order: SortOrderSchema::Asc,
+                alpha: false,
+            },
+        };
+        let result = req.validate();
+        assert!(result.is_ok());
     }
 }

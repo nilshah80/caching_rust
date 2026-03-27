@@ -4,14 +4,13 @@
 //! (CMS, TopK) and core Redis commands (HyperLogLog).
 
 use async_trait::async_trait;
-use redis::{cmd, Value};
+use redis::{Value, cmd};
 use std::sync::Arc;
 
 use crate::domain::entities::{
-    CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult,
-    PfAddResult, PfCountResult, PfMergeResult,
-    TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo, TopKItem, TopKListResult,
-    TopKQueryResult, TopKReserveResult,
+    CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult, PfAddResult,
+    PfCountResult, PfMergeResult, TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo,
+    TopKItem, TopKListResult, TopKQueryResult, TopKReserveResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::ProbabilisticRepository;
@@ -32,12 +31,10 @@ impl RedisProbabilisticRepository {
     fn extract_u64(value: &Value) -> u64 {
         match value {
             Value::Int(i) => *i as u64,
-            Value::BulkString(bytes) => {
-                String::from_utf8_lossy(bytes)
-                    .trim()
-                    .parse::<u64>()
-                    .unwrap_or(0)
-            }
+            Value::BulkString(bytes) => String::from_utf8_lossy(bytes)
+                .trim()
+                .parse::<u64>()
+                .unwrap_or(0),
             _ => 0,
         }
     }
@@ -46,12 +43,10 @@ impl RedisProbabilisticRepository {
     fn extract_f64(value: &Value) -> f64 {
         match value {
             Value::Double(f) => *f,
-            Value::BulkString(bytes) => {
-                String::from_utf8_lossy(bytes)
-                    .trim()
-                    .parse::<f64>()
-                    .unwrap_or(0.0)
-            }
+            Value::BulkString(bytes) => String::from_utf8_lossy(bytes)
+                .trim()
+                .parse::<f64>()
+                .unwrap_or(0.0),
             Value::Int(i) => *i as f64,
             _ => 0.0,
         }
@@ -94,7 +89,9 @@ impl RedisProbabilisticRepository {
 
                 Ok(info)
             }
-            _ => Err(CacheError::Internal("Invalid CMS.INFO response".to_string())),
+            _ => Err(CacheError::Internal(
+                "Invalid CMS.INFO response".to_string(),
+            )),
         }
     }
 
@@ -127,7 +124,9 @@ impl RedisProbabilisticRepository {
 
                 Ok(info)
             }
-            _ => Err(CacheError::Internal("Invalid TOPK.INFO response".to_string())),
+            _ => Err(CacheError::Internal(
+                "Invalid TOPK.INFO response".to_string(),
+            )),
         }
     }
 }
@@ -136,7 +135,12 @@ impl RedisProbabilisticRepository {
 impl ProbabilisticRepository for RedisProbabilisticRepository {
     // ==================== Count-Min Sketch Operations ====================
 
-    async fn cms_init_by_dim(&self, key: &str, width: u64, depth: u64) -> Result<CmsInitResult, CacheError> {
+    async fn cms_init_by_dim(
+        &self,
+        key: &str,
+        width: u64,
+        depth: u64,
+    ) -> Result<CmsInitResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let result: Value = cmd("CMS.INITBYDIM")
@@ -155,7 +159,12 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         })
     }
 
-    async fn cms_init_by_prob(&self, key: &str, error: f64, probability: f64) -> Result<CmsInitResult, CacheError> {
+    async fn cms_init_by_prob(
+        &self,
+        key: &str,
+        error: f64,
+        probability: f64,
+    ) -> Result<CmsInitResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let result: Value = cmd("CMS.INITBYPROB")
@@ -174,7 +183,11 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         })
     }
 
-    async fn cms_incr_by(&self, key: &str, items: Vec<(String, u64)>) -> Result<CmsIncrByResult, CacheError> {
+    async fn cms_incr_by(
+        &self,
+        key: &str,
+        items: Vec<(String, u64)>,
+    ) -> Result<CmsIncrByResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut command = cmd("CMS.INCRBY");
@@ -224,7 +237,12 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         })
     }
 
-    async fn cms_merge(&self, dest: &str, sources: Vec<String>, weights: Option<Vec<u64>>) -> Result<CmsMergeResult, CacheError> {
+    async fn cms_merge(
+        &self,
+        dest: &str,
+        sources: Vec<String>,
+        weights: Option<Vec<u64>>,
+    ) -> Result<CmsMergeResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut command = cmd("CMS.MERGE");
@@ -267,7 +285,14 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
 
     // ==================== Top-K Operations ====================
 
-    async fn topk_reserve(&self, key: &str, k: u64, width: Option<u64>, depth: Option<u64>, decay: Option<f64>) -> Result<TopKReserveResult, CacheError> {
+    async fn topk_reserve(
+        &self,
+        key: &str,
+        k: u64,
+        width: Option<u64>,
+        depth: Option<u64>,
+        decay: Option<f64>,
+    ) -> Result<TopKReserveResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut command = cmd("TOPK.RESERVE");
@@ -321,7 +346,11 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         })
     }
 
-    async fn topk_incr_by(&self, key: &str, items: Vec<(String, u64)>) -> Result<TopKIncrByResult, CacheError> {
+    async fn topk_incr_by(
+        &self,
+        key: &str,
+        items: Vec<(String, u64)>,
+    ) -> Result<TopKIncrByResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut command = cmd("TOPK.INCRBY");
@@ -346,7 +375,11 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         })
     }
 
-    async fn topk_query(&self, key: &str, items: Vec<String>) -> Result<TopKQueryResult, CacheError> {
+    async fn topk_query(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<TopKQueryResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut command = cmd("TOPK.QUERY");
@@ -371,7 +404,11 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         })
     }
 
-    async fn topk_count(&self, key: &str, items: Vec<String>) -> Result<TopKCountResult, CacheError> {
+    async fn topk_count(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<TopKCountResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut command = cmd("TOPK.COUNT");
@@ -491,13 +528,14 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
             .await
             .map_err(CacheError::from)?;
 
-        Ok(PfCountResult {
-            keys,
-            count,
-        })
+        Ok(PfCountResult { keys, count })
     }
 
-    async fn pf_merge(&self, dest: &str, sources: Vec<String>) -> Result<PfMergeResult, CacheError> {
+    async fn pf_merge(
+        &self,
+        dest: &str,
+        sources: Vec<String>,
+    ) -> Result<PfMergeResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut command = cmd("PFMERGE");
@@ -524,15 +562,27 @@ mod tests {
 
     #[test]
     fn test_extract_u64() {
-        assert_eq!(RedisProbabilisticRepository::extract_u64(&Value::Int(42)), 42);
-        assert_eq!(RedisProbabilisticRepository::extract_u64(&Value::BulkString(b"100".to_vec())), 100);
+        assert_eq!(
+            RedisProbabilisticRepository::extract_u64(&Value::Int(42)),
+            42
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_u64(&Value::BulkString(b"100".to_vec())),
+            100
+        );
         assert_eq!(RedisProbabilisticRepository::extract_u64(&Value::Nil), 0);
     }
 
     #[test]
     fn test_extract_f64() {
-        assert_eq!(RedisProbabilisticRepository::extract_f64(&Value::Double(0.9)), 0.9);
-        assert_eq!(RedisProbabilisticRepository::extract_f64(&Value::Int(1)), 1.0);
+        assert_eq!(
+            RedisProbabilisticRepository::extract_f64(&Value::Double(0.9)),
+            0.9
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_f64(&Value::Int(1)),
+            1.0
+        );
     }
 
     #[test]
@@ -541,7 +591,10 @@ mod tests {
             RedisProbabilisticRepository::extract_string(&Value::BulkString(b"test".to_vec())),
             Some("test".to_string())
         );
-        assert_eq!(RedisProbabilisticRepository::extract_string(&Value::Nil), None);
+        assert_eq!(
+            RedisProbabilisticRepository::extract_string(&Value::Nil),
+            None
+        );
     }
 
     #[test]

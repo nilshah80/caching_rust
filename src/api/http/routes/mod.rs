@@ -14,13 +14,13 @@ mod lists;
 mod openapi;
 mod probabilistic;
 mod pubsub;
+mod scripting;
 mod search;
 mod sets;
 mod sorted_sets;
 mod streams;
 mod strings;
 mod transactions;
-mod scripting;
 
 pub use admin::admin_routes;
 pub use bitmaps::bitmap_routes;
@@ -33,17 +33,17 @@ pub use keys::key_routes;
 pub use lists::list_routes;
 pub use openapi::openapi_routes;
 pub use probabilistic::{cms_routes, hyperloglog_routes, topk_routes};
+pub use pubsub::pubsub_routes;
+pub use scripting::scripting_routes;
 pub use search::search_routes;
 pub use sets::set_routes;
 pub use sorted_sets::sorted_set_routes;
-pub use pubsub::pubsub_routes;
 pub use streams::{stream_admin_routes, stream_routes};
 pub use strings::string_routes;
 pub use transactions::transaction_routes;
-pub use scripting::scripting_routes;
 
-use axum::Router;
 use crate::shared::app_state::AppState;
+use axum::Router;
 
 /// Build the complete API router based on detected capabilities
 pub fn build_router(state: AppState) -> Router {
@@ -75,9 +75,7 @@ pub fn build_router(state: AppState) -> Router {
 
     // Conditionally add stream routes (Redis 5.0+)
     if capabilities.features.streams {
-        router = router
-            .merge(stream_routes())
-            .merge(stream_admin_routes());
+        router = router.merge(stream_routes()).merge(stream_admin_routes());
     }
 
     // Conditionally add JSON routes (requires RedisJSON module)
@@ -123,7 +121,9 @@ pub fn build_router(state: AppState) -> Router {
 mod tests {
     use super::*;
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
-    use crate::test_support::{test_state_with_bloom_repo, test_state_with_json_repo, test_state_with_search_repo};
+    use crate::test_support::{
+        test_state_with_bloom_repo, test_state_with_json_repo, test_state_with_search_repo,
+    };
     use axum::http::Request;
     use std::sync::Arc;
     use tower::ServiceExt;
@@ -133,7 +133,12 @@ mod tests {
         let (state, _) = test_state_with_json_repo();
         let app = build_router(state);
         let response = app
-            .oneshot(Request::builder().uri("/health").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .expect("response");
         assert_eq!(response.status(), axum::http::StatusCode::OK);

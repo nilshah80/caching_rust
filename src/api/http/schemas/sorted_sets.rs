@@ -3,7 +3,7 @@
 //! Request and response types for sorted set (ZSET) API endpoints.
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 /// A member with its score
@@ -232,7 +232,11 @@ pub struct ZBPopRequest {
     #[validate(length(min = 1, message = "At least one key is required"))]
     pub keys: Vec<String>,
     /// Timeout in seconds (server-enforced max 30s)
-    #[validate(range(min = 1, max = 30, message = "Timeout must be between 1 and 30 seconds"))]
+    #[validate(range(
+        min = 1,
+        max = 30,
+        message = "Timeout must be between 1 and 30 seconds"
+    ))]
     pub timeout_seconds: u32,
 }
 
@@ -257,7 +261,11 @@ pub struct ZBMPopRequest {
     /// Direction: "min" or "max"
     pub direction: String,
     /// Timeout in seconds (server-enforced max 30s)
-    #[validate(range(min = 1, max = 30, message = "Timeout must be between 1 and 30 seconds"))]
+    #[validate(range(
+        min = 1,
+        max = 30,
+        message = "Timeout must be between 1 and 30 seconds"
+    ))]
     pub timeout_seconds: u32,
     /// Number of elements to pop
     pub count: Option<i64>,
@@ -276,16 +284,12 @@ pub struct ZRandMemberQuery {
 /// Aggregate function for set operations
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ZAggregateDto {
+    #[default]
     Sum,
     Min,
     Max,
-}
-
-impl Default for ZAggregateDto {
-    fn default() -> Self {
-        ZAggregateDto::Sum
-    }
 }
 
 /// Options for set algebra operations (ZUNION, ZINTER)
@@ -527,6 +531,18 @@ pub struct ZScanResponse {
     pub members: Vec<ScoredMemberDto>,
 }
 
+/// Query parameters for BZPOPMIN/BZPOPMAX SSE streaming endpoints
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct ZBPopStreamQuery {
+    /// Number of seconds between polls (default: 5, max: 30)
+    #[serde(default = "default_zpop_poll_seconds")]
+    pub poll_seconds: Option<u32>,
+}
+
+fn default_zpop_poll_seconds() -> Option<u32> {
+    Some(5)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,7 +558,8 @@ mod tests {
 
     #[test]
     fn test_zadd_request_with_options() {
-        let json = r#"{"members": [{"member": "a", "score": 1.0}], "options": {"nx": true, "ch": true}}"#;
+        let json =
+            r#"{"members": [{"member": "a", "score": 1.0}], "options": {"nx": true, "ch": true}}"#;
         let req: ZAddRequest = serde_json::from_str(json).unwrap();
         let opts = req.options.unwrap();
         assert!(opts.nx);
@@ -610,5 +627,91 @@ mod tests {
     fn test_aggregate_default() {
         let agg = ZAggregateDto::default();
         assert!(matches!(agg, ZAggregateDto::Sum));
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use validator::Validate;
+
+    #[test]
+    fn zbpop_empty_keys_fails() {
+        let req = ZBPopRequest {
+            keys: vec![],
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn zbpop_timeout_zero_fails() {
+        let req = ZBPopRequest {
+            keys: vec!["k1".into()],
+            timeout_seconds: 0,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn zbpop_timeout_31_fails() {
+        let req = ZBPopRequest {
+            keys: vec!["k1".into()],
+            timeout_seconds: 31,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn zbpop_valid_passes() {
+        let req = ZBPopRequest {
+            keys: vec!["k1".into()],
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn zbmpop_empty_keys_fails() {
+        let req = ZBMPopRequest {
+            keys: vec![],
+            direction: "min".into(),
+            timeout_seconds: 5,
+            count: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn zbmpop_timeout_zero_fails() {
+        let req = ZBMPopRequest {
+            keys: vec!["k1".into()],
+            direction: "min".into(),
+            timeout_seconds: 0,
+            count: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn zbmpop_timeout_31_fails() {
+        let req = ZBMPopRequest {
+            keys: vec!["k1".into()],
+            direction: "min".into(),
+            timeout_seconds: 31,
+            count: None,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn zbmpop_valid_passes() {
+        let req = ZBMPopRequest {
+            keys: vec!["k1".into()],
+            direction: "min".into(),
+            timeout_seconds: 5,
+            count: None,
+        };
+        assert!(req.validate().is_ok());
     }
 }

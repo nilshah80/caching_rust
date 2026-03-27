@@ -337,3 +337,42 @@ mod tests {
         assert!(json.contains("null"));
     }
 }
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use validator::Validate;
+
+    #[test]
+    fn evalsha_short_sha_fails() {
+        let req = EvalShaRequest {
+            sha: "abc123".into(),
+            keys: vec![],
+            args: vec![],
+            readonly: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn evalsha_long_sha_fails() {
+        let req = EvalShaRequest {
+            sha: "a".repeat(41),
+            keys: vec![],
+            args: vec![],
+            readonly: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn evalsha_valid_40_char_sha_passes() {
+        let req = EvalShaRequest {
+            sha: "6b1bf486c81ceb7edf3c093f4a73d3e117c0b169".into(),
+            keys: vec![],
+            args: vec![],
+            readonly: false,
+        };
+        assert!(req.validate().is_ok());
+    }
+}

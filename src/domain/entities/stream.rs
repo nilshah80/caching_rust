@@ -207,7 +207,7 @@ pub struct XReadOptions {
 }
 
 /// Options for XREADGROUP command
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct XReadGroupOptions {
     /// Maximum number of entries to return per stream
     pub count: Option<i64>,
@@ -217,16 +217,6 @@ pub struct XReadGroupOptions {
 
     /// Don't update last-delivered-id when acknowledging
     pub no_ack: bool,
-}
-
-impl Default for XReadGroupOptions {
-    fn default() -> Self {
-        Self {
-            count: None,
-            block_ms: None,
-            no_ack: false,
-        }
-    }
 }
 
 /// Options for XGROUP CREATE command
@@ -240,7 +230,7 @@ pub struct XGroupCreateOptions {
 }
 
 /// Options for XCLAIM command
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct XClaimOptions {
     /// Minimum idle time in milliseconds to claim
     pub min_idle_time_ms: i64,
@@ -264,37 +254,14 @@ pub struct XClaimOptions {
     pub last_id: Option<String>,
 }
 
-impl Default for XClaimOptions {
-    fn default() -> Self {
-        Self {
-            min_idle_time_ms: 0,
-            idle_ms: None,
-            time_ms: None,
-            retry_count: None,
-            force: false,
-            just_id: false,
-            last_id: None,
-        }
-    }
-}
-
 /// Options for XAUTOCLAIM command
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct XAutoClaimOptions {
     /// Maximum number of entries to claim
     pub count: Option<i64>,
 
     /// Only return IDs, not full entries
     pub just_id: bool,
-}
-
-impl Default for XAutoClaimOptions {
-    fn default() -> Self {
-        Self {
-            count: None,
-            just_id: false,
-        }
-    }
 }
 
 /// Options for XPENDING command

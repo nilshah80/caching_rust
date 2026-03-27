@@ -3,19 +3,26 @@
 //! HTTP endpoints for Redis list operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{
+        IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{delete, get, patch, post},
-    Json, Router,
 };
+use std::time::Duration;
+
+use validator::Validate;
 
 use crate::api::http::schemas::lists::{
-    BlockingMoveRequest, BlockingPopRequest, BlockingPopResponse,
-    ListIndexQuery, ListIndexResponse, ListInsertRequest, ListInsertResponse,
-    ListLengthResponse, ListMoveRequest, ListMoveResponse, ListPopRequest, ListPopResponse,
-    ListPosQuery, ListPosResponse, ListPushRequest, ListPushResponse, ListRangeQuery,
-    ListRemoveRequest, ListRemoveResponse, ListSetRequest, ListTrimRequest,
+    BLMPopRequest, BLMPopStreamQuery, BlockingMoveRequest, BlockingPopRequest, BlockingPopResponse,
+    BlockingPopStreamQuery, LMPopRequest, LMPopResponse, ListIndexQuery, ListIndexResponse,
+    ListInsertRequest, ListInsertResponse, ListLengthResponse, ListMoveRequest, ListMoveResponse,
+    ListPopRequest, ListPopResponse, ListPosQuery, ListPosResponse, ListPushRequest,
+    ListPushResponse, ListRangeQuery, ListRemoveRequest, ListRemoveResponse, ListSetRequest,
+    ListTrimRequest,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::LPosOptions;
@@ -53,6 +60,12 @@ pub fn list_routes() -> Router<AppState> {
         .route("/api/v1/lists/brpop", post(brpop))
         .route("/api/v1/lists/blmove", post(blmove))
         .route("/api/v1/lists/brpoplpush", post(brpop_lpush))
+        .route("/api/v1/lists/mpop", post(lmpop))
+        .route("/api/v1/lists/blmpop", post(blmpop))
+        // SSE streaming endpoints for blocking operations
+        .route("/api/v1/lists/{key}/blpop/stream", get(blpop_stream))
+        .route("/api/v1/lists/{key}/brpop/stream", get(brpop_stream))
+        .route("/api/v1/lists/blmpop/stream", get(blmpop_stream))
 }
 
 // ========== Push Operations ==========
@@ -232,7 +245,10 @@ pub async fn lrange(
     Path(key): Path<String>,
     Query(query): Query<ListRangeQuery>,
 ) -> Result<Json<ApiResponse<Vec<String>>>, CacheError> {
-    let values = state.list_service.lrange(&key, query.start, query.stop).await?;
+    let values = state
+        .list_service
+        .lrange(&key, query.start, query.stop)
+        .await?;
     Ok(Json(ApiResponse::success(values)))
 }
 
@@ -418,7 +434,10 @@ pub async fn lpos(
         rank: query.rank,
         max_len: query.max_len,
     };
-    let indices = state.list_service.lpos(&key, &query.element, options).await?;
+    let indices = state
+        .list_service
+        .lpos(&key, &query.element, options)
+        .await?;
     Ok(Json(ApiResponse::success(ListPosResponse { indices })))
 }
 
@@ -498,6 +517,8 @@ pub async fn blpop(
     State(state): State<AppState>,
     Json(req): Json<BlockingPopRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .list_service
         .blpop(req.keys, req.timeout_seconds)
@@ -532,6 +553,8 @@ pub async fn brpop(
     State(state): State<AppState>,
     Json(req): Json<BlockingPopRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .list_service
         .brpop(req.keys, req.timeout_seconds)
@@ -566,6 +589,8 @@ pub async fn blmove(
     State(state): State<AppState>,
     Json(req): Json<BlockingMoveRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .list_service
         .blmove(
@@ -578,7 +603,10 @@ pub async fn blmove(
         .await?;
 
     match result {
-        Some(value) => Ok(Json(ApiResponse::success(ListMoveResponse { value: Some(value) })).into_response()),
+        Some(value) => Ok(Json(ApiResponse::success(ListMoveResponse {
+            value: Some(value),
+        }))
+        .into_response()),
         None => Ok(StatusCode::NO_CONTENT.into_response()),
     }
 }
@@ -602,15 +630,282 @@ pub async fn brpop_lpush(
     State(state): State<AppState>,
     Json(req): Json<BlockingMoveRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .list_service
         .brpop_lpush(&req.source, &req.destination, req.timeout_seconds)
         .await?;
 
     match result {
-        Some(value) => Ok(Json(ApiResponse::success(ListMoveResponse { value: Some(value) })).into_response()),
+        Some(value) => Ok(Json(ApiResponse::success(ListMoveResponse {
+            value: Some(value),
+        }))
+        .into_response()),
         None => Ok(StatusCode::NO_CONTENT.into_response()),
     }
+}
+
+// ========== LMPOP / BLMPOP Operations ==========
+
+/// POST /api/v1/lists/mpop
+///
+/// Atomically pop elements from the first non-empty list (LMPOP, Redis 7.0+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/lists/mpop",
+    request_body = LMPopRequest,
+    responses(
+        (status = 200, description = "Elements popped", body = LMPopResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Lists"
+)]
+pub async fn lmpop(
+    State(state): State<AppState>,
+    Json(req): Json<LMPopRequest>,
+) -> Result<Json<ApiResponse<LMPopResponse>>, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let result = state
+        .list_service
+        .lmpop(req.keys, req.direction.into(), req.count)
+        .await?;
+
+    match result {
+        Some(pop_result) => Ok(Json(ApiResponse::success(LMPopResponse {
+            key: Some(pop_result.key),
+            elements: pop_result.elements,
+        }))),
+        None => Ok(Json(ApiResponse::success(LMPopResponse {
+            key: None,
+            elements: vec![],
+        }))),
+    }
+}
+
+/// POST /api/v1/lists/blmpop
+///
+/// Blocking pop from the first non-empty list (BLMPOP, Redis 7.0+).
+/// Returns 204 No Content if timeout is reached.
+#[utoipa::path(
+    post,
+    path = "/api/v1/lists/blmpop",
+    request_body = BLMPopRequest,
+    responses(
+        (status = 200, description = "Elements popped", body = LMPopResponse),
+        (status = 204, description = "Timeout reached, no data available"),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Lists"
+)]
+pub async fn blmpop(
+    State(state): State<AppState>,
+    Json(req): Json<BLMPopRequest>,
+) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let result = state
+        .list_service
+        .blmpop(
+            req.keys,
+            req.direction.into(),
+            req.timeout_seconds,
+            req.count,
+        )
+        .await?;
+
+    match result {
+        Some(pop_result) => Ok(Json(ApiResponse::success(LMPopResponse {
+            key: Some(pop_result.key),
+            elements: pop_result.elements,
+        }))
+        .into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
+}
+
+// ========== SSE Streaming Endpoints ==========
+
+/// GET /api/v1/lists/{key}/blpop/stream
+///
+/// SSE stream that repeatedly polls BLPOP and streams results.
+#[utoipa::path(
+    get,
+    path = "/api/v1/lists/{key}/blpop/stream",
+    params(
+        ("key" = String, Path, description = "The list key"),
+        BlockingPopStreamQuery
+    ),
+    responses(
+        (status = 200, description = "SSE stream of BLPOP results", content_type = "text/event-stream"),
+        (status = 503, description = "Too many concurrent SSE connections")
+    ),
+    tag = "Lists"
+)]
+pub async fn blpop_stream(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(query): Query<BlockingPopStreamQuery>,
+) -> Result<impl IntoResponse, CacheError> {
+    let permit = state
+        .sse_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| CacheError::SubscriptionLimitReached)?;
+
+    let poll_secs = query.poll_seconds.unwrap_or(5).clamp(1, 30);
+    let stream = async_stream::stream! {
+        let _permit = permit;
+        loop {
+            match state.list_service.blpop(vec![key.clone()], poll_secs).await {
+                Ok(Some(result)) => {
+                    let data = serde_json::json!({"key": result.key, "value": result.value});
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("message").data(data.to_string()));
+                }
+                Ok(None) => {
+                    // Timeout, continue polling
+                }
+                Err(e) => {
+                    let error_data = serde_json::json!({"error": e.to_string()}).to_string();
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("error").data(error_data));
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    ))
+}
+
+/// GET /api/v1/lists/{key}/brpop/stream
+///
+/// SSE stream that repeatedly polls BRPOP and streams results.
+#[utoipa::path(
+    get,
+    path = "/api/v1/lists/{key}/brpop/stream",
+    params(
+        ("key" = String, Path, description = "The list key"),
+        BlockingPopStreamQuery
+    ),
+    responses(
+        (status = 200, description = "SSE stream of BRPOP results", content_type = "text/event-stream"),
+        (status = 503, description = "Too many concurrent SSE connections")
+    ),
+    tag = "Lists"
+)]
+pub async fn brpop_stream(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(query): Query<BlockingPopStreamQuery>,
+) -> Result<impl IntoResponse, CacheError> {
+    let permit = state
+        .sse_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| CacheError::SubscriptionLimitReached)?;
+
+    let poll_secs = query.poll_seconds.unwrap_or(5).clamp(1, 30);
+    let stream = async_stream::stream! {
+        let _permit = permit;
+        loop {
+            match state.list_service.brpop(vec![key.clone()], poll_secs).await {
+                Ok(Some(result)) => {
+                    let data = serde_json::json!({"key": result.key, "value": result.value});
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("message").data(data.to_string()));
+                }
+                Ok(None) => {
+                    // Timeout, continue polling
+                }
+                Err(e) => {
+                    let error_data = serde_json::json!({"error": e.to_string()}).to_string();
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("error").data(error_data));
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    ))
+}
+
+/// GET /api/v1/lists/blmpop/stream
+///
+/// SSE stream that repeatedly polls BLMPOP and streams results.
+#[utoipa::path(
+    get,
+    path = "/api/v1/lists/blmpop/stream",
+    params(
+        BLMPopStreamQuery
+    ),
+    responses(
+        (status = 200, description = "SSE stream of BLMPOP results", content_type = "text/event-stream"),
+        (status = 503, description = "Too many concurrent SSE connections")
+    ),
+    tag = "Lists"
+)]
+pub async fn blmpop_stream(
+    State(state): State<AppState>,
+    Query(query): Query<BLMPopStreamQuery>,
+) -> Result<impl IntoResponse, CacheError> {
+    let permit = state
+        .sse_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| CacheError::SubscriptionLimitReached)?;
+
+    let poll_secs = query.poll_seconds.unwrap_or(5).clamp(1, 30);
+    let direction = query.direction;
+    let count = query.count;
+    let keys: Vec<String> = query
+        .keys
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if keys.is_empty() {
+        return Err(CacheError::InvalidInput(
+            "At least one key is required".to_string(),
+        ));
+    }
+
+    let stream = async_stream::stream! {
+        let _permit = permit;
+        loop {
+            match state.list_service.blmpop(keys.clone(), direction.into(), poll_secs, count).await {
+                Ok(Some(result)) => {
+                    let data = serde_json::json!({"key": result.key, "elements": result.elements});
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("message").data(data.to_string()));
+                }
+                Ok(None) => {
+                    // Timeout, continue polling
+                }
+                Err(e) => {
+                    let error_data = serde_json::json!({"error": e.to_string()}).to_string();
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("error").data(error_data));
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    ))
 }
 
 #[cfg(test)]
@@ -618,10 +913,10 @@ mod tests {
     use super::*;
     use crate::api::http::schemas::lists::{InsertPositionParam, ListDirectionParam};
     use crate::test_support::test_state_with_list_repo;
+    use axum::Json;
     use axum::extract::{Path, Query, State};
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
-    use axum::Json;
 
     #[tokio::test]
     async fn test_list_routes_push_pop() {
@@ -738,10 +1033,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(
-            response.0.data.expect("data").value.as_deref(),
-            Some("z")
-        );
+        assert_eq!(response.0.data.expect("data").value.as_deref(), Some("z"));
     }
 
     #[tokio::test]
@@ -800,10 +1092,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_routes_push_variants_and_pos() {
         let (state, list_repo) = test_state_with_list_repo();
-        list_repo.insert(
-            "existing",
-            vec!["a".to_string(), "b".to_string()],
-        );
+        list_repo.insert("existing", vec!["a".to_string(), "b".to_string()]);
         let state = State(state);
 
         let response = lpush_x(
@@ -846,10 +1135,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_routes_move_and_blocking() {
         let (state, list_repo) = test_state_with_list_repo();
-        list_repo.insert(
-            "source",
-            vec!["a".to_string(), "b".to_string()],
-        );
+        list_repo.insert("source", vec!["a".to_string(), "b".to_string()]);
         let state = State(state);
 
         let moved = lmove(
@@ -983,6 +1269,112 @@ mod tests {
                 src_direction: ListDirectionParam::Right,
                 dst_direction: ListDirectionParam::Left,
                 timeout_seconds: 1,
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_lmpop_returns_data() {
+        let (state, list_repo) = test_state_with_list_repo();
+        list_repo.insert(
+            "mpop1",
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        );
+        let state = State(state);
+
+        let response = lmpop(
+            state.clone(),
+            Json(LMPopRequest {
+                keys: vec!["mpop1".to_string()],
+                direction: ListDirectionParam::Left,
+                count: Some(2),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.key.as_deref(), Some("mpop1"));
+        assert_eq!(data.elements, vec!["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn test_lmpop_empty_returns_none() {
+        let (state, _list_repo) = test_state_with_list_repo();
+        let state = State(state);
+
+        let response = lmpop(
+            state,
+            Json(LMPopRequest {
+                keys: vec!["empty".to_string()],
+                direction: ListDirectionParam::Left,
+                count: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert!(data.key.is_none());
+        assert!(data.elements.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_lmpop_multi_key_skips_empty() {
+        let (state, list_repo) = test_state_with_list_repo();
+        list_repo.insert("mpop2", vec!["x".to_string(), "y".to_string()]);
+        let state = State(state);
+
+        let response = lmpop(
+            state,
+            Json(LMPopRequest {
+                keys: vec!["nonexistent".to_string(), "mpop2".to_string()],
+                direction: ListDirectionParam::Right,
+                count: Some(1),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = response.0.data.expect("data");
+        assert_eq!(data.key.as_deref(), Some("mpop2"));
+        assert_eq!(data.elements, vec!["y"]);
+    }
+
+    #[tokio::test]
+    async fn test_blmpop_returns_data() {
+        let (state, list_repo) = test_state_with_list_repo();
+        list_repo.insert("blmpop1", vec!["p".to_string(), "q".to_string()]);
+        let state = State(state);
+
+        let response = blmpop(
+            state,
+            Json(BLMPopRequest {
+                keys: vec!["blmpop1".to_string()],
+                direction: ListDirectionParam::Left,
+                timeout_seconds: 5,
+                count: Some(1),
+            }),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_blmpop_returns_204_on_empty() {
+        let (state, _list_repo) = test_state_with_list_repo();
+        let state = State(state);
+
+        let response = blmpop(
+            state,
+            Json(BLMPopRequest {
+                keys: vec!["empty".to_string()],
+                direction: ListDirectionParam::Left,
+                timeout_seconds: 1,
+                count: None,
             }),
         )
         .await

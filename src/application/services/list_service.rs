@@ -7,18 +7,16 @@ use std::time::Duration;
 
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    BlockingPopResult, InsertPosition, ListDirection, ListRepository, LPosOptions,
+    BlockingPopResult, InsertPosition, LMPopResult, LPosOptions, ListDirection, ListRepository,
 };
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisListRepository;
-
-/// Maximum allowed timeout for blocking operations (30 seconds)
-const MAX_BLOCKING_TIMEOUT_SECONDS: u64 = 30;
+use crate::shared::blocking::BlockingTimeoutEnforcer;
 
 /// Service for list operations
 pub struct ListService {
     repository: Arc<dyn ListRepository>,
-    max_blocking_timeout: Duration,
+    timeout_enforcer: BlockingTimeoutEnforcer,
 }
 
 impl ListService {
@@ -31,23 +29,19 @@ impl ListService {
     pub fn new_with_repository(repository: Arc<dyn ListRepository>) -> Self {
         Self {
             repository,
-            max_blocking_timeout: Duration::from_secs(MAX_BLOCKING_TIMEOUT_SECONDS),
+            timeout_enforcer: BlockingTimeoutEnforcer::new(),
         }
     }
 
     /// Set custom max blocking timeout (for testing or configuration)
     pub fn with_max_blocking_timeout(mut self, timeout: Duration) -> Self {
-        self.max_blocking_timeout = timeout;
+        self.timeout_enforcer = BlockingTimeoutEnforcer::with_max(timeout.as_secs());
         self
     }
 
-    /// Enforce maximum timeout for blocking operations
+    /// Enforce timeout bounds for blocking operations
     fn enforce_timeout(&self, requested: Duration) -> Duration {
-        if requested > self.max_blocking_timeout {
-            self.max_blocking_timeout
-        } else {
-            requested
-        }
+        self.timeout_enforcer.enforce(requested)
     }
 
     // ========== Non-blocking operations ==========
@@ -55,7 +49,9 @@ impl ListService {
     /// LPUSH - Insert values at the head of the list
     pub async fn lpush(&self, key: &str, values: Vec<String>) -> Result<i64, CacheError> {
         if values.is_empty() {
-            return Err(CacheError::InvalidInput("Values cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Values cannot be empty".to_string(),
+            ));
         }
         self.repository.lpush(key, &values).await
     }
@@ -63,7 +59,9 @@ impl ListService {
     /// RPUSH - Insert values at the tail of the list
     pub async fn rpush(&self, key: &str, values: Vec<String>) -> Result<i64, CacheError> {
         if values.is_empty() {
-            return Err(CacheError::InvalidInput("Values cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Values cannot be empty".to_string(),
+            ));
         }
         self.repository.rpush(key, &values).await
     }
@@ -71,7 +69,9 @@ impl ListService {
     /// LPUSHX - Insert value at head only if list exists
     pub async fn lpush_x(&self, key: &str, values: Vec<String>) -> Result<i64, CacheError> {
         if values.is_empty() {
-            return Err(CacheError::InvalidInput("Values cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Values cannot be empty".to_string(),
+            ));
         }
         self.repository.lpush_x(key, &values).await
     }
@@ -79,7 +79,9 @@ impl ListService {
     /// RPUSHX - Insert value at tail only if list exists
     pub async fn rpush_x(&self, key: &str, values: Vec<String>) -> Result<i64, CacheError> {
         if values.is_empty() {
-            return Err(CacheError::InvalidInput("Values cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Values cannot be empty".to_string(),
+            ));
         }
         self.repository.rpush_x(key, &values).await
     }
@@ -95,7 +97,12 @@ impl ListService {
     }
 
     /// LRANGE - Get a range of elements from the list
-    pub async fn lrange(&self, key: &str, start: i64, stop: i64) -> Result<Vec<String>, CacheError> {
+    pub async fn lrange(
+        &self,
+        key: &str,
+        start: i64,
+        stop: i64,
+    ) -> Result<Vec<String>, CacheError> {
         self.repository.lrange(key, start, stop).await
     }
 
@@ -153,11 +160,17 @@ impl ListService {
         src_dir: ListDirection,
         dst_dir: ListDirection,
     ) -> Result<Option<String>, CacheError> {
-        self.repository.lmove(source, destination, src_dir, dst_dir).await
+        self.repository
+            .lmove(source, destination, src_dir, dst_dir)
+            .await
     }
 
     /// RPOPLPUSH - Pop from source tail and push to destination head (deprecated, use LMOVE)
-    pub async fn rpop_lpush(&self, source: &str, destination: &str) -> Result<Option<String>, CacheError> {
+    pub async fn rpop_lpush(
+        &self,
+        source: &str,
+        destination: &str,
+    ) -> Result<Option<String>, CacheError> {
         self.repository.rpop_lpush(source, destination).await
     }
 
@@ -202,7 +215,9 @@ impl ListService {
         timeout_seconds: u32,
     ) -> Result<Option<String>, CacheError> {
         let timeout = self.enforce_timeout(Duration::from_secs(timeout_seconds as u64));
-        self.repository.blmove(source, destination, src_dir, dst_dir, timeout).await
+        self.repository
+            .blmove(source, destination, src_dir, dst_dir, timeout)
+            .await
     }
 
     /// BRPOPLPUSH - Blocking pop from source tail and push to destination head (deprecated, use BLMOVE)
@@ -214,7 +229,40 @@ impl ListService {
         timeout_seconds: u32,
     ) -> Result<Option<String>, CacheError> {
         let timeout = self.enforce_timeout(Duration::from_secs(timeout_seconds as u64));
-        self.repository.brpop_lpush(source, destination, timeout).await
+        self.repository
+            .brpop_lpush(source, destination, timeout)
+            .await
+    }
+
+    /// LMPOP - Atomically pop elements from the first non-empty list (Redis 7.0+)
+    pub async fn lmpop(
+        &self,
+        keys: Vec<String>,
+        direction: ListDirection,
+        count: Option<u32>,
+    ) -> Result<Option<LMPopResult>, CacheError> {
+        if keys.is_empty() {
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
+        }
+        self.repository.lmpop(&keys, direction, count).await
+    }
+
+    /// BLMPOP - Blocking pop from the first non-empty list (Redis 7.0+)
+    /// Returns None if timeout is reached
+    pub async fn blmpop(
+        &self,
+        keys: Vec<String>,
+        direction: ListDirection,
+        timeout_seconds: u32,
+        count: Option<u32>,
+    ) -> Result<Option<LMPopResult>, CacheError> {
+        if keys.is_empty() {
+            return Err(CacheError::InvalidInput("Keys cannot be empty".to_string()));
+        }
+        let timeout = self.enforce_timeout(Duration::from_secs(timeout_seconds as u64));
+        self.repository
+            .blmpop(&keys, direction, timeout, count)
+            .await
     }
 }
 
@@ -268,11 +316,17 @@ mod tests {
         let service = ListService::new_with_repository(repo.clone());
 
         // Test LPUSH
-        let len = service.lpush("mylist", vec!["a".to_string(), "b".to_string()]).await.unwrap();
+        let len = service
+            .lpush("mylist", vec!["a".to_string(), "b".to_string()])
+            .await
+            .unwrap();
         assert_eq!(len, 2);
 
         // Test RPUSH
-        let len = service.rpush("mylist", vec!["c".to_string()]).await.unwrap();
+        let len = service
+            .rpush("mylist", vec!["c".to_string()])
+            .await
+            .unwrap();
         assert_eq!(len, 3);
 
         // Test LLEN
@@ -320,10 +374,16 @@ mod tests {
             .unwrap();
         assert_eq!(len, 3);
 
-        let len = service.lpush_x("list", vec!["z".to_string()]).await.unwrap();
+        let len = service
+            .lpush_x("list", vec!["z".to_string()])
+            .await
+            .unwrap();
         assert_eq!(len, 4);
 
-        let len = service.rpush_x("list", vec!["y".to_string()]).await.unwrap();
+        let len = service
+            .rpush_x("list", vec!["y".to_string()])
+            .await
+            .unwrap();
         assert_eq!(len, 5);
 
         let indices = service
@@ -365,10 +425,7 @@ mod tests {
             .unwrap();
         assert_eq!(result.unwrap().value, "one");
 
-        repo.insert(
-            "blocklist2",
-            vec!["three".to_string(), "four".to_string()],
-        );
+        repo.insert("blocklist2", vec!["three".to_string(), "four".to_string()]);
         let result = service
             .brpop(vec!["blocklist2".to_string()], 1)
             .await
@@ -400,5 +457,163 @@ mod tests {
     fn test_list_service_new() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let _service = ListService::new(pool);
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::sync::Arc;
+    use testcontainers::ContainerAsync;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+
+    async fn start_redis() -> (ContainerAsync<Redis>, String) {
+        let container = Redis::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
+        let url = format!("redis://{host}:{port}");
+        (container, url)
+    }
+
+    async fn create_service() -> (ContainerAsync<Redis>, ListService) {
+        let (container, redis_url) = start_redis().await;
+        let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap());
+        let service = ListService::new(pool);
+        (container, service)
+    }
+
+    #[tokio::test]
+    async fn test_blpop_returns_none_on_timeout() {
+        let (_container, service) = create_service().await;
+
+        let start = std::time::Instant::now();
+        let result = service
+            .blpop(vec!["nonexistent_key".to_string()], 1)
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.is_none());
+        assert!(
+            elapsed.as_millis() >= 900,
+            "Expected ~1s wait, got {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_blpop_returns_data_when_available() {
+        let (_container, service) = create_service().await;
+
+        // LPUSH pushes elements to the head; order in list will be [c, b, a]
+        service
+            .lpush(
+                "mylist",
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            )
+            .await
+            .unwrap();
+
+        // BLPOP pops from the head, so it should return "c"
+        let result = service.blpop(vec!["mylist".to_string()], 1).await.unwrap();
+
+        assert!(result.is_some());
+        let pop = result.unwrap();
+        assert_eq!(pop.key, "mylist");
+        assert_eq!(pop.value, "c");
+    }
+
+    #[tokio::test]
+    async fn test_brpop_returns_data_when_available() {
+        let (_container, service) = create_service().await;
+
+        // RPUSH appends to the tail; order in list will be [x, y, z]
+        service
+            .rpush(
+                "mylist",
+                vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            )
+            .await
+            .unwrap();
+
+        // BRPOP pops from the tail, so it should return "z"
+        let result = service.brpop(vec!["mylist".to_string()], 1).await.unwrap();
+
+        assert!(result.is_some());
+        let pop = result.unwrap();
+        assert_eq!(pop.key, "mylist");
+        assert_eq!(pop.value, "z");
+    }
+
+    /// BLMOVE requires Redis 6.2+. The testcontainers default image may be older,
+    /// so these tests skip gracefully if the command is not available.
+    #[tokio::test]
+    async fn test_blmove_returns_none_on_timeout() {
+        let (_container, service) = create_service().await;
+
+        let start = std::time::Instant::now();
+        let result = service
+            .blmove(
+                "empty_source",
+                "dest",
+                ListDirection::Left,
+                ListDirection::Right,
+                1,
+            )
+            .await;
+        let elapsed = start.elapsed();
+
+        match result {
+            Ok(val) => {
+                assert!(val.is_none());
+                assert!(
+                    elapsed.as_millis() >= 900,
+                    "Expected ~1s wait, got {}ms",
+                    elapsed.as_millis()
+                );
+            }
+            Err(CacheError::RedisError(ref e)) if e.to_string().contains("unknown command") => {
+                // BLMOVE not available on this Redis version — skip
+                return;
+            }
+            Err(e) => panic!("Unexpected error: {e}"),
+        }
+    }
+
+    /// BLMOVE requires Redis 6.2+.
+    #[tokio::test]
+    async fn test_blmove_moves_element() {
+        let (_container, service) = create_service().await;
+
+        service
+            .lpush("src_list", vec!["alpha".to_string(), "beta".to_string()])
+            .await
+            .unwrap();
+
+        let result = service
+            .blmove(
+                "src_list",
+                "dst_list",
+                ListDirection::Left,
+                ListDirection::Right,
+                1,
+            )
+            .await;
+
+        match result {
+            Ok(val) => {
+                assert_eq!(val.as_deref(), Some("beta"));
+                let dest_values = service.lrange("dst_list", 0, -1).await.unwrap();
+                assert_eq!(dest_values, vec!["beta"]);
+                let src_values = service.lrange("src_list", 0, -1).await.unwrap();
+                assert_eq!(src_values, vec!["alpha"]);
+            }
+            Err(CacheError::RedisError(ref e)) if e.to_string().contains("unknown command") => {
+                // BLMOVE not available on this Redis version — skip
+                return;
+            }
+            Err(e) => panic!("Unexpected error: {e}"),
+        }
     }
 }

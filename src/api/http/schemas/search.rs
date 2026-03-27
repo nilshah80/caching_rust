@@ -11,9 +11,8 @@ use crate::domain::entities::{
     ExplainResult, GeoFilter, HighlightOptions, IndexAlterResult, IndexCreateOptions,
     IndexCreateResult, IndexDataType, IndexDropResult, IndexInfo, NumericFilter, ProfileResult,
     ProfileType, SearchFieldSchema, SearchFieldType, SearchOptions, SearchResult, SortBy,
-    SpellcheckOptions, SpellcheckResult, SugAddResult, SugDelResult, SugGetOptions,
-    SugLenResult, Suggestion, SummarizeOptions, SynonymGroup, SynonymUpdateResult,
-    VectorFieldOptions,
+    SpellcheckOptions, SpellcheckResult, SugAddResult, SugDelResult, SugGetOptions, SugLenResult,
+    Suggestion, SummarizeOptions, SynonymGroup, SynonymUpdateResult, VectorFieldOptions,
 };
 
 // ==================== Index Operations ====================
@@ -105,10 +104,13 @@ pub struct IndexCreateOptionsDto {
 impl From<IndexCreateOptionsDto> for IndexCreateOptions {
     fn from(dto: IndexCreateOptionsDto) -> Self {
         IndexCreateOptions {
-            on: dto.on.map(|s| match s.to_uppercase().as_str() {
-                "JSON" => IndexDataType::Json,
-                _ => IndexDataType::Hash,
-            }).unwrap_or_default(),
+            on: dto
+                .on
+                .map(|s| match s.to_uppercase().as_str() {
+                    "JSON" => IndexDataType::Json,
+                    _ => IndexDataType::Hash,
+                })
+                .unwrap_or_default(),
             prefixes: dto.prefixes,
             filter: dto.filter,
             language: dto.language,
@@ -188,7 +190,11 @@ pub struct InvalidFieldTypeError(pub String);
 
 impl std::fmt::Display for InvalidFieldTypeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Invalid field type '{}'. Valid types are: TEXT, TAG, NUMERIC, GEO, VECTOR, GEOSHAPE", self.0)
+        write!(
+            f,
+            "Invalid field type '{}'. Valid types are: TEXT, TAG, NUMERIC, GEO, VECTOR, GEOSHAPE",
+            self.0
+        )
     }
 }
 
@@ -488,9 +494,11 @@ impl From<SearchResult> for SearchResponse {
     fn from(result: SearchResult) -> Self {
         SearchResponse {
             total_results: result.total_results,
-            documents: result.documents.into_iter().map(|d| {
-                serde_json::to_value(d).unwrap_or(serde_json::Value::Null)
-            }).collect(),
+            documents: result
+                .documents
+                .into_iter()
+                .map(|d| serde_json::to_value(d).unwrap_or(serde_json::Value::Null))
+                .collect(),
         }
     }
 }
@@ -568,9 +576,11 @@ impl From<AggregateResult> for AggregateResponse {
     fn from(result: AggregateResult) -> Self {
         AggregateResponse {
             total_results: result.total_results,
-            rows: result.rows.into_iter().map(|r| {
-                serde_json::to_value(r).unwrap_or(serde_json::Value::Null)
-            }).collect(),
+            rows: result
+                .rows
+                .into_iter()
+                .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
+                .collect(),
         }
     }
 }
@@ -1022,9 +1032,18 @@ mod tests {
 
     #[test]
     fn test_parse_profile_type() {
-        assert!(matches!(parse_profile_type("SEARCH"), Some(ProfileType::Search)));
-        assert!(matches!(parse_profile_type("search"), Some(ProfileType::Search)));
-        assert!(matches!(parse_profile_type("AGGREGATE"), Some(ProfileType::Aggregate)));
+        assert!(matches!(
+            parse_profile_type("SEARCH"),
+            Some(ProfileType::Search)
+        ));
+        assert!(matches!(
+            parse_profile_type("search"),
+            Some(ProfileType::Search)
+        ));
+        assert!(matches!(
+            parse_profile_type("AGGREGATE"),
+            Some(ProfileType::Aggregate)
+        ));
         assert!(parse_profile_type("invalid").is_none());
     }
 

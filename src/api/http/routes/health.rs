@@ -2,17 +2,13 @@
 //!
 //! Endpoints for liveness and readiness probes.
 
-use axum::{
-    extract::State,
-    routing::get,
-    Json, Router,
-};
+use axum::{Json, Router, extract::State, routing::get};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::shared::app_state::AppState;
-use crate::infrastructure::redis::connection::PoolStats;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
+use crate::infrastructure::redis::connection::PoolStats;
+use crate::shared::app_state::AppState;
 
 /// Health check response
 #[derive(Debug, Serialize, ToSchema)]

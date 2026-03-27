@@ -2,11 +2,7 @@
 //!
 //! Structured logging for HTTP requests and responses.
 
-use axum::{
-    extract::Request,
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, middleware::Next, response::Response};
 use std::time::Instant;
 #[cfg(not(test))]
 use tracing::{info, warn};
@@ -84,8 +80,8 @@ pub async fn logging_middleware(request: Request, next: Next) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{middleware, routing::get, Router};
     use axum::http::{Request, StatusCode};
+    use axum::{Router, middleware, routing::get};
     use tower::ServiceExt;
 
     async fn ok_handler() -> StatusCode {
@@ -110,20 +106,35 @@ mod tests {
 
         let ok = app
             .clone()
-            .oneshot(Request::builder().uri("/ok").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/ok")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .expect("ok response");
         assert_eq!(ok.status(), StatusCode::OK);
 
         let bad = app
             .clone()
-            .oneshot(Request::builder().uri("/bad").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/bad")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .expect("bad response");
         assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
 
         let err = app
-            .oneshot(Request::builder().uri("/err").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/err")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .expect("err response");
         assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);

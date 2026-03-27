@@ -277,7 +277,11 @@ mod tests {
 
     #[test]
     fn test_pubsub_message_new_pmessage() {
-        let msg = PubSubMessage::new_pmessage("user:*".to_string(), "user:123".to_string(), "hello".to_string());
+        let msg = PubSubMessage::new_pmessage(
+            "user:*".to_string(),
+            "user:123".to_string(),
+            "hello".to_string(),
+        );
         assert_eq!(msg.r#type, "pmessage");
         assert_eq!(msg.channel, "user:123");
         assert_eq!(msg.pattern, Some("user:*".to_string()));

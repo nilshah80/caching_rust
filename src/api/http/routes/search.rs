@@ -3,21 +3,20 @@
 //! HTTP endpoints for RediSearch operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, post, put},
-    Json, Router,
 };
 use validator::Validate;
 
 use crate::api::http::schemas::search::{
-    AggregateRequest, AggregateResponse, AliasRequest, AliasResponse,
-    AlterIndexRequest, AlterIndexResponse, CreateIndexRequest, CreateIndexResponse,
-    DictDumpResponse, DictResponse, DictTermsRequest, DropIndexParams, DropIndexResponse,
-    ExplainRequest, ExplainResponse, IndexInfoResponse, ListIndicesResponse,
-    ProfileRequest, ProfileResponse, SearchRequest, SearchResponse,
-    SpellcheckRequest, SpellcheckResponse, SugAddRequest, SugAddResponse, SugDelRequest,
-    SugDelResponse, SugGetParams, SugGetResponse, SugLenResponse, SynonymDumpResponse,
-    SynonymUpdateRequest, SynonymUpdateResponse, parse_profile_type,
+    AggregateRequest, AggregateResponse, AliasRequest, AliasResponse, AlterIndexRequest,
+    AlterIndexResponse, CreateIndexRequest, CreateIndexResponse, DictDumpResponse, DictResponse,
+    DictTermsRequest, DropIndexParams, DropIndexResponse, ExplainRequest, ExplainResponse,
+    IndexInfoResponse, ListIndicesResponse, ProfileRequest, ProfileResponse, SearchRequest,
+    SearchResponse, SpellcheckRequest, SpellcheckResponse, SugAddRequest, SugAddResponse,
+    SugDelRequest, SugDelResponse, SugGetParams, SugGetResponse, SugLenResponse,
+    SynonymDumpResponse, SynonymUpdateRequest, SynonymUpdateResponse, parse_profile_type,
 };
 use crate::domain::entities::{SugAddOptions, SugGetOptions};
 use crate::domain::errors::CacheError;
@@ -49,9 +48,15 @@ pub fn search_routes() -> Router<AppState> {
         .route("/api/v1/search/suggest/{key}/len", get(sug_len))
         // Synonym operations
         .route("/api/v1/search/indices/{index}/synonyms", get(syn_dump))
-        .route("/api/v1/search/indices/{index}/synonyms/{group}", put(syn_update))
+        .route(
+            "/api/v1/search/indices/{index}/synonyms/{group}",
+            put(syn_update),
+        )
         // Spellcheck operations
-        .route("/api/v1/search/indices/{index}/spellcheck", post(spellcheck))
+        .route(
+            "/api/v1/search/indices/{index}/spellcheck",
+            post(spellcheck),
+        )
         // Dictionary operations
         .route("/api/v1/search/dicts/{dict}/terms", post(dict_add))
         .route("/api/v1/search/dicts/{dict}/terms", delete(dict_del))
@@ -83,15 +88,21 @@ async fn create_index(
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
     let options = request.options.into();
-    let schema: Vec<_> = request.schema
+    let schema: Vec<_> = request
+        .schema
         .into_iter()
         .map(|f| f.try_into())
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e: crate::api::http::schemas::search::InvalidFieldTypeError| {
-            CacheError::InvalidInput(e.to_string())
-        })?;
+        .map_err(
+            |e: crate::api::http::schemas::search::InvalidFieldTypeError| {
+                CacheError::InvalidInput(e.to_string())
+            },
+        )?;
 
-    let result = state.search_service.ft_create(&request.index, options, schema).await?;
+    let result = state
+        .search_service
+        .ft_create(&request.index, options, schema)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -191,10 +202,11 @@ async fn alter_index(
     Path(index): Path<String>,
     Json(request): Json<AlterIndexRequest>,
 ) -> Result<Json<ApiResponse<AlterIndexResponse>>, CacheError> {
-    let field = request.field.try_into()
-        .map_err(|e: crate::api::http::schemas::search::InvalidFieldTypeError| {
+    let field = request.field.try_into().map_err(
+        |e: crate::api::http::schemas::search::InvalidFieldTypeError| {
             CacheError::InvalidInput(e.to_string())
-        })?;
+        },
+    )?;
     let result = state.search_service.ft_alter(&index, field).await?;
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -229,7 +241,10 @@ async fn search(
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
     let options = request.options.into();
-    let result = state.search_service.ft_search(&index, &request.query, options).await?;
+    let result = state
+        .search_service
+        .ft_search(&index, &request.query, options)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -262,7 +277,10 @@ async fn aggregate(
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
     let options = request.options.into();
-    let result = state.search_service.ft_aggregate(&index, &request.query, options).await?;
+    let result = state
+        .search_service
+        .ft_aggregate(&index, &request.query, options)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -294,7 +312,10 @@ async fn explain(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.search_service.ft_explain(&index, &request.query, request.dialect).await?;
+    let result = state
+        .search_service
+        .ft_explain(&index, &request.query, request.dialect)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -326,12 +347,24 @@ async fn profile(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let profile_type = parse_profile_type(&request.profile_type).ok_or_else(|| CacheError::InvalidInput("Invalid profile type. Use SEARCH or AGGREGATE".to_string()))?;
+    let profile_type = parse_profile_type(&request.profile_type).ok_or_else(|| {
+        CacheError::InvalidInput("Invalid profile type. Use SEARCH or AGGREGATE".to_string())
+    })?;
 
     let search_opts = request.search_options.map(|o| o.into());
     let agg_opts = request.aggregate_options.map(|o| o.into());
 
-    let result = state.search_service.ft_profile(&index, profile_type, request.limited, &request.query, search_opts, agg_opts).await?;
+    let result = state
+        .search_service
+        .ft_profile(
+            &index,
+            profile_type,
+            request.limited,
+            &request.query,
+            search_opts,
+            agg_opts,
+        )
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -360,7 +393,10 @@ async fn alias_add(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.search_service.ft_aliasadd(&request.alias, &request.index).await?;
+    let result = state
+        .search_service
+        .ft_aliasadd(&request.alias, &request.index)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -452,7 +488,10 @@ async fn sug_add(
         payload: request.payload,
     };
 
-    let result = state.search_service.ft_sugadd(&key, &request.string, request.score, options).await?;
+    let result = state
+        .search_service
+        .ft_sugadd(&key, &request.string, request.score, options)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -521,7 +560,10 @@ async fn sug_del(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.search_service.ft_sugdel(&key, &request.string).await?;
+    let result = state
+        .search_service
+        .ft_sugdel(&key, &request.string)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -572,7 +614,10 @@ async fn syn_dump(
     Path(index): Path<String>,
 ) -> Result<Json<ApiResponse<SynonymDumpResponse>>, CacheError> {
     let groups = state.search_service.ft_syndump(&index).await?;
-    Ok(Json(ApiResponse::new(SynonymDumpResponse { index, groups })))
+    Ok(Json(ApiResponse::new(SynonymDumpResponse {
+        index,
+        groups,
+    })))
 }
 
 /// PUT /api/v1/search/indices/:index/synonyms/:group
@@ -603,7 +648,10 @@ async fn syn_update(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.search_service.ft_synupdate(&index, &group, request.skip_initial_scan, request.terms).await?;
+    let result = state
+        .search_service
+        .ft_synupdate(&index, &group, request.skip_initial_scan, request.terms)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -638,12 +686,12 @@ async fn spellcheck(
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
     let options = request.clone().into();
-    let result = state.search_service.ft_spellcheck(&index, &request.query, options).await?;
+    let result = state
+        .search_service
+        .ft_spellcheck(&index, &request.query, options)
+        .await?;
 
-    Ok(Json(ApiResponse::new(SpellcheckResponse {
-        index,
-        result,
-    })))
+    Ok(Json(ApiResponse::new(SpellcheckResponse { index, result })))
 }
 
 // ==================== Dictionary Operations ====================
@@ -674,7 +722,10 @@ async fn dict_add(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.search_service.ft_dictadd(&dict, request.terms).await?;
+    let result = state
+        .search_service
+        .ft_dictadd(&dict, request.terms)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -705,7 +756,10 @@ async fn dict_del(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let result = state.search_service.ft_dictdel(&dict, request.terms).await?;
+    let result = state
+        .search_service
+        .ft_dictdel(&dict, request.terms)
+        .await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -736,9 +790,9 @@ async fn dict_dump(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_state_with_search_repo;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use crate::test_support::test_state_with_search_repo;
     use tower::ServiceExt;
 
     #[tokio::test]

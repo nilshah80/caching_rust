@@ -2,11 +2,7 @@
 //!
 //! HTTP endpoints for Redis Lua scripting operations.
 
-use axum::{
-    extract::State,
-    routing::post,
-    Json, Router,
-};
+use axum::{Json, Router, extract::State, routing::post};
 use validator::Validate;
 
 use crate::api::http::schemas::scripting::{
@@ -53,7 +49,9 @@ pub async fn eval(
     State(state): State<AppState>,
     Json(request): Json<EvalRequest>,
 ) -> Result<Json<ApiResponse<EvalResponse>>, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let response = state.scripting_service.eval(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -82,7 +80,9 @@ pub async fn evalsha(
     State(state): State<AppState>,
     Json(request): Json<EvalShaRequest>,
 ) -> Result<Json<ApiResponse<EvalResponse>>, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let response = state.scripting_service.evalsha(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -110,7 +110,9 @@ pub async fn script_load(
     State(state): State<AppState>,
     Json(request): Json<ScriptLoadRequest>,
 ) -> Result<Json<ApiResponse<ScriptLoadResponse>>, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let response = state.scripting_service.script_load(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -137,7 +139,9 @@ pub async fn script_exists(
     State(state): State<AppState>,
     Json(request): Json<ScriptExistsRequest>,
 ) -> Result<Json<ApiResponse<ScriptExistsResponse>>, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let response = state.scripting_service.script_exists(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -326,7 +330,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_eval_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = EvalRequest {
             script: "".to_string(),
             keys: Vec::new(),
@@ -339,7 +344,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_eval_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = EvalRequest {
             script: "return 1".to_string(),
             keys: Vec::new(),
@@ -349,13 +355,16 @@ mod tests {
         let result = eval(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_evalsha_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = EvalShaRequest {
             sha: "bad".to_string(),
             keys: Vec::new(),
@@ -368,7 +377,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_evalsha_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = EvalShaRequest {
             sha: "6b1bf486c81ceb7edf3c093f4a73d3e117c0b169".to_string(),
             keys: Vec::new(),
@@ -378,13 +388,16 @@ mod tests {
         let result = evalsha(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_script_load_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = ScriptLoadRequest {
             script: "".to_string(),
         };
@@ -394,20 +407,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_script_load_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = ScriptLoadRequest {
             script: "return 1".to_string(),
         };
         let result = script_load(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_script_exists_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = ScriptExistsRequest { shas: Vec::new() };
         let result = script_exists(State(state), Json(request)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
@@ -415,50 +432,63 @@ mod tests {
 
     #[tokio::test]
     async fn test_script_exists_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = ScriptExistsRequest {
             shas: vec!["6b1bf486c81ceb7edf3c093f4a73d3e117c0b169".to_string()],
         };
         let result = script_exists(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_script_flush_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = ScriptFlushRequest {
             mode: Some(FlushMode::Sync),
         };
         let result = script_flush(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_script_kill_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let result = script_kill(State(state)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_)) | Err(CacheError::ScriptError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
+                | Err(CacheError::ScriptError(_))
         ));
     }
 
     #[tokio::test]
     async fn test_script_debug_service_error_path() {
-        let (state, _string_repo, _key_repo, _admin_repo) = test_state_with_config(Settings::default());
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
         let request = ScriptDebugRequest {
             mode: ScriptDebugMode::No,
         };
         let result = script_debug(State(state), Json(request)).await;
         assert!(matches!(
             result,
-            Err(CacheError::PoolError(_)) | Err(CacheError::ConnectionFailed(_)) | Err(CacheError::RedisError(_))
+            Err(CacheError::PoolError(_))
+                | Err(CacheError::ConnectionFailed(_))
+                | Err(CacheError::RedisError(_))
         ));
     }
 }

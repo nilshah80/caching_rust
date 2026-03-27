@@ -19,7 +19,11 @@ pub trait BloomRepository: Send + Sync {
     // ==================== Bloom Filter Operations ====================
 
     /// Create a new Bloom filter with specified options (BF.RESERVE)
-    async fn bf_reserve(&self, key: &str, options: BloomReserveOptions) -> Result<BloomReserveResult, CacheError>;
+    async fn bf_reserve(
+        &self,
+        key: &str,
+        options: BloomReserveOptions,
+    ) -> Result<BloomReserveResult, CacheError>;
 
     /// Add an item to a Bloom filter (BF.ADD)
     async fn bf_add(&self, key: &str, item: &str) -> Result<BloomAddResult, CacheError>;
@@ -31,10 +35,19 @@ pub trait BloomRepository: Send + Sync {
     async fn bf_exists(&self, key: &str, item: &str) -> Result<BloomExistsResult, CacheError>;
 
     /// Check if multiple items exist in a Bloom filter (BF.MEXISTS)
-    async fn bf_mexists(&self, key: &str, items: Vec<String>) -> Result<BloomExistsResult, CacheError>;
+    async fn bf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<BloomExistsResult, CacheError>;
 
     /// Insert items with options, auto-creating filter if needed (BF.INSERT)
-    async fn bf_insert(&self, key: &str, options: BloomInsertOptions, items: Vec<String>) -> Result<BloomInsertResult, CacheError>;
+    async fn bf_insert(
+        &self,
+        key: &str,
+        options: BloomInsertOptions,
+        items: Vec<String>,
+    ) -> Result<BloomInsertResult, CacheError>;
 
     /// Get information about a Bloom filter (BF.INFO)
     async fn bf_info(&self, key: &str) -> Result<BloomInfo, CacheError>;
@@ -43,15 +56,28 @@ pub trait BloomRepository: Send + Sync {
     async fn bf_card(&self, key: &str) -> Result<BloomCardResult, CacheError>;
 
     /// Begin incremental save of a Bloom filter (BF.SCANDUMP)
-    async fn bf_scandump(&self, key: &str, iterator: u64) -> Result<BloomScanDumpResult, CacheError>;
+    async fn bf_scandump(
+        &self,
+        key: &str,
+        iterator: u64,
+    ) -> Result<BloomScanDumpResult, CacheError>;
 
     /// Restore a Bloom filter from a dump (BF.LOADCHUNK)
-    async fn bf_loadchunk(&self, key: &str, iterator: u64, data: &[u8]) -> Result<BloomLoadChunkResult, CacheError>;
+    async fn bf_loadchunk(
+        &self,
+        key: &str,
+        iterator: u64,
+        data: &[u8],
+    ) -> Result<BloomLoadChunkResult, CacheError>;
 
     // ==================== Cuckoo Filter Operations ====================
 
     /// Create a new Cuckoo filter with specified options (CF.RESERVE)
-    async fn cf_reserve(&self, key: &str, options: CuckooReserveOptions) -> Result<CuckooReserveResult, CacheError>;
+    async fn cf_reserve(
+        &self,
+        key: &str,
+        options: CuckooReserveOptions,
+    ) -> Result<CuckooReserveResult, CacheError>;
 
     /// Add an item to a Cuckoo filter (CF.ADD)
     async fn cf_add(&self, key: &str, item: &str) -> Result<CuckooAddResult, CacheError>;
@@ -60,16 +86,30 @@ pub trait BloomRepository: Send + Sync {
     async fn cf_addnx(&self, key: &str, item: &str) -> Result<CuckooAddResult, CacheError>;
 
     /// Insert items with options (CF.INSERT)
-    async fn cf_insert(&self, key: &str, options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError>;
+    async fn cf_insert(
+        &self,
+        key: &str,
+        options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError>;
 
     /// Insert items only if they don't exist (CF.INSERTNX)
-    async fn cf_insertnx(&self, key: &str, options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError>;
+    async fn cf_insertnx(
+        &self,
+        key: &str,
+        options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError>;
 
     /// Check if an item exists in a Cuckoo filter (CF.EXISTS)
     async fn cf_exists(&self, key: &str, item: &str) -> Result<CuckooExistsResult, CacheError>;
 
     /// Check if multiple items exist in a Cuckoo filter (CF.MEXISTS)
-    async fn cf_mexists(&self, key: &str, items: Vec<String>) -> Result<CuckooExistsResult, CacheError>;
+    async fn cf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<CuckooExistsResult, CacheError>;
 
     /// Delete an item from a Cuckoo filter (CF.DEL)
     async fn cf_del(&self, key: &str, item: &str) -> Result<CuckooDelResult, CacheError>;
@@ -81,8 +121,17 @@ pub trait BloomRepository: Send + Sync {
     async fn cf_info(&self, key: &str) -> Result<CuckooInfo, CacheError>;
 
     /// Begin incremental save of a Cuckoo filter (CF.SCANDUMP)
-    async fn cf_scandump(&self, key: &str, iterator: u64) -> Result<CuckooScanDumpResult, CacheError>;
+    async fn cf_scandump(
+        &self,
+        key: &str,
+        iterator: u64,
+    ) -> Result<CuckooScanDumpResult, CacheError>;
 
     /// Restore a Cuckoo filter from a dump (CF.LOADCHUNK)
-    async fn cf_loadchunk(&self, key: &str, iterator: u64, data: &[u8]) -> Result<CuckooLoadChunkResult, CacheError>;
+    async fn cf_loadchunk(
+        &self,
+        key: &str,
+        iterator: u64,
+        data: &[u8],
+    ) -> Result<CuckooLoadChunkResult, CacheError>;
 }

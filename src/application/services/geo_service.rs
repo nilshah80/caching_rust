@@ -130,7 +130,9 @@ impl GeoService {
         }
         // Validate shape
         Self::validate_search_shape(&shape)?;
-        self.repository.geo_search(key, center, shape, options).await
+        self.repository
+            .geo_search(key, center, shape, options)
+            .await
     }
 
     /// GEOSEARCHSTORE - Search and store results in a destination key
@@ -364,7 +366,10 @@ mod tests {
         let repo = Arc::new(MockGeoRepository::new());
         let service = GeoService::new_with_repository(repo);
 
-        let err = service.geo_hash("", vec!["member".to_string()]).await.unwrap_err();
+        let err = service
+            .geo_hash("", vec!["member".to_string()])
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let err = service.geo_hash("locations", vec![]).await.unwrap_err();

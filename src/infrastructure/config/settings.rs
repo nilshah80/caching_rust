@@ -2,11 +2,11 @@
 //!
 //! Configuration loaded from environment variables.
 
-use serde::Deserialize;
 use config::{Config, Environment};
+use serde::Deserialize;
 
 /// Root settings structure
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Settings {
     pub server: ServerConfig,
     pub redis: RedisConfig,
@@ -316,20 +316,6 @@ impl Default for AdminConfig {
     }
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            redis: RedisConfig::default(),
-            pool: PoolConfig::default(),
-            pubsub: PubSubConfig::default(),
-            blocking: BlockingConfig::default(),
-            admin: AdminConfig::default(),
-            log: LogConfig::default(),
-        }
-    }
-}
-
 impl Settings {
     /// Load settings from environment variables
     pub fn load() -> anyhow::Result<Self> {
@@ -364,11 +350,7 @@ impl Settings {
             .set_default("log.format", "json")?
             // Load from environment with double underscore separator for nested config
             // e.g., ADMIN__API_KEY maps to admin.api_key
-            .add_source(
-                Environment::default()
-                    .separator("__")
-                    .try_parsing(true)
-            )
+            .add_source(Environment::default().separator("__").try_parsing(true))
             .build()?;
 
         let settings: Settings = config.try_deserialize()?;

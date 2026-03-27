@@ -8,116 +8,70 @@ use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::api::http::routes::admin::{
+    AclCatRequest,
+    AclCatResponse,
+    AclDryrunRequest,
+    AclDryrunResponse,
+    AclGenPassRequest,
+    AclGenPassResponse,
+    // ACL operations
+    AclListResponse,
+    AclLogRequest,
+    AclLogResponse,
+    AclUsersResponse,
+    AclWhoamiResponse,
+    ClientGetNameResponse,
+    ClientIdResponse,
+    ClientKillRequest,
+    ClientKillResponse,
+    // Client operations
+    ClientListResponse,
+    ClientPauseRequest,
+    ClientPauseResponse,
+    ClientSetNameRequest,
+    ClientSetNameResponse,
+    ClientUnpauseResponse,
+    // Config operations
+    ConfigGetRequest,
+    ConfigGetResponse,
+    ConfigResetStatResponse,
+    ConfigRewriteResponse,
+    ConfigSetRequest,
+    ConfigSetResponse,
     // Database operations
-    CopyKeyRequest, CopyKeyResponse, MoveKeyRequest, MoveKeyResponse,
-    SwapDbRequest, SwapDbResponse, DbSizeResponse, FlushDbRequest,
+    CopyKeyRequest,
+    CopyKeyResponse,
+    DbSizeResponse,
+    FlushDbRequest,
     // Server info
     LastSaveResponse,
+    LatencyDoctorResponse,
+    LatencyHistoryRequest,
+    LatencyHistoryResponse,
+    LatencyLatestResponse,
+    LatencyResetRequest,
+    LatencyResetResponse,
+    MemoryDoctorResponse,
+    MemoryPurgeResponse,
     // Memory operations
-    MemoryUsageRequest, MemoryDoctorResponse, MemoryPurgeResponse,
-    // Config operations
-    ConfigGetRequest, ConfigGetResponse, ConfigSetRequest, ConfigSetResponse,
-    ConfigRewriteResponse, ConfigResetStatResponse,
+    MemoryUsageRequest,
+    MoveKeyRequest,
+    MoveKeyResponse,
     // Persistence operations
     SaveResponse,
-    // Client operations
-    ClientListResponse, ClientKillRequest, ClientKillResponse,
-    ClientPauseRequest, ClientPauseResponse, ClientUnpauseResponse,
-    ClientSetNameRequest, ClientSetNameResponse, ClientGetNameResponse, ClientIdResponse,
     // Monitoring operations
-    SlowlogGetRequest, SlowlogGetResponse, SlowlogLenResponse, SlowlogResetResponse,
-    LatencyLatestResponse, LatencyHistoryRequest, LatencyHistoryResponse,
-    LatencyDoctorResponse, LatencyResetRequest, LatencyResetResponse,
-    // ACL operations
-    AclListResponse, AclUsersResponse, AclWhoamiResponse,
-    AclCatRequest, AclCatResponse, AclGenPassRequest, AclGenPassResponse,
-    AclLogRequest, AclLogResponse,
+    SlowlogGetRequest,
+    SlowlogGetResponse,
+    SlowlogLenResponse,
+    SlowlogResetResponse,
+    SwapDbRequest,
+    SwapDbResponse,
 };
 // Domain entities used directly in API responses
-use crate::domain::entities::{
-    ServerInfo, ServerTime, MemoryStats, MemoryUsage,
-    ClientInfo, SlowlogEntry, LatencyEvent, AclLogEntry,
-    FlushResult, BgSaveResult, BgRewriteAofResult,
-};
-use crate::api::http::schemas::strings::{
-    AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams,
-    GetRangeResponse, IncrementRequest, IncrementResponse, MGetRequest, MGetResponse,
-    MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
-    SetStringResponse, StrLenResponse,
-};
-use crate::api::http::schemas::common::{KeyInfo, PaginationParams, TtlInfo};
-use crate::api::http::schemas::keys::{
-    ScanParams, DeleteKeysRequest, DeleteKeysResponse, ExistsRequest, ExistsResponse,
-    ExpireRequest, ExpireResponse, TtlResponse, PersistResponse, TypeResponse,
-    RenameRequest, RenameResponse, CopyRequest, CopyResponse, ScanResponse,
-    KeysParams, KeysResponse, TouchRequest, TouchResponse, RandomKeyResponse,
-    DumpResponse, RestoreRequest, RestoreResponse, ObjectInfoResponse, KeyInfoResponse,
-};
-use crate::api::http::schemas::hashes::{
-    GetMultipleFieldsRequest, HashFieldEntry, HashIncrFloatRequest, HashIncrRequest,
-    HashRandomFieldResponse, HashScanResponse, RandomFieldQuery, ScanHashQuery,
-    SetHashNxRequest, SetHashRequest,
-};
-use crate::api::http::schemas::lists::{
-    BlockingMoveRequest, BlockingPopRequest, BlockingPopResponse,
-    InsertPositionParam, ListDirectionParam, ListIndexQuery, ListIndexResponse,
-    ListInsertRequest, ListInsertResponse, ListLengthResponse, ListMoveRequest,
-    ListMoveResponse, ListPopRequest, ListPopResponse, ListPosQuery, ListPosResponse,
-    ListPushRequest, ListPushResponse, ListRangeQuery, ListRemoveRequest,
-    ListRemoveResponse, ListSetRequest, ListTrimRequest,
-};
-use crate::api::http::schemas::sets::{
-    SetAddRequest, SetAddResponse, SetAlgebraRequest, SetAlgebraResponse,
-    SetAlgebraStoreRequest, SetAlgebraStoreResponse, SetCardResponse,
-    SetInterCardRequest, SetInterCardResponse, SetIsMemberRequest, SetIsMemberResponse,
-    SetMIsMemberRequest, SetMIsMemberResponse, SetMembersResponse, SetMoveRequest,
-    SetMoveResponse, SetPopRequest, SetPopResponse, SetRandMemberQuery,
-    SetRandMemberResponse, SetRemoveRequest, SetRemoveResponse, SetScanQuery, SetScanResponse,
-};
-use crate::api::http::schemas::sorted_sets::{
-    LexRangeDto, ScoreRangeDto, ScoredMemberDto, ZAddIncrRequest, ZAddIncrResponse,
-    ZAddOptionsDto, ZAddRequest, ZAddResponse, ZAggregateDto, ZBMPopRequest, ZBPopRequest,
-    ZBPopResponse, ZCardResponse, ZCountRequest, ZCountResponse, ZDiffRequest,
-    ZDiffStoreRequest, ZIncrByRequest, ZIncrByResponse, ZInterCardRequest, ZInterCardResponse,
-    ZLexCountRequest, ZMPopRequest, ZMPopResponse, ZMScoreRequest, ZMScoreResponse,
-    ZPopQuery, ZPopResponse, ZRandMemberQuery, ZRandMemberResponse, ZRangeByLexRequest,
-    ZRangeByLexResponse, ZRangeByScoreRequest, ZRangeQuery, ZRangeResponse,
-    ZRangeStoreRequest, ZRangeStoreResponse, ZRankResponse, ZRemRangeByLexRequest,
-    ZRemRangeByRankRequest, ZRemRangeByScoreRequest, ZRemRangeResponse, ZRemRequest,
-    ZRemResponse, ZScanQuery, ZScanResponse, ZScoreResponse, ZSetAlgebraOptionsDto,
-    ZSetAlgebraRequest, ZSetAlgebraResponse, ZSetAlgebraStoreRequest, ZSetAlgebraStoreResponse,
-};
-use crate::api::http::schemas::streams::{
-    ConsumerCreateRequest, ConsumerGroupCreateRequest, ConsumerGroupCreateResponse,
-    ConsumerGroupSetIdRequest, ConsumerOperationResponse, PendingQuery, StreamAckRequest,
-    StreamAckResponse, StreamAddRequest, StreamAddResponse, StreamAutoClaimRequest,
-    StreamClaimRequest, StreamDeleteRequest, StreamDeleteResponse, StreamEntriesResponse,
-    StreamGroupSubscribeQuery, StreamIdPair, StreamInfoQuery, StreamLengthResponse,
-    StreamRangeQuery, StreamReadBlockingRequest, StreamReadGroupBlockingRequest,
-    StreamReadGroupRequest, StreamReadRequest, StreamSetIdRequest, StreamSubscribeQuery,
-    StreamTrimRequest, StreamTrimResponse, TrimStrategyParam,
-};
-use crate::api::http::schemas::json::{
-    JsonArrAppendRequest, JsonArrAppendResponse, JsonArrIndexRequest, JsonArrIndexResponse,
-    JsonArrInsertRequest, JsonArrInsertResponse, JsonArrLenParams, JsonArrLenResponse,
-    JsonArrPopRequest, JsonArrPopResponse, JsonArrTrimRequest, JsonArrTrimResponse,
-    JsonClearParams, JsonClearResponse, JsonDebugMemoryParams, JsonDebugMemoryResponse,
-    JsonDelParams, JsonDelResponse, JsonGetParams, JsonGetResponse, JsonMGetRequest,
-    JsonMGetItem, JsonMGetResponse, JsonMSetItemRequest, JsonMSetRequest, JsonNumIncrByRequest,
-    JsonNumMultByRequest, JsonNumResponse, JsonObjKeysParams, JsonObjKeysResponse, JsonObjLenParams,
-    JsonObjLenResponse, JsonRespParams, JsonRespResponse, JsonSetRequest, JsonSetResponse,
-    JsonStrAppendRequest, JsonStrAppendResponse, JsonStrLenParams, JsonStrLenResponse,
-    JsonToggleParams, JsonToggleResponse, JsonTypeParams, JsonTypeResponse,
-};
-use crate::api::http::schemas::search::{
-    AggregateOptionsDto, AggregateRequest, AggregateResponse, AliasRequest, AliasResponse,
-    AlterIndexRequest, AlterIndexResponse, CreateIndexRequest, CreateIndexResponse,
-    DictDumpResponse, DictResponse, DictTermsRequest, DropIndexParams, DropIndexResponse,
-    ExplainRequest, ExplainResponse, IndexCreateOptionsDto, IndexInfoResponse, ListIndicesResponse,
-    ProfileRequest, ProfileResponse, SearchFieldSchemaDto, SearchOptionsDto, SearchRequest,
-    SearchResponse, SpellcheckRequest, SpellcheckResponse, SugAddRequest, SugAddResponse,
-    SugDelRequest, SugDelResponse, SugGetParams, SugGetResponse, SugLenResponse,
-    SynonymDumpResponse, SynonymUpdateRequest, SynonymUpdateResponse,
+use crate::api::http::schemas::bitmaps::{
+    BitCountQuery, BitCountResponse, BitGetResponse, BitOpRequest, BitOpResponse, BitOpType,
+    BitPosQuery, BitPosResponse, BitSetRequest, BitSetResponse, BitfieldCommandSchema,
+    BitfieldEncodingSchema, BitfieldOverflowSchema, BitfieldRequest, BitfieldResponse,
 };
 use crate::api::http::schemas::bloom::{
     BloomAddRequest, BloomAddResponse, BloomCardResponse, BloomExistsRequest, BloomExistsResponse,
@@ -129,6 +83,47 @@ use crate::api::http::schemas::bloom::{
     CuckooLoadChunkRequest, CuckooLoadChunkResponse, CuckooReserveRequest, CuckooReserveResponse,
     CuckooScanDumpParams, CuckooScanDumpResponse,
 };
+use crate::api::http::schemas::common::{KeyInfo, PaginationParams, TtlInfo};
+use crate::api::http::schemas::geo::{
+    GeoAddRequest, GeoAddResponse, GeoDistQuery, GeoDistResponse, GeoHashRequest, GeoHashResponse,
+    GeoMemberSchema, GeoPosRequest, GeoPosResponse, GeoPositionSchema, GeoRadiusByMemberQuery,
+    GeoRadiusQuery, GeoSearchCenterSchema, GeoSearchOptionsSchema, GeoSearchRequest,
+    GeoSearchResponse, GeoSearchResultItem, GeoSearchShapeSchema, GeoSearchStoreRequest,
+    GeoSearchStoreResponse, GeoSortOrderSchema, GeoUnitSchema,
+};
+use crate::api::http::schemas::hashes::{
+    GetMultipleFieldsRequest, HashFieldEntry, HashIncrFloatRequest, HashIncrRequest,
+    HashRandomFieldResponse, HashScanResponse, RandomFieldQuery, ScanHashQuery, SetHashNxRequest,
+    SetHashRequest,
+};
+use crate::api::http::schemas::json::{
+    JsonArrAppendRequest, JsonArrAppendResponse, JsonArrIndexRequest, JsonArrIndexResponse,
+    JsonArrInsertRequest, JsonArrInsertResponse, JsonArrLenParams, JsonArrLenResponse,
+    JsonArrPopRequest, JsonArrPopResponse, JsonArrTrimRequest, JsonArrTrimResponse,
+    JsonClearParams, JsonClearResponse, JsonDebugMemoryParams, JsonDebugMemoryResponse,
+    JsonDelParams, JsonDelResponse, JsonGetParams, JsonGetResponse, JsonMGetItem, JsonMGetRequest,
+    JsonMGetResponse, JsonMSetItemRequest, JsonMSetRequest, JsonNumIncrByRequest,
+    JsonNumMultByRequest, JsonNumResponse, JsonObjKeysParams, JsonObjKeysResponse,
+    JsonObjLenParams, JsonObjLenResponse, JsonRespParams, JsonRespResponse, JsonSetRequest,
+    JsonSetResponse, JsonStrAppendRequest, JsonStrAppendResponse, JsonStrLenParams,
+    JsonStrLenResponse, JsonToggleParams, JsonToggleResponse, JsonTypeParams, JsonTypeResponse,
+};
+use crate::api::http::schemas::keys::{
+    CopyRequest, CopyResponse, DeleteKeysRequest, DeleteKeysResponse, DumpResponse, ExistsRequest,
+    ExistsResponse, ExpireRequest, ExpireResponse, KeyInfoResponse, KeysParams, KeysResponse,
+    ObjectInfoResponse, PersistResponse, RandomKeyResponse, RenameRequest, RenameResponse,
+    RestoreRequest, RestoreResponse, ScanParams, ScanResponse, SortOrderSchema, SortRequest,
+    SortResponse, SortStoreRequest, SortStoreResponse, TouchRequest, TouchResponse, TtlResponse,
+    TypeResponse,
+};
+use crate::api::http::schemas::lists::{
+    BLMPopRequest, BLMPopStreamQuery, BlockingMoveRequest, BlockingPopRequest, BlockingPopResponse,
+    BlockingPopStreamQuery, InsertPositionParam, LMPopRequest, LMPopResponse, ListDirectionParam,
+    ListIndexQuery, ListIndexResponse, ListInsertRequest, ListInsertResponse, ListLengthResponse,
+    ListMoveRequest, ListMoveResponse, ListPopRequest, ListPopResponse, ListPosQuery,
+    ListPosResponse, ListPushRequest, ListPushResponse, ListRangeQuery, ListRemoveRequest,
+    ListRemoveResponse, ListSetRequest, ListTrimRequest,
+};
 use crate::api::http::schemas::probabilistic::{
     CmsIncrByItem, CmsIncrByRequest, CmsIncrByResponse, CmsInfoResponse, CmsInitByDimRequest,
     CmsInitByProbRequest, CmsInitResponse, CmsMergeRequest, CmsMergeResponse, CmsQueryRequest,
@@ -137,27 +132,9 @@ use crate::api::http::schemas::probabilistic::{
     TopKIncrByRequest, TopKIncrByResponse, TopKInfoResponse, TopKListItem, TopKListQuery,
     TopKListResponse, TopKQueryRequest, TopKQueryResponse, TopKReserveRequest, TopKReserveResponse,
 };
-use crate::api::http::schemas::bitmaps::{
-    BitCountQuery, BitCountResponse, BitfieldCommandSchema, BitfieldEncodingSchema,
-    BitfieldOverflowSchema, BitfieldRequest, BitfieldResponse, BitGetResponse, BitOpRequest,
-    BitOpResponse, BitOpType, BitPosQuery, BitPosResponse, BitSetRequest, BitSetResponse,
-};
-use crate::api::http::schemas::geo::{
-    GeoAddRequest, GeoAddResponse, GeoDistQuery, GeoDistResponse, GeoHashRequest, GeoHashResponse,
-    GeoMemberSchema, GeoPosRequest, GeoPosResponse, GeoPositionSchema, GeoRadiusByMemberQuery,
-    GeoRadiusQuery, GeoSearchCenterSchema, GeoSearchOptionsSchema, GeoSearchRequest,
-    GeoSearchResponse, GeoSearchResultItem, GeoSearchShapeSchema, GeoSearchStoreRequest,
-    GeoSearchStoreResponse, GeoSortOrderSchema, GeoUnitSchema,
-};
 use crate::api::http::schemas::pubsub::{
-    ChannelsResponse, NumPatResponse, NumSubItem, NumSubRequest, NumSubResponse,
-    PubSubMessage, PubSubStatsResponse, PublishRequest, PublishResponse,
-    SubscriptionConfirmation, WebSocketError,
-};
-use crate::api::http::schemas::transactions::{
-    CommandResult, CompareAndSetRequest, CompareAndSetResponse, FieldValue,
-    HCompareAndSetRequest, KeyValue, RedisCommand, ScoredMember as TransactionScoredMember,
-    TransactionRequest, TransactionResponse,
+    ChannelsResponse, NumPatResponse, NumSubItem, NumSubRequest, NumSubResponse, PubSubMessage,
+    PubSubStatsResponse, PublishRequest, PublishResponse, SubscriptionConfirmation, WebSocketError,
 };
 use crate::api::http::schemas::scripting::{
     EvalRequest, EvalResponse, EvalShaRequest, FlushMode, ScriptDebugMode, ScriptDebugRequest,
@@ -165,16 +142,108 @@ use crate::api::http::schemas::scripting::{
     ScriptFlushRequest, ScriptFlushResponse, ScriptKillResponse, ScriptLoadRequest,
     ScriptLoadResponse,
 };
+use crate::api::http::schemas::search::{
+    AggregateOptionsDto, AggregateRequest, AggregateResponse, AliasRequest, AliasResponse,
+    AlterIndexRequest, AlterIndexResponse, CreateIndexRequest, CreateIndexResponse,
+    DictDumpResponse, DictResponse, DictTermsRequest, DropIndexParams, DropIndexResponse,
+    ExplainRequest, ExplainResponse, IndexCreateOptionsDto, IndexInfoResponse, ListIndicesResponse,
+    ProfileRequest, ProfileResponse, SearchFieldSchemaDto, SearchOptionsDto, SearchRequest,
+    SearchResponse, SpellcheckRequest, SpellcheckResponse, SugAddRequest, SugAddResponse,
+    SugDelRequest, SugDelResponse, SugGetParams, SugGetResponse, SugLenResponse,
+    SynonymDumpResponse, SynonymUpdateRequest, SynonymUpdateResponse,
+};
+use crate::api::http::schemas::sets::{
+    SetAddRequest, SetAddResponse, SetAlgebraRequest, SetAlgebraResponse, SetAlgebraStoreRequest,
+    SetAlgebraStoreResponse, SetCardResponse, SetInterCardRequest, SetInterCardResponse,
+    SetIsMemberRequest, SetIsMemberResponse, SetMIsMemberRequest, SetMIsMemberResponse,
+    SetMembersResponse, SetMoveRequest, SetMoveResponse, SetPopRequest, SetPopResponse,
+    SetRandMemberQuery, SetRandMemberResponse, SetRemoveRequest, SetRemoveResponse, SetScanQuery,
+    SetScanResponse,
+};
+use crate::api::http::schemas::sorted_sets::{
+    LexRangeDto, ScoreRangeDto, ScoredMemberDto, ZAddIncrRequest, ZAddIncrResponse, ZAddOptionsDto,
+    ZAddRequest, ZAddResponse, ZAggregateDto, ZBMPopRequest, ZBPopRequest, ZBPopResponse,
+    ZBPopStreamQuery, ZCardResponse, ZCountRequest, ZCountResponse, ZDiffRequest,
+    ZDiffStoreRequest, ZIncrByRequest, ZIncrByResponse, ZInterCardRequest, ZInterCardResponse,
+    ZLexCountRequest, ZMPopRequest, ZMPopResponse, ZMScoreRequest, ZMScoreResponse, ZPopQuery,
+    ZPopResponse, ZRandMemberQuery, ZRandMemberResponse, ZRangeByLexRequest, ZRangeByLexResponse,
+    ZRangeByScoreRequest, ZRangeQuery, ZRangeResponse, ZRangeStoreRequest, ZRangeStoreResponse,
+    ZRankResponse, ZRemRangeByLexRequest, ZRemRangeByRankRequest, ZRemRangeByScoreRequest,
+    ZRemRangeResponse, ZRemRequest, ZRemResponse, ZScanQuery, ZScanResponse, ZScoreResponse,
+    ZSetAlgebraOptionsDto, ZSetAlgebraRequest, ZSetAlgebraResponse, ZSetAlgebraStoreRequest,
+    ZSetAlgebraStoreResponse,
+};
+use crate::api::http::schemas::streams::{
+    ConsumerCreateRequest, ConsumerGroupCreateRequest, ConsumerGroupCreateResponse,
+    ConsumerGroupSetIdRequest, ConsumerOperationResponse, PendingQuery, StreamAckRequest,
+    StreamAckResponse, StreamAddRequest, StreamAddResponse, StreamAutoClaimRequest,
+    StreamClaimRequest, StreamDeleteRequest, StreamDeleteResponse, StreamEntriesResponse,
+    StreamGroupSubscribeQuery, StreamIdPair, StreamInfoQuery, StreamLengthResponse,
+    StreamRangeQuery, StreamReadBlockingRequest, StreamReadGroupBlockingRequest,
+    StreamReadGroupRequest, StreamReadRequest, StreamSetIdRequest, StreamSubscribeQuery,
+    StreamTrimRequest, StreamTrimResponse, TrimStrategyParam,
+};
+use crate::api::http::schemas::strings::{
+    AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams, GetRangeResponse,
+    IncrementRequest, IncrementResponse, MGetRequest, MGetResponse, MSetRequest, MSetResponse,
+    SetRangeRequest, SetRangeResponse, SetStringRequest, SetStringResponse, StrLenResponse,
+};
+use crate::api::http::schemas::transactions::{
+    CommandResult, CompareAndSetRequest, CompareAndSetResponse, FieldValue, HCompareAndSetRequest,
+    KeyValue, RedisCommand, ScoredMember as TransactionScoredMember, TransactionRequest,
+    TransactionResponse,
+};
 use crate::domain::entities::{
-    AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-    StreamEntry, StreamInfo, StreamReadResult, StringValue,
+    AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, FlushResult, LatencyEvent,
+    MemoryStats, MemoryUsage, ServerInfo, ServerTime, SlowlogEntry,
+};
+use crate::domain::entities::{
     // Search entities
-    AggregateOptions, AggregateResult, AggregateStep, ApplyStep, DistanceMetric, FilterStep,
-    GeoFilter, GroupByStep, HighlightOptions, IndexCreateOptions, IndexDataType, IndexInfo,
-    LimitStep, NumericFilter, PhoneticMatcher, ProfileType, Reducer, SearchDocument,
-    SearchFieldSchema, SearchFieldType, SearchOptions, SearchResult, SortBy, SortByStep, SortOrder,
-    SpellcheckResult, SpellcheckSuggestion, SpellcheckTerm, SugAddOptions, SugGetOptions,
-    Suggestion, SummarizeOptions, SynonymGroup, VectorAlgorithm, VectorFieldOptions,
+    AggregateOptions,
+    AggregateResult,
+    AggregateStep,
+    ApplyStep,
+    AutoClaimResult,
+    ClaimResult,
+    ConsumerGroupInfo,
+    ConsumerInfo,
+    DistanceMetric,
+    FilterStep,
+    GeoFilter,
+    GroupByStep,
+    HighlightOptions,
+    IndexCreateOptions,
+    IndexDataType,
+    IndexInfo,
+    LimitStep,
+    NumericFilter,
+    PendingEntry,
+    PendingSummary,
+    PhoneticMatcher,
+    ProfileType,
+    Reducer,
+    SearchDocument,
+    SearchFieldSchema,
+    SearchFieldType,
+    SearchOptions,
+    SearchResult,
+    SortBy,
+    SortByStep,
+    SortOrder,
+    SpellcheckResult,
+    SpellcheckSuggestion,
+    SpellcheckTerm,
+    StreamEntry,
+    StreamInfo,
+    StreamReadResult,
+    StringValue,
+    SugAddOptions,
+    SugGetOptions,
+    Suggestion,
+    SummarizeOptions,
+    SynonymGroup,
+    VectorAlgorithm,
+    VectorFieldOptions,
 };
 use crate::domain::errors::{ErrorDetail, ErrorResponse};
 use crate::infrastructure::redis::capabilities::{
@@ -243,6 +312,9 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::keys::dump_key,
         crate::api::http::routes::keys::restore_key,
         crate::api::http::routes::keys::get_object_info,
+        crate::api::http::routes::keys::sort_key,
+        crate::api::http::routes::keys::sort_store_key,
+        crate::api::http::routes::keys::sort_ro_key,
         // String endpoints
         crate::api::http::routes::strings::get_string,
         crate::api::http::routes::strings::set_string,
@@ -293,6 +365,11 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::lists::brpop,
         crate::api::http::routes::lists::blmove,
         crate::api::http::routes::lists::brpop_lpush,
+        crate::api::http::routes::lists::lmpop,
+        crate::api::http::routes::lists::blmpop,
+        crate::api::http::routes::lists::blpop_stream,
+        crate::api::http::routes::lists::brpop_stream,
+        crate::api::http::routes::lists::blmpop_stream,
         // Set endpoints
         crate::api::http::routes::sets::sadd,
         crate::api::http::routes::sets::srem,
@@ -345,6 +422,8 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::sorted_sets::zdiff,
         crate::api::http::routes::sorted_sets::zdiffstore,
         crate::api::http::routes::sorted_sets::zscan,
+        crate::api::http::routes::sorted_sets::bzpopmin_stream,
+        crate::api::http::routes::sorted_sets::bzpopmax_stream,
         // Bitmap endpoints (core Redis)
         crate::api::http::routes::bitmaps::getbit,
         crate::api::http::routes::bitmaps::setbit,
@@ -553,6 +632,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::acl_cat,
         crate::api::http::routes::admin::acl_genpass,
         crate::api::http::routes::admin::acl_log,
+        crate::api::http::routes::admin::acl_dryrun,
     ),
     components(
         schemas(
@@ -588,6 +668,11 @@ use crate::shared::app_state::AppState;
             RestoreResponse,
             ObjectInfoResponse,
             KeyInfoResponse,
+            SortOrderSchema,
+            SortRequest,
+            SortStoreRequest,
+            SortResponse,
+            SortStoreResponse,
             // String schemas
             StringValue,
             SetStringRequest,
@@ -642,6 +727,11 @@ use crate::shared::app_state::AppState;
             BlockingPopRequest,
             BlockingPopResponse,
             BlockingMoveRequest,
+            LMPopRequest,
+            BLMPopRequest,
+            LMPopResponse,
+            BlockingPopStreamQuery,
+            BLMPopStreamQuery,
             // Set schemas
             SetAddRequest,
             SetAddResponse,
@@ -720,6 +810,7 @@ use crate::shared::app_state::AppState;
             ZDiffStoreRequest,
             ZScanQuery,
             ZScanResponse,
+            ZBPopStreamQuery,
             // Bitmap schemas (core Redis)
             BitSetRequest,
             BitSetResponse,
@@ -848,6 +939,8 @@ use crate::shared::app_state::AppState;
             AclLogRequest,
             AclLogEntry,
             AclLogResponse,
+            AclDryrunRequest,
+            AclDryrunResponse,
             // JSON schemas (RedisJSON module)
             JsonSetRequest,
             JsonSetResponse,

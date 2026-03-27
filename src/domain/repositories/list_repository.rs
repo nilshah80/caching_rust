@@ -57,6 +57,13 @@ pub struct BlockingPopResult {
     pub value: String,
 }
 
+/// Result from LMPOP/BLMPOP operations (multi-element pop)
+#[derive(Debug, Clone)]
+pub struct LMPopResult {
+    pub key: String,
+    pub elements: Vec<String>,
+}
+
 /// Repository trait for Redis list operations
 #[async_trait]
 pub trait ListRepository: Send + Sync {
@@ -125,7 +132,11 @@ pub trait ListRepository: Send + Sync {
     ) -> Result<Option<String>, CacheError>;
 
     /// RPOPLPUSH - Pop from source tail and push to destination head (deprecated, use LMOVE)
-    async fn rpop_lpush(&self, source: &str, destination: &str) -> Result<Option<String>, CacheError>;
+    async fn rpop_lpush(
+        &self,
+        source: &str,
+        destination: &str,
+    ) -> Result<Option<String>, CacheError>;
 
     // ========== Blocking operations ==========
 
@@ -164,6 +175,24 @@ pub trait ListRepository: Send + Sync {
         destination: &str,
         timeout: Duration,
     ) -> Result<Option<String>, CacheError>;
+
+    /// LMPOP - Atomically pop elements from the first non-empty list (Redis 7.0+)
+    async fn lmpop(
+        &self,
+        keys: &[String],
+        direction: ListDirection,
+        count: Option<u32>,
+    ) -> Result<Option<LMPopResult>, CacheError>;
+
+    /// BLMPOP - Blocking pop from the first non-empty list (Redis 7.0+)
+    /// Returns None if timeout is reached
+    async fn blmpop(
+        &self,
+        keys: &[String],
+        direction: ListDirection,
+        timeout: Duration,
+        count: Option<u32>,
+    ) -> Result<Option<LMPopResult>, CacheError>;
 }
 
 #[cfg(test)]

@@ -5,19 +5,32 @@
 //! SSE streaming endpoints for real-time data.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::{delete, get, post},
-    Json, Router,
 };
 use std::time::Duration;
 
+use validator::Validate;
+
 use crate::api::http::middleware::admin_auth::ADMIN_API_KEY_HEADER;
-use crate::api::http::schemas::streams::*;
+use crate::api::http::schemas::streams::{
+    ConsumerCreateRequest, ConsumerGroupCreateRequest, ConsumerGroupCreateResponse,
+    ConsumerGroupInfoResponse, ConsumerGroupSetIdRequest, ConsumerInfoResponse,
+    ConsumerOperationResponse, PendingEntriesResponse, PendingQuery, PendingSummaryResponse,
+    StreamAckRequest, StreamAckResponse, StreamAddRequest, StreamAddResponse,
+    StreamAutoClaimRequest, StreamAutoClaimResponse, StreamClaimRequest, StreamClaimResponse,
+    StreamDeleteRequest, StreamDeleteResponse, StreamEntriesResponse, StreamGroupSubscribeQuery,
+    StreamInfoQuery, StreamInfoResponse, StreamLengthResponse, StreamRangeQuery,
+    StreamReadBlockingRequest, StreamReadGroupBlockingRequest, StreamReadGroupRequest,
+    StreamReadRequest, StreamReadResponse, StreamSetIdRequest, StreamSubscribeQuery,
+    StreamTrimRequest, StreamTrimResponse,
+};
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
 use crate::shared::response::ApiResponse;
@@ -52,19 +65,40 @@ pub fn stream_routes() -> Router<AppState> {
         .route("/api/v1/streams/{key}/subscribe", get(stream_subscribe))
         // Consumer group info (public)
         .route("/api/v1/streams/{key}/groups", get(xinfo_groups))
-        .route("/api/v1/streams/{key}/groups/{group}/consumers", get(xinfo_consumers))
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/consumers",
+            get(xinfo_consumers),
+        )
         // Consumer group read operations
-        .route("/api/v1/streams/{key}/groups/{group}/read", post(xreadgroup))
-        .route("/api/v1/streams/{key}/groups/{group}/read/blocking", post(xreadgroup_blocking))
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/read",
+            post(xreadgroup),
+        )
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/read/blocking",
+            post(xreadgroup_blocking),
+        )
         .route("/api/v1/streams/{key}/groups/{group}/ack", post(xack))
         // Pending entries
-        .route("/api/v1/streams/{key}/groups/{group}/pending", get(xpending_summary))
-        .route("/api/v1/streams/{key}/groups/{group}/pending/detail", get(xpending))
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/pending",
+            get(xpending_summary),
+        )
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/pending/detail",
+            get(xpending),
+        )
         // Claim operations
         .route("/api/v1/streams/{key}/groups/{group}/claim", post(xclaim))
-        .route("/api/v1/streams/{key}/groups/{group}/autoclaim", post(xautoclaim))
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/autoclaim",
+            post(xautoclaim),
+        )
         // SSE streaming for consumer groups
-        .route("/api/v1/streams/{key}/groups/{group}/subscribe", get(stream_group_subscribe))
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/subscribe",
+            get(stream_group_subscribe),
+        )
 }
 
 /// Create admin-protected stream routes (consumer group management)
@@ -72,10 +106,22 @@ pub fn stream_admin_routes() -> Router<AppState> {
     Router::new()
         // Consumer group management (admin-protected)
         .route("/api/v1/streams/{key}/groups", post(xgroup_create))
-        .route("/api/v1/streams/{key}/groups/{group}", delete(xgroup_destroy))
-        .route("/api/v1/streams/{key}/groups/{group}/setid", post(xgroup_setid))
-        .route("/api/v1/streams/{key}/groups/{group}/consumers", post(xgroup_createconsumer))
-        .route("/api/v1/streams/{key}/groups/{group}/consumers/{consumer}", delete(xgroup_delconsumer))
+        .route(
+            "/api/v1/streams/{key}/groups/{group}",
+            delete(xgroup_destroy),
+        )
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/setid",
+            post(xgroup_setid),
+        )
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/consumers",
+            post(xgroup_createconsumer),
+        )
+        .route(
+            "/api/v1/streams/{key}/groups/{group}/consumers/{consumer}",
+            delete(xgroup_delconsumer),
+        )
         // Stream management (admin-protected)
         .route("/api/v1/streams/{key}/setid", post(xsetid))
 }
@@ -156,7 +202,9 @@ pub async fn xrange(
         .stream_service
         .xrange(&key, &query.start, &query.end, query.count)
         .await?;
-    Ok(Json(ApiResponse::success(StreamEntriesResponse { entries })))
+    Ok(Json(ApiResponse::success(StreamEntriesResponse {
+        entries,
+    })))
 }
 
 /// GET /api/v1/streams/{key}/revrange
@@ -183,7 +231,9 @@ pub async fn xrevrange(
         .stream_service
         .xrevrange(&key, &query.end, &query.start, query.count)
         .await?;
-    Ok(Json(ApiResponse::success(StreamEntriesResponse { entries })))
+    Ok(Json(ApiResponse::success(StreamEntriesResponse {
+        entries,
+    })))
 }
 
 /// DELETE /api/v1/streams/{key}/entries
@@ -314,6 +364,8 @@ pub async fn xread_blocking(
     State(state): State<AppState>,
     Json(req): Json<StreamReadBlockingRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let streams: Vec<(String, String)> = req
         .streams
         .iter()
@@ -492,7 +544,11 @@ pub async fn xreadgroup(
 ) -> Result<impl IntoResponse, CacheError> {
     // Use path key with the ID from request (defaults to ">" for new entries)
     // The path key is authoritative - we ignore any key in the request body
-    let id = req.streams.first().map(|s| s.id.clone()).unwrap_or_else(|| ">".to_string());
+    let id = req
+        .streams
+        .first()
+        .map(|s| s.id.clone())
+        .unwrap_or_else(|| ">".to_string());
     let streams = vec![(key, id)];
 
     // Apply default count if not specified to prevent unbounded reads
@@ -535,9 +591,15 @@ pub async fn xreadgroup_blocking(
     Path((key, group)): Path<(String, String)>,
     Json(req): Json<StreamReadGroupBlockingRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     // Use path key with the ID from request (defaults to ">" for new entries)
     // The path key is authoritative - we ignore any key in the request body
-    let id = req.streams.first().map(|s| s.id.clone()).unwrap_or_else(|| ">".to_string());
+    let id = req
+        .streams
+        .first()
+        .map(|s| s.id.clone())
+        .unwrap_or_else(|| ">".to_string());
     let streams = vec![(key, id)];
 
     // Apply default count if not specified to prevent unbounded reads
@@ -554,7 +616,8 @@ pub async fn xreadgroup_blocking(
             count,
             req.no_ack,
             req.timeout_seconds,
-        ).await?;
+        )
+        .await?;
 
     match result {
         Some(entries) => Ok(Json(ApiResponse::success(entries)).into_response()),
@@ -585,7 +648,9 @@ pub async fn xack(
     Json(req): Json<StreamAckRequest>,
 ) -> Result<Json<ApiResponse<StreamAckResponse>>, CacheError> {
     let acknowledged = state.stream_service.xack(&key, &group, req.ids).await?;
-    Ok(Json(ApiResponse::success(StreamAckResponse { acknowledged })))
+    Ok(Json(ApiResponse::success(StreamAckResponse {
+        acknowledged,
+    })))
 }
 
 // ========== Pending Entry Operations ==========
@@ -667,7 +732,13 @@ pub async fn xclaim(
 ) -> Result<Json<ApiResponse<StreamClaimResponse>>, CacheError> {
     let result = state
         .stream_service
-        .xclaim(&key, &group, &req.consumer, req.ids.clone(), req.to_options())
+        .xclaim(
+            &key,
+            &group,
+            &req.consumer,
+            req.ids.clone(),
+            req.to_options(),
+        )
         .await?;
     Ok(Json(ApiResponse::success(result)))
 }
@@ -703,7 +774,8 @@ pub async fn xautoclaim(
             req.min_idle_time_ms,
             &req.start,
             req.to_options(),
-        ).await?;
+        )
+        .await?;
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -822,7 +894,10 @@ pub async fn xgroup_create(
 ) -> Result<Json<ApiResponse<ConsumerGroupCreateResponse>>, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    state.stream_service.xgroup_create(&key, &req.group, &req.id, req.to_options()).await?;
+    state
+        .stream_service
+        .xgroup_create(&key, &req.group, &req.id, req.to_options())
+        .await?;
 
     Ok(Json(ApiResponse::success(ConsumerGroupCreateResponse {
         created: true,
@@ -894,7 +969,10 @@ pub async fn xgroup_setid(
 ) -> Result<impl IntoResponse, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    state.stream_service.xgroup_setid(&key, &group, &req.id, req.entries_read).await?;
+    state
+        .stream_service
+        .xgroup_setid(&key, &group, &req.id, req.entries_read)
+        .await?;
 
     Ok(StatusCode::OK)
 }
@@ -928,8 +1006,10 @@ pub async fn xgroup_createconsumer(
 ) -> Result<Json<ApiResponse<ConsumerOperationResponse>>, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    let created =
-        state.stream_service.xgroup_createconsumer(&key, &group, &req.consumer).await?;
+    let created = state
+        .stream_service
+        .xgroup_createconsumer(&key, &group, &req.consumer)
+        .await?;
 
     Ok(Json(ApiResponse::success(ConsumerOperationResponse {
         result: if created { 1 } else { 0 },
@@ -963,8 +1043,10 @@ pub async fn xgroup_delconsumer(
 ) -> Result<Json<ApiResponse<ConsumerOperationResponse>>, CacheError> {
     verify_admin_key(&headers, &state)?;
 
-    let pending_count =
-        state.stream_service.xgroup_delconsumer(&key, &group, &consumer).await?;
+    let pending_count = state
+        .stream_service
+        .xgroup_delconsumer(&key, &group, &consumer)
+        .await?;
 
     Ok(Json(ApiResponse::success(ConsumerOperationResponse {
         result: pending_count,
@@ -1006,7 +1088,8 @@ pub async fn xsetid(
             &req.last_id,
             req.entries_added,
             req.max_deleted_id.as_deref(),
-        ).await?;
+        )
+        .await?;
 
     Ok(StatusCode::OK)
 }
@@ -1021,25 +1104,27 @@ mod tests {
     use std::collections::{HashMap, VecDeque};
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
     use tower::ServiceExt;
 
     use crate::application::services::{
-        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService,
+        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService,
+        KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService,
         SortedSetService, StreamService, StringService,
     };
     use crate::domain::entities::{
-        AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-        StreamEntry, StreamInfo, StreamReadResult, XReadGroupOptions, XReadOptions,
+        AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry,
+        PendingSummary, StreamEntry, StreamInfo, StreamReadResult, XReadGroupOptions, XReadOptions,
     };
     use crate::domain::repositories::StreamRepository;
     use crate::infrastructure::config::Settings;
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
-        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
-        MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository,
-        MockStringRepository,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository,
+        MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
+        MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
+        MockSortedSetRepository, MockStreamRepository, MockStringRepository,
     };
 
     struct SequenceStreamRepository {
@@ -1176,9 +1261,7 @@ mod tests {
             id: &str,
             entries_read: Option<i64>,
         ) -> Result<(), CacheError> {
-            self.base
-                .xgroup_setid(key, group, id, entries_read)
-                .await
+            self.base.xgroup_setid(key, group, id, entries_read).await
         }
 
         async fn xgroup_createconsumer(
@@ -1255,12 +1338,7 @@ mod tests {
                 .await
         }
 
-        async fn xack(
-            &self,
-            key: &str,
-            group: &str,
-            ids: &[String],
-        ) -> Result<i64, CacheError> {
+        async fn xack(&self, key: &str, group: &str, ids: &[String]) -> Result<i64, CacheError> {
             self.base.xack(key, group, ids).await
         }
 
@@ -1289,9 +1367,7 @@ mod tests {
             ids: &[String],
             options: crate::domain::entities::XClaimOptions,
         ) -> Result<ClaimResult, CacheError> {
-            self.base
-                .xclaim(key, group, consumer, ids, options)
-                .await
+            self.base.xclaim(key, group, consumer, ids, options).await
         }
 
         async fn xautoclaim(
@@ -1325,42 +1401,63 @@ mod tests {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let config = Arc::new(Settings::default());
         let capabilities = Arc::new(RedisCapabilities::default_capabilities());
-        let string_service =
-            Arc::new(StringService::new_with_repository(Arc::new(MockStringRepository::new())));
-        let hash_service =
-            Arc::new(HashService::new_with_repository(Arc::new(MockHashRepository::new())));
-        let list_service =
-            Arc::new(ListService::new_with_repository(Arc::new(MockListRepository::new())));
-        let set_service =
-            Arc::new(SetService::new_with_repository(Arc::new(MockSetRepository::new())));
+        let string_service = Arc::new(StringService::new_with_repository(Arc::new(
+            MockStringRepository::new(),
+        )));
+        let hash_service = Arc::new(HashService::new_with_repository(Arc::new(
+            MockHashRepository::new(),
+        )));
+        let list_service = Arc::new(ListService::new_with_repository(Arc::new(
+            MockListRepository::new(),
+        )));
+        let set_service = Arc::new(SetService::new_with_repository(Arc::new(
+            MockSetRepository::new(),
+        )));
         let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(
             MockSortedSetRepository::new(),
         )));
-        let bitmap_service =
-            Arc::new(BitMapService::new_with_repository(Arc::new(MockBitMapRepository::new())));
-        let key_service =
-            Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
-        let admin_service =
-            Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
+        let bitmap_service = Arc::new(BitMapService::new_with_repository(Arc::new(
+            MockBitMapRepository::new(),
+        )));
+        let key_service = Arc::new(KeyService::new_with_repository(Arc::new(
+            MockKeyRepository::new(),
+        )));
+        let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(
+            MockAdminRepository,
+        )));
         let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
-        let json_service =
-            Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
-        let search_service =
-            Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
-        let bloom_service =
-            Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
-        let probabilistic_service =
-            Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
-        let geo_service =
-            Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
+        let json_service = Arc::new(JsonService::new_with_repository(Arc::new(
+            MockJsonRepository::new(),
+        )));
+        let search_service = Arc::new(SearchService::new_with_repository(Arc::new(
+            MockSearchRepository::new(),
+        )));
+        let bloom_service = Arc::new(BloomService::new_with_repository(Arc::new(
+            MockBloomRepository::new(),
+        )));
+        let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(Arc::new(
+            MockProbabilisticRepository::new(),
+        )));
+        let geo_service = Arc::new(GeoService::new_with_repository(Arc::new(
+            MockGeoRepository::new(),
+        )));
         let pubsub_manager = Arc::new(
-            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(&config.redis.url, config.pubsub.clone())
-                .expect("Failed to create PubSubManager for tests")
+            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(
+                &config.redis.url,
+                config.pubsub.clone(),
+            )
+            .expect("Failed to create PubSubManager for tests"),
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
-        let transaction_service = Arc::new(crate::application::services::TransactionService::new(pool.clone()));
-        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(pool.clone()));
-        let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
+        let transaction_service = Arc::new(crate::application::services::TransactionService::new(
+            pool.clone(),
+        ));
+        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(
+            pool.clone(),
+        ));
+        let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(
+            config.blocking.max_sse_connections,
+        ));
 
         AppState::new_with_services(
             pool,
@@ -1491,7 +1588,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/streams/stream/trim")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"strategy":"maxlen","count":10,"approximate":true}"#))
+                    .body(Body::from(
+                        r#"{"strategy":"maxlen","count":10,"approximate":true}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -1755,7 +1854,8 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        // Empty streams are now rejected by validation
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -1945,13 +2045,10 @@ mod tests {
     #[tokio::test]
     async fn test_stream_subscribe_sse_message_and_error() {
         let repo = Arc::new(SequenceStreamRepository::new());
-        repo.xread_results
-            .lock()
-            .expect("xread lock")
-            .extend([
-                Ok(Some(vec![sample_read_result("stream")])),
-                Err(CacheError::Internal("boom".to_string())),
-            ]);
+        repo.xread_results.lock().expect("xread lock").extend([
+            Ok(Some(vec![sample_read_result("stream")])),
+            Err(CacheError::Internal("boom".to_string())),
+        ]);
         let state = state_with_stream_repo(repo);
 
         let response = stream_subscribe(
@@ -1981,10 +2078,7 @@ mod tests {
         repo.xread_results
             .lock()
             .expect("xread lock")
-            .extend([
-                Ok(None),
-                Err(CacheError::Internal("boom".to_string())),
-            ]);
+            .extend([Ok(None), Err(CacheError::Internal("boom".to_string()))]);
         let state = state_with_stream_repo(repo);
 
         let response = stream_subscribe(
@@ -2044,10 +2138,7 @@ mod tests {
         repo.xreadgroup_results
             .lock()
             .expect("xreadgroup lock")
-            .extend([
-                Ok(None),
-                Err(CacheError::Internal("boom".to_string())),
-            ]);
+            .extend([Ok(None), Err(CacheError::Internal("boom".to_string()))]);
         let state = state_with_stream_repo(repo);
 
         let response = stream_group_subscribe(
@@ -2075,41 +2166,60 @@ mod tests {
         settings.blocking.max_sse_connections = max_sse;
         let config = Arc::new(settings);
         let capabilities = Arc::new(RedisCapabilities::default_capabilities());
-        let string_service =
-            Arc::new(StringService::new_with_repository(Arc::new(MockStringRepository::new())));
-        let hash_service =
-            Arc::new(HashService::new_with_repository(Arc::new(MockHashRepository::new())));
-        let list_service =
-            Arc::new(ListService::new_with_repository(Arc::new(MockListRepository::new())));
-        let set_service =
-            Arc::new(SetService::new_with_repository(Arc::new(MockSetRepository::new())));
+        let string_service = Arc::new(StringService::new_with_repository(Arc::new(
+            MockStringRepository::new(),
+        )));
+        let hash_service = Arc::new(HashService::new_with_repository(Arc::new(
+            MockHashRepository::new(),
+        )));
+        let list_service = Arc::new(ListService::new_with_repository(Arc::new(
+            MockListRepository::new(),
+        )));
+        let set_service = Arc::new(SetService::new_with_repository(Arc::new(
+            MockSetRepository::new(),
+        )));
         let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(
             MockSortedSetRepository::new(),
         )));
-        let bitmap_service =
-            Arc::new(BitMapService::new_with_repository(Arc::new(MockBitMapRepository::new())));
-        let key_service =
-            Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
-        let admin_service =
-            Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
+        let bitmap_service = Arc::new(BitMapService::new_with_repository(Arc::new(
+            MockBitMapRepository::new(),
+        )));
+        let key_service = Arc::new(KeyService::new_with_repository(Arc::new(
+            MockKeyRepository::new(),
+        )));
+        let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(
+            MockAdminRepository,
+        )));
         let stream_service = Arc::new(StreamService::new_with_repository(stream_repo));
-        let json_service =
-            Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
-        let search_service =
-            Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
-        let bloom_service =
-            Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
-        let probabilistic_service =
-            Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
-        let geo_service =
-            Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
+        let json_service = Arc::new(JsonService::new_with_repository(Arc::new(
+            MockJsonRepository::new(),
+        )));
+        let search_service = Arc::new(SearchService::new_with_repository(Arc::new(
+            MockSearchRepository::new(),
+        )));
+        let bloom_service = Arc::new(BloomService::new_with_repository(Arc::new(
+            MockBloomRepository::new(),
+        )));
+        let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(Arc::new(
+            MockProbabilisticRepository::new(),
+        )));
+        let geo_service = Arc::new(GeoService::new_with_repository(Arc::new(
+            MockGeoRepository::new(),
+        )));
         let pubsub_manager = Arc::new(
-            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(&config.redis.url, config.pubsub.clone())
-                .expect("Failed to create PubSubManager for tests")
+            crate::infrastructure::redis::pubsub_manager::PubSubManager::new(
+                &config.redis.url,
+                config.pubsub.clone(),
+            )
+            .expect("Failed to create PubSubManager for tests"),
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
-        let transaction_service = Arc::new(crate::application::services::TransactionService::new(pool.clone()));
-        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(pool.clone()));
+        let transaction_service = Arc::new(crate::application::services::TransactionService::new(
+            pool.clone(),
+        ));
+        let scripting_service = Arc::new(crate::application::services::ScriptingService::new(
+            pool.clone(),
+        ));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(max_sse));
 
         AppState::new_with_services(

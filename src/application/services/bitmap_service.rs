@@ -67,7 +67,9 @@ impl BitMapService {
                 "Start and end must both be provided or both absent".to_string(),
             ));
         }
-        self.repository.bitcount(key, start, end, use_bit_index).await
+        self.repository
+            .bitcount(key, start, end, use_bit_index)
+            .await
     }
 
     /// BITPOS - Find first bit set to 0 or 1 in a string
@@ -89,7 +91,9 @@ impl BitMapService {
                 "End can only be specified if start is also specified".to_string(),
             ));
         }
-        self.repository.bitpos(key, bit, start, end, use_bit_index).await
+        self.repository
+            .bitpos(key, bit, start, end, use_bit_index)
+            .await
     }
 
     // ========== Bitwise operations ==========
@@ -138,9 +142,7 @@ impl BitMapService {
         }
         // Validate encoding bits (max 64 for signed, 63 for unsigned)
         for cmd in &commands {
-            if let Err(e) = Self::validate_bitfield_command(cmd) {
-                return Err(e);
-            }
+            Self::validate_bitfield_command(cmd)?
         }
         self.repository.bitfield(key, &commands).await
     }
@@ -167,9 +169,7 @@ impl BitMapService {
                     "BITFIELD_RO only supports GET operations".to_string(),
                 ));
             }
-            if let Err(e) = Self::validate_bitfield_command(cmd) {
-                return Err(e);
-            }
+            Self::validate_bitfield_command(cmd)?
         }
         self.repository.bitfield_ro(key, &commands).await
     }
@@ -252,7 +252,10 @@ mod tests {
         let service = BitMapService::new_with_repository(repo);
 
         // Empty key
-        let err = service.bitpos("", true, None, None, false).await.unwrap_err();
+        let err = service
+            .bitpos("", true, None, None, false)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         // End without start
@@ -450,7 +453,10 @@ mod tests {
         service.setbit("mybitmap", 1, true).await.unwrap();
         service.setbit("mybitmap", 7, true).await.unwrap();
 
-        let count = service.bitcount("mybitmap", None, None, false).await.unwrap();
+        let count = service
+            .bitcount("mybitmap", None, None, false)
+            .await
+            .unwrap();
         assert_eq!(count, 3);
     }
 
@@ -461,7 +467,10 @@ mod tests {
 
         service.setbit("mybitmap", 7, true).await.unwrap();
 
-        let pos = service.bitpos("mybitmap", true, None, None, false).await.unwrap();
+        let pos = service
+            .bitpos("mybitmap", true, None, None, false)
+            .await
+            .unwrap();
         assert_eq!(pos, 7);
     }
 

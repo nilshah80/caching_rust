@@ -3,15 +3,15 @@
 //! HTTP endpoints for Redis hash operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, patch, post},
-    Json, Router,
 };
 
 use crate::api::http::schemas::hashes::{
     GetMultipleFieldsRequest, HashFieldEntry, HashIncrFloatRequest, HashIncrRequest,
-    HashRandomFieldResponse, HashScanResponse, RandomFieldQuery, ScanHashQuery,
-    SetHashNxRequest, SetHashRequest,
+    HashRandomFieldResponse, HashScanResponse, RandomFieldQuery, ScanHashQuery, SetHashNxRequest,
+    SetHashRequest,
 };
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -30,7 +30,10 @@ pub fn hash_routes() -> Router<AppState> {
         .route("/api/v1/hashes/{key}/values", get(hvals))
         .route("/api/v1/hashes/{key}/length", get(hlen))
         .route("/api/v1/hashes/{key}/fields/{field}/incr", patch(hincr_by))
-        .route("/api/v1/hashes/{key}/fields/{field}/incr-float", patch(hincr_by_float))
+        .route(
+            "/api/v1/hashes/{key}/fields/{field}/incr-float",
+            patch(hincr_by_float),
+        )
         .route("/api/v1/hashes/{key}/fields/{field}/length", get(hstr_len))
         .route("/api/v1/hashes/{key}/random", get(hrand_field))
         .route("/api/v1/hashes/{key}/scan", get(hscan))
@@ -107,7 +110,10 @@ pub async fn hset_nx(
     Path(key): Path<String>,
     Json(req): Json<SetHashNxRequest>,
 ) -> Result<Json<ApiResponse<bool>>, CacheError> {
-    let result = state.hash_service.hset_nx(&key, &req.field, &req.value).await?;
+    let result = state
+        .hash_service
+        .hset_nx(&key, &req.field, &req.value)
+        .await?;
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -321,7 +327,10 @@ pub async fn hincr_by_float(
     Path((key, field)): Path<(String, String)>,
     Json(req): Json<HashIncrFloatRequest>,
 ) -> Result<Json<ApiResponse<f64>>, CacheError> {
-    let result = state.hash_service.hincr_by_float(&key, &field, req.delta).await?;
+    let result = state
+        .hash_service
+        .hincr_by_float(&key, &field, req.delta)
+        .await?;
     Ok(Json(ApiResponse::success(result)))
 }
 
@@ -370,7 +379,10 @@ pub async fn hrand_field(
     Path(key): Path<String>,
     Query(query): Query<RandomFieldQuery>,
 ) -> Result<Json<ApiResponse<HashRandomFieldResponse>>, CacheError> {
-    let result = state.hash_service.hrand_field(&key, query.count, query.with_values).await?;
+    let result = state
+        .hash_service
+        .hrand_field(&key, query.count, query.with_values)
+        .await?;
     if query.with_values {
         let entries = to_entries(result);
         Ok(Json(ApiResponse::success(HashRandomFieldResponse {
@@ -412,7 +424,10 @@ pub async fn hscan(
         .hscan(&key, query.cursor, query.pattern, query.count)
         .await?;
     let entries = to_entries(items);
-    Ok(Json(ApiResponse::success(HashScanResponse { cursor, entries })))
+    Ok(Json(ApiResponse::success(HashScanResponse {
+        cursor,
+        entries,
+    })))
 }
 
 fn to_entries(items: Vec<String>) -> Vec<HashFieldEntry> {
@@ -428,8 +443,8 @@ fn to_entries(items: Vec<String>) -> Vec<HashFieldEntry> {
 mod tests {
     use super::*;
     use crate::test_support::test_state_with_hash_repo;
-    use axum::extract::{Path, Query, State};
     use axum::Json;
+    use axum::extract::{Path, Query, State};
 
     #[tokio::test]
     async fn test_hash_routes_basic() {
@@ -438,15 +453,21 @@ mod tests {
         hash_repo.insert("hash1", "field2", "2");
         let state = State(state);
 
-        let response = hget(state.clone(), Path(("hash1".to_string(), "field1".to_string())))
-            .await
-            .unwrap();
+        let response = hget(
+            state.clone(),
+            Path(("hash1".to_string(), "field1".to_string())),
+        )
+        .await
+        .unwrap();
         let value = response.0.data.expect("data");
         assert_eq!(value.as_deref(), Some("1"));
 
-        let response = hget(state.clone(), Path(("hash1".to_string(), "missing".to_string())))
-            .await
-            .unwrap();
+        let response = hget(
+            state.clone(),
+            Path(("hash1".to_string(), "missing".to_string())),
+        )
+        .await
+        .unwrap();
         let value = response.0.data.expect("data");
         assert!(value.is_none());
 
@@ -454,7 +475,9 @@ mod tests {
             state.clone(),
             Path("hash1".to_string()),
             Json(SetHashRequest {
-                items: [("field3".to_string(), "3".to_string())].into_iter().collect(),
+                items: [("field3".to_string(), "3".to_string())]
+                    .into_iter()
+                    .collect(),
             }),
         )
         .await
@@ -500,15 +523,24 @@ mod tests {
         .unwrap();
         assert_eq!(response.0.data.expect("data"), 1);
 
-        let response = hexists(state.clone(), Path(("hash1".to_string(), "field1".to_string())))
-            .await
-            .unwrap();
+        let response = hexists(
+            state.clone(),
+            Path(("hash1".to_string(), "field1".to_string())),
+        )
+        .await
+        .unwrap();
         assert!(response.0.data.expect("data"));
 
         let response = hkeys(state.clone(), Path("hash1".to_string()))
             .await
             .unwrap();
-        assert!(response.0.data.expect("data").contains(&"field1".to_string()));
+        assert!(
+            response
+                .0
+                .data
+                .expect("data")
+                .contains(&"field1".to_string())
+        );
 
         let response = hvals(state.clone(), Path("hash1".to_string()))
             .await
@@ -554,7 +586,10 @@ mod tests {
         let response = hrand_field(
             state.clone(),
             Path("hash2".to_string()),
-            Query(RandomFieldQuery { count: None, with_values: false }),
+            Query(RandomFieldQuery {
+                count: None,
+                with_values: false,
+            }),
         )
         .await
         .unwrap();
@@ -563,7 +598,10 @@ mod tests {
         let response = hrand_field(
             state.clone(),
             Path("hash2".to_string()),
-            Query(RandomFieldQuery { count: Some(1), with_values: true }),
+            Query(RandomFieldQuery {
+                count: Some(1),
+                with_values: true,
+            }),
         )
         .await
         .unwrap();
@@ -574,7 +612,10 @@ mod tests {
         let err = hrand_field(
             state.clone(),
             Path("hash2".to_string()),
-            Query(RandomFieldQuery { count: None, with_values: true }),
+            Query(RandomFieldQuery {
+                count: None,
+                with_values: true,
+            }),
         )
         .await
         .unwrap_err();

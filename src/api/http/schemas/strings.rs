@@ -3,8 +3,8 @@
 //! Request/response schemas for string operations.
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use std::collections::HashMap;
+use utoipa::ToSchema;
 use validator::Validate;
 
 /// Request to set a string value

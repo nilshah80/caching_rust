@@ -3,17 +3,16 @@
 //! Concrete implementation of KeyRepository using Redis.
 
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use redis::AsyncCommands;
 use std::sync::Arc;
 
 use crate::domain::entities::{
-    CopyOptions, CopyResult, DeleteResult, DumpResult, ExistsResult, ExpireOptions,
-    ExpireResult, KeyInfo, PersistResult, RandomKeyResult, RenameResult,
-    ScanResult, TouchResult,
+    CopyOptions, CopyResult, DeleteResult, DumpResult, ExistsResult, ExpireOptions, ExpireResult,
+    KeyInfo, PersistResult, RandomKeyResult, RenameResult, ScanResult, TouchResult,
 };
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::KeyRepository;
+use crate::domain::repositories::{KeyRepository, SortOptions, SortOrder};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
 /// Redis implementation of KeyRepository
@@ -25,6 +24,38 @@ impl RedisKeyRepository {
     /// Create a new RedisKeyRepository
     pub fn new(pool: Arc<InstrumentedPool>) -> Self {
         Self { pool }
+    }
+
+    /// Apply sort options to a redis command
+    fn apply_sort_options(cmd: &mut redis::Cmd, options: &SortOptions) {
+        if let Some(ref by) = options.by {
+            cmd.arg("BY").arg(by);
+        }
+        if let Some((offset, count)) = options.limit {
+            cmd.arg("LIMIT").arg(offset).arg(count);
+        }
+        for pattern in &options.get {
+            cmd.arg("GET").arg(pattern);
+        }
+        if options.order == SortOrder::Desc {
+            cmd.arg("DESC");
+        }
+        if options.alpha {
+            cmd.arg("ALPHA");
+        }
+    }
+
+    /// Convert redis Values to Vec<Option<String>>
+    fn convert_sort_values(values: Vec<redis::Value>) -> Vec<Option<String>> {
+        values
+            .into_iter()
+            .map(|v| match v {
+                redis::Value::BulkString(bytes) => String::from_utf8(bytes).ok(),
+                redis::Value::SimpleString(s) => Some(s),
+                redis::Value::Int(i) => Some(i.to_string()),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -95,7 +126,12 @@ impl KeyRepository for RedisKeyRepository {
         })
     }
 
-    async fn expire(&self, key: &str, seconds: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn expire(
+        &self,
+        key: &str,
+        seconds: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("EXPIRE");
@@ -123,7 +159,12 @@ impl KeyRepository for RedisKeyRepository {
         })
     }
 
-    async fn expire_at(&self, key: &str, timestamp: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn expire_at(
+        &self,
+        key: &str,
+        timestamp: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("EXPIREAT");
@@ -151,7 +192,12 @@ impl KeyRepository for RedisKeyRepository {
         })
     }
 
-    async fn pexpire(&self, key: &str, milliseconds: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn pexpire(
+        &self,
+        key: &str,
+        milliseconds: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("PEXPIRE");
@@ -175,11 +221,20 @@ impl KeyRepository for RedisKeyRepository {
         Ok(ExpireResult {
             key: key.to_string(),
             success: result == 1,
-            new_ttl: if result == 1 { Some(milliseconds / 1000) } else { None },
+            new_ttl: if result == 1 {
+                Some(milliseconds / 1000)
+            } else {
+                None
+            },
         })
     }
 
-    async fn pexpire_at(&self, key: &str, timestamp: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn pexpire_at(
+        &self,
+        key: &str,
+        timestamp: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("PEXPIREAT");
@@ -231,10 +286,7 @@ impl KeyRepository for RedisKeyRepository {
 
     async fn key_type(&self, key: &str) -> Result<String, CacheError> {
         let mut conn = self.pool.get().await?;
-        let key_type: String = redis::cmd("TYPE")
-            .arg(key)
-            .query_async(&mut conn)
-            .await?;
+        let key_type: String = redis::cmd("TYPE").arg(key).query_async(&mut conn).await?;
         Ok(key_type)
     }
 
@@ -277,7 +329,12 @@ impl KeyRepository for RedisKeyRepository {
         })
     }
 
-    async fn copy(&self, source: &str, destination: &str, options: CopyOptions) -> Result<CopyResult, CacheError> {
+    async fn copy(
+        &self,
+        source: &str,
+        destination: &str,
+        options: CopyOptions,
+    ) -> Result<CopyResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("COPY");
@@ -299,7 +356,13 @@ impl KeyRepository for RedisKeyRepository {
         })
     }
 
-    async fn scan(&self, cursor: u64, pattern: Option<&str>, count: Option<u64>, key_type: Option<&str>) -> Result<ScanResult, CacheError> {
+    async fn scan(
+        &self,
+        cursor: u64,
+        pattern: Option<&str>,
+        count: Option<u64>,
+        key_type: Option<&str>,
+    ) -> Result<ScanResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("SCAN");
@@ -332,9 +395,7 @@ impl KeyRepository for RedisKeyRepository {
 
     async fn random_key(&self) -> Result<RandomKeyResult, CacheError> {
         let mut conn = self.pool.get().await?;
-        let key: Option<String> = redis::cmd("RANDOMKEY")
-            .query_async(&mut conn)
-            .await?;
+        let key: Option<String> = redis::cmd("RANDOMKEY").query_async(&mut conn).await?;
 
         Ok(RandomKeyResult { key })
     }
@@ -345,12 +406,11 @@ impl KeyRepository for RedisKeyRepository {
         }
 
         let mut conn = self.pool.get().await?;
-        let count: i64 = redis::cmd("TOUCH")
-            .arg(keys)
-            .query_async(&mut conn)
-            .await?;
+        let count: i64 = redis::cmd("TOUCH").arg(keys).query_async(&mut conn).await?;
 
-        Ok(TouchResult { count: count as usize })
+        Ok(TouchResult {
+            count: count as usize,
+        })
     }
 
     async fn unlink(&self, keys: &[String]) -> Result<DeleteResult, CacheError> {
@@ -390,10 +450,7 @@ impl KeyRepository for RedisKeyRepository {
 
     async fn dump(&self, key: &str) -> Result<DumpResult, CacheError> {
         let mut conn = self.pool.get().await?;
-        let data: Option<Vec<u8>> = redis::cmd("DUMP")
-            .arg(key)
-            .query_async(&mut conn)
-            .await?;
+        let data: Option<Vec<u8>> = redis::cmd("DUMP").arg(key).query_async(&mut conn).await?;
 
         Ok(DumpResult {
             key: key.to_string(),
@@ -401,7 +458,13 @@ impl KeyRepository for RedisKeyRepository {
         })
     }
 
-    async fn restore(&self, key: &str, ttl: i64, data: &[u8], replace: bool) -> Result<bool, CacheError> {
+    async fn restore(
+        &self,
+        key: &str,
+        ttl: i64,
+        data: &[u8],
+        replace: bool,
+    ) -> Result<bool, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("RESTORE");
@@ -477,32 +540,34 @@ impl KeyRepository for RedisKeyRepository {
 
         // Get type, TTL, PTTL in a pipeline
         let (key_type, ttl, pttl): (String, i64, i64) = redis::pipe()
-            .cmd("TYPE").arg(key)
-            .cmd("TTL").arg(key)
-            .cmd("PTTL").arg(key)
+            .cmd("TYPE")
+            .arg(key)
+            .cmd("TTL")
+            .arg(key)
+            .cmd("PTTL")
+            .arg(key)
             .query_async(&mut conn)
             .await?;
 
-        let mut info = KeyInfo::new(key.to_string(), key_type, ttl)
-            .with_pttl(pttl);
+        let mut info = KeyInfo::new(key.to_string(), key_type, ttl).with_pttl(pttl);
 
         // Try to get OBJECT info (may fail for some types)
-        if let Ok(encoding) = self.object_encoding(key).await {
-            if let Some(enc) = encoding {
-                info = info.with_encoding(enc);
-            }
+        if let Ok(encoding) = self.object_encoding(key).await
+            && let Some(enc) = encoding
+        {
+            info = info.with_encoding(enc);
         }
 
-        if let Ok(idle) = self.object_idletime(key).await {
-            if let Some(i) = idle {
-                info = info.with_idle_time(i);
-            }
+        if let Ok(idle) = self.object_idletime(key).await
+            && let Some(i) = idle
+        {
+            info = info.with_idle_time(i);
         }
 
-        if let Ok(refcount) = self.object_refcount(key).await {
-            if let Some(rc) = refcount {
-                info = info.with_ref_count(rc);
-            }
+        if let Ok(refcount) = self.object_refcount(key).await
+            && let Some(rc) = refcount
+        {
+            info = info.with_ref_count(rc);
         }
 
         // Try to get memory usage (Redis 4.0+)
@@ -535,5 +600,49 @@ impl KeyRepository for RedisKeyRepository {
             .query_async(&mut conn)
             .await?;
         Ok(time)
+    }
+
+    async fn sort(
+        &self,
+        key: &str,
+        options: SortOptions,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("SORT");
+        cmd.arg(key);
+        Self::apply_sort_options(&mut cmd, &options);
+
+        let values: Vec<redis::Value> = cmd.query_async(&mut conn).await?;
+        Ok(Self::convert_sort_values(values))
+    }
+
+    async fn sort_store(
+        &self,
+        key: &str,
+        destination: &str,
+        options: SortOptions,
+    ) -> Result<i64, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("SORT");
+        cmd.arg(key);
+        Self::apply_sort_options(&mut cmd, &options);
+        cmd.arg("STORE").arg(destination);
+
+        let count: i64 = cmd.query_async(&mut conn).await?;
+        Ok(count)
+    }
+
+    async fn sort_ro(
+        &self,
+        key: &str,
+        options: SortOptions,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("SORT_RO");
+        cmd.arg(key);
+        Self::apply_sort_options(&mut cmd, &options);
+
+        let values: Vec<redis::Value> = cmd.query_async(&mut conn).await?;
+        Ok(Self::convert_sort_values(values))
     }
 }

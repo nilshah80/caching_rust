@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::domain::entities::{
-    AppendResult, ExpiryMode, GetExOptions, MGetResult, RangeResult,
-    SetOptions, SetRangeResult, SetResult, StringValue,
+    AppendResult, ExpiryMode, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult,
+    SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StringRepository;
@@ -70,20 +70,29 @@ impl StringService {
     }
 
     /// Set a key only if it doesn't exist
-    pub async fn set_nx(&self, key: &str, value: &str, ttl_seconds: Option<u64>) -> Result<bool, CacheError> {
+    pub async fn set_nx(
+        &self,
+        key: &str,
+        value: &str,
+        ttl_seconds: Option<u64>,
+    ) -> Result<bool, CacheError> {
         let ttl = ttl_seconds.map(Duration::from_secs);
         self.repository.set_nx(key, value, ttl).await
     }
 
     /// Set a key with expiration
     pub async fn set_ex(&self, key: &str, value: &str, ttl_seconds: u64) -> Result<(), CacheError> {
-        self.repository.set_ex(key, value, Duration::from_secs(ttl_seconds)).await
+        self.repository
+            .set_ex(key, value, Duration::from_secs(ttl_seconds))
+            .await
     }
 
     /// Get multiple keys at once
     pub async fn mget(&self, keys: Vec<String>) -> Result<MGetResult, CacheError> {
         if keys.is_empty() {
-            return Err(CacheError::InvalidInput("Keys list cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Keys list cannot be empty".to_string(),
+            ));
         }
         self.repository.mget(&keys).await
     }
@@ -91,7 +100,9 @@ impl StringService {
     /// Set multiple key-value pairs at once
     pub async fn mset(&self, pairs: Vec<(String, String)>) -> Result<usize, CacheError> {
         if pairs.is_empty() {
-            return Err(CacheError::InvalidInput("Pairs list cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Pairs list cannot be empty".to_string(),
+            ));
         }
         let count = pairs.len();
         self.repository.mset(&pairs).await?;
@@ -101,7 +112,9 @@ impl StringService {
     /// Set multiple key-value pairs only if none exist
     pub async fn mset_nx(&self, pairs: Vec<(String, String)>) -> Result<bool, CacheError> {
         if pairs.is_empty() {
-            return Err(CacheError::InvalidInput("Pairs list cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Pairs list cannot be empty".to_string(),
+            ));
         }
         self.repository.mset_nx(&pairs).await
     }
@@ -142,14 +155,26 @@ impl StringService {
     }
 
     /// Get a substring of a string value
-    pub async fn get_range(&self, key: &str, start: i64, end: i64) -> Result<RangeResult, CacheError> {
+    pub async fn get_range(
+        &self,
+        key: &str,
+        start: i64,
+        end: i64,
+    ) -> Result<RangeResult, CacheError> {
         self.repository.get_range(key, start, end).await
     }
 
     /// Set a substring at a specific offset
-    pub async fn set_range(&self, key: &str, offset: i64, value: &str) -> Result<SetRangeResult, CacheError> {
+    pub async fn set_range(
+        &self,
+        key: &str,
+        offset: i64,
+        value: &str,
+    ) -> Result<SetRangeResult, CacheError> {
         if offset < 0 {
-            return Err(CacheError::InvalidInput("Offset cannot be negative".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Offset cannot be negative".to_string(),
+            ));
         }
         self.repository.set_range(key, offset, value).await
     }
@@ -190,8 +215,8 @@ impl StringService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::MockStringRepository;
     use crate::infrastructure::redis::connection::InstrumentedPool;
+    use crate::test_support::MockStringRepository;
     use async_trait::async_trait;
     use std::sync::Mutex;
 
@@ -226,7 +251,12 @@ mod tests {
             Ok(None)
         }
 
-        async fn set(&self, _key: &str, _value: &str, options: SetOptions) -> Result<SetResult, CacheError> {
+        async fn set(
+            &self,
+            _key: &str,
+            _value: &str,
+            options: SetOptions,
+        ) -> Result<SetResult, CacheError> {
             *self.last_set.lock().expect("lock") = Some(options);
             Ok(SetResult {
                 key: "k".to_string(),
@@ -235,7 +265,12 @@ mod tests {
             })
         }
 
-        async fn set_nx(&self, _key: &str, _value: &str, _ttl: Option<Duration>) -> Result<bool, CacheError> {
+        async fn set_nx(
+            &self,
+            _key: &str,
+            _value: &str,
+            _ttl: Option<Duration>,
+        ) -> Result<bool, CacheError> {
             Ok(true)
         }
 
@@ -292,7 +327,12 @@ mod tests {
             Ok(1)
         }
 
-        async fn get_range(&self, _key: &str, start: i64, end: i64) -> Result<RangeResult, CacheError> {
+        async fn get_range(
+            &self,
+            _key: &str,
+            start: i64,
+            end: i64,
+        ) -> Result<RangeResult, CacheError> {
             Ok(RangeResult {
                 key: "k".to_string(),
                 value: "v".to_string(),
@@ -301,14 +341,23 @@ mod tests {
             })
         }
 
-        async fn set_range(&self, _key: &str, _offset: i64, _value: &str) -> Result<SetRangeResult, CacheError> {
+        async fn set_range(
+            &self,
+            _key: &str,
+            _offset: i64,
+            _value: &str,
+        ) -> Result<SetRangeResult, CacheError> {
             Ok(SetRangeResult {
                 key: "k".to_string(),
                 new_length: 1,
             })
         }
 
-        async fn get_ex(&self, _key: &str, options: GetExOptions) -> Result<Option<String>, CacheError> {
+        async fn get_ex(
+            &self,
+            _key: &str,
+            options: GetExOptions,
+        ) -> Result<Option<String>, CacheError> {
             *self.last_getex.lock().expect("lock") = Some(options);
             Ok(Some("v".to_string()))
         }
@@ -327,7 +376,12 @@ mod tests {
             .set("k", "v", Some(10), Some(5), false, false, false, false)
             .await
             .expect("set");
-        let options = repo.last_set.lock().expect("lock").clone().expect("set options");
+        let options = repo
+            .last_set
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("set options");
         assert!(matches!(options.expiry_mode, Some(ExpiryMode::Px)));
         assert_eq!(options.expiry_value, Some(5));
 
@@ -335,7 +389,12 @@ mod tests {
             .get_ex("k", Some(10), None, true)
             .await
             .expect("get_ex");
-        let options = repo.last_getex.lock().expect("lock").clone().expect("getex options");
+        let options = repo
+            .last_getex
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("getex options");
         assert!(options.persist);
         assert!(options.expiry_mode.is_none());
     }

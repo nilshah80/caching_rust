@@ -39,7 +39,11 @@ pub trait JsonRepository: Send + Sync {
     /// # Arguments
     /// * `key` - The key name
     /// * `paths` - One or more JSONPath expressions
-    async fn json_get(&self, key: &str, paths: &[String]) -> Result<Option<JsonGetResult>, CacheError>;
+    async fn json_get(
+        &self,
+        key: &str,
+        paths: &[String],
+    ) -> Result<Option<JsonGetResult>, CacheError>;
 
     /// JSON.MGET - Get values from multiple keys at a path
     ///

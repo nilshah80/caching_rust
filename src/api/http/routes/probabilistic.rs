@@ -3,19 +3,19 @@
 //! HTTP routes for Count-Min Sketch, Top-K, and HyperLogLog operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{get, post},
-    Json, Router,
 };
 use validator::Validate;
 
 use crate::api::http::schemas::probabilistic::{
-    CmsIncrByRequest, CmsIncrByResponse, CmsInfoResponse, CmsInitByDimRequest, CmsInitByProbRequest,
-    CmsInitResponse, CmsMergeRequest, CmsMergeResponse, CmsQueryRequest, CmsQueryResponse,
-    PfAddRequest, PfAddResponse, PfCountRequest, PfCountResponse, PfMergeRequest, PfMergeResponse,
-    TopKAddRequest, TopKAddResponse, TopKCountResponse, TopKIncrByRequest, TopKIncrByResponse,
-    TopKInfoResponse, TopKListQuery, TopKListResponse, TopKQueryRequest, TopKQueryResponse,
-    TopKReserveRequest, TopKReserveResponse,
+    CmsIncrByRequest, CmsIncrByResponse, CmsInfoResponse, CmsInitByDimRequest,
+    CmsInitByProbRequest, CmsInitResponse, CmsMergeRequest, CmsMergeResponse, CmsQueryRequest,
+    CmsQueryResponse, PfAddRequest, PfAddResponse, PfCountRequest, PfCountResponse, PfMergeRequest,
+    PfMergeResponse, TopKAddRequest, TopKAddResponse, TopKCountResponse, TopKIncrByRequest,
+    TopKIncrByResponse, TopKInfoResponse, TopKListQuery, TopKListResponse, TopKQueryRequest,
+    TopKQueryResponse, TopKReserveRequest, TopKReserveResponse,
 };
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -114,9 +114,10 @@ async fn cms_init_by_prob(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .cms_init_by_prob(&key, request.error, request.probability);
+    let future =
+        state
+            .probabilistic_service
+            .cms_init_by_prob(&key, request.error, request.probability);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -185,9 +186,7 @@ async fn cms_query(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .cms_query(&key, request.items);
+    let future = state.probabilistic_service.cms_query(&key, request.items);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -279,9 +278,13 @@ async fn topk_reserve(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .topk_reserve(&key, request.k, request.width, request.depth, request.decay);
+    let future = state.probabilistic_service.topk_reserve(
+        &key,
+        request.k,
+        request.width,
+        request.depth,
+        request.decay,
+    );
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -337,9 +340,7 @@ async fn topk_add(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .topk_add(&key, request.items);
+    let future = state.probabilistic_service.topk_add(&key, request.items);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -377,9 +378,7 @@ async fn topk_incr_by(
         .map(|i| (i.item, i.increment))
         .collect();
 
-    let future = state
-        .probabilistic_service
-        .topk_incr_by(&key, items);
+    let future = state.probabilistic_service.topk_incr_by(&key, items);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -411,9 +410,7 @@ async fn topk_query(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .topk_query(&key, request.items);
+    let future = state.probabilistic_service.topk_query(&key, request.items);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -445,9 +442,7 @@ async fn topk_count(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .topk_count(&key, request.items);
+    let future = state.probabilistic_service.topk_count(&key, request.items);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -511,9 +506,7 @@ async fn pf_add(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .pf_add(&key, request.elements);
+    let future = state.probabilistic_service.pf_add(&key, request.elements);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -572,9 +565,7 @@ async fn pf_merge(
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
 
-    let future = state
-        .probabilistic_service
-        .pf_merge(&key, request.sources);
+    let future = state.probabilistic_service.pf_merge(&key, request.sources);
     let result = future.await?;
 
     Ok(Json(ApiResponse::new(result.into())))
@@ -583,9 +574,9 @@ async fn pf_merge(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_state_with_probabilistic_repo;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use crate::test_support::test_state_with_probabilistic_repo;
     use tower::ServiceExt;
 
     #[test]
@@ -648,7 +639,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/cms/cms-test/incrby")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"items":[{"item":"a","increment":2},{"item":"b","increment":3}]}"#))
+                    .body(Body::from(
+                        r#"{"items":[{"item":"a","increment":2},{"item":"b","increment":3}]}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -676,7 +669,9 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/cms/cms-dest/merge")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"sources":["cms-src1","cms-src2"],"weights":[1,2]}"#))
+                    .body(Body::from(
+                        r#"{"sources":["cms-src1","cms-src2"],"weights":[1,2]}"#,
+                    ))
                     .unwrap(),
             )
             .await

@@ -4,4 +4,4 @@
 
 mod cache_error;
 
-pub use cache_error::{CacheError, ErrorResponse, ErrorDetail};
+pub use cache_error::{CacheError, ErrorDetail, ErrorResponse};

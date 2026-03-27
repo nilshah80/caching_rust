@@ -3,16 +3,15 @@
 //! HTTP endpoints for Redis string operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, patch, post, put},
-    Json, Router,
 };
 
 use crate::api::http::schemas::strings::{
-    AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams,
-    GetRangeResponse, IncrementRequest, IncrementResponse, MGetRequest, MGetResponse,
-    MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
-    SetStringResponse, StrLenResponse,
+    AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams, GetRangeResponse,
+    IncrementRequest, IncrementResponse, MGetRequest, MGetResponse, MSetRequest, MSetResponse,
+    SetRangeRequest, SetRangeResponse, SetStringRequest, SetStringResponse, StrLenResponse,
 };
 use crate::domain::entities::StringValue;
 use crate::domain::errors::CacheError;
@@ -61,14 +60,10 @@ async fn get_string(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<ApiResponse<StringValue>>, CacheError> {
-    state
-        .string_service
-        .get(&key)
-        .await?
-        .map_or_else(
-            || Err(CacheError::KeyNotFound(key)),
-            |value| Ok(Json(ApiResponse::new(value))),
-        )
+    state.string_service.get(&key).await?.map_or_else(
+        || Err(CacheError::KeyNotFound(key)),
+        |value| Ok(Json(ApiResponse::new(value))),
+    )
 }
 
 /// PUT /api/v1/strings/:key
@@ -97,7 +92,8 @@ async fn set_string(
     if request.value.len() > max_value_size {
         return Err(CacheError::InvalidInput(format!(
             "Value size ({} bytes) exceeds maximum allowed size of {} bytes",
-            request.value.len(), max_value_size
+            request.value.len(),
+            max_value_size
         )));
     }
 
@@ -112,7 +108,8 @@ async fn set_string(
             request.xx,
             request.get,
             request.keep_ttl,
-        ).await?;
+        )
+        .await?;
 
     Ok(Json(ApiResponse::new(SetStringResponse {
         key: result.key,
@@ -221,7 +218,9 @@ async fn mset_strings(
         if value.len() > max_value_size {
             return Err(CacheError::InvalidInput(format!(
                 "Value for key '{}' ({} bytes) exceeds maximum allowed size of {} bytes",
-                key, value.len(), max_value_size
+                key,
+                value.len(),
+                max_value_size
             )));
         }
     }
@@ -277,10 +276,7 @@ async fn incr_string(
         result.to_string()
     };
 
-    Ok(Json(ApiResponse::new(IncrementResponse {
-        key,
-        new_value,
-    })))
+    Ok(Json(ApiResponse::new(IncrementResponse { key, new_value })))
 }
 
 /// PATCH /api/v1/strings/:key/decr
@@ -400,7 +396,10 @@ async fn get_range(
     Path(key): Path<String>,
     Query(params): Query<GetRangeParams>,
 ) -> Result<Json<ApiResponse<GetRangeResponse>>, CacheError> {
-    let result = state.string_service.get_range(&key, params.start, params.end).await?;
+    let result = state
+        .string_service
+        .get_range(&key, params.start, params.end)
+        .await?;
 
     Ok(Json(ApiResponse::new(GetRangeResponse {
         key: result.key,
@@ -434,7 +433,7 @@ async fn set_range(
     // Validate offset is non-negative
     if request.offset < 0 {
         return Err(CacheError::InvalidInput(
-            "Offset must be non-negative".to_string()
+            "Offset must be non-negative".to_string(),
         ));
     }
 
@@ -454,7 +453,10 @@ async fn set_range(
         )));
     }
 
-    let result = state.string_service.set_range(&key, request.offset, &request.value).await?;
+    let result = state
+        .string_service
+        .set_range(&key, request.offset, &request.value)
+        .await?;
 
     Ok(Json(ApiResponse::new(SetRangeResponse {
         key: result.key,
@@ -496,10 +498,10 @@ async fn get_ex_string(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{test_state, test_state_with_config};
     use crate::infrastructure::config::Settings;
-    use axum::extract::{Path, Query, State};
+    use crate::test_support::{test_state, test_state_with_config};
     use axum::Json;
+    use axum::extract::{Path, Query, State};
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -513,7 +515,9 @@ mod tests {
 
         string_repo.insert("key", "value");
 
-        let found = get_string(state.clone(), Path("key".to_string())).await.unwrap();
+        let found = get_string(state.clone(), Path("key".to_string()))
+            .await
+            .unwrap();
         assert_eq!(found.0.data.as_ref().unwrap().value, "value");
 
         let set_req = SetStringRequest {
@@ -525,14 +529,20 @@ mod tests {
             get: false,
             keep_ttl: false,
         };
-        let set_resp = set_string(state.clone(), Path("key".to_string()), Json(set_req)).await.unwrap();
+        let set_resp = set_string(state.clone(), Path("key".to_string()), Json(set_req))
+            .await
+            .unwrap();
         assert!(set_resp.0.data.unwrap().success);
 
-        let del_resp = get_del_string(state.clone(), Path("key".to_string())).await.unwrap();
+        let del_resp = get_del_string(state.clone(), Path("key".to_string()))
+            .await
+            .unwrap();
         assert!(del_resp.0.data.unwrap().existed);
 
         string_repo.insert("k1", "v1");
-        let mget_req = MGetRequest { keys: vec!["k1".to_string(), "k2".to_string()] };
+        let mget_req = MGetRequest {
+            keys: vec!["k1".to_string(), "k2".to_string()],
+        };
         let mget_resp = mget_strings(state.clone(), Json(mget_req)).await.unwrap();
         assert_eq!(mget_resp.0.data.unwrap().found_count, 1);
 
@@ -544,39 +554,81 @@ mod tests {
 
         let mut nx_pairs = HashMap::new();
         nx_pairs.insert("a".to_string(), "2".to_string());
-        let mset_nx_req = MSetRequest { pairs: nx_pairs, nx: true };
-        let mset_nx_resp = mset_strings(state.clone(), Json(mset_nx_req)).await.unwrap();
+        let mset_nx_req = MSetRequest {
+            pairs: nx_pairs,
+            nx: true,
+        };
+        let mset_nx_resp = mset_strings(state.clone(), Json(mset_nx_req))
+            .await
+            .unwrap();
         assert!(!mset_nx_resp.0.data.unwrap().success);
 
-        let incr_req = IncrementRequest { delta: 2, float: false, float_delta: None };
-        let incr_resp = incr_string(state.clone(), Path("counter".to_string()), Json(incr_req)).await.unwrap();
+        let incr_req = IncrementRequest {
+            delta: 2,
+            float: false,
+            float_delta: None,
+        };
+        let incr_resp = incr_string(state.clone(), Path("counter".to_string()), Json(incr_req))
+            .await
+            .unwrap();
         assert_eq!(incr_resp.0.data.unwrap().new_value, "2");
 
-        let incr_float = IncrementRequest { delta: 1, float: true, float_delta: Some(1.5) };
-        let incr_float_resp = incr_string(state.clone(), Path("f".to_string()), Json(incr_float)).await.unwrap();
+        let incr_float = IncrementRequest {
+            delta: 1,
+            float: true,
+            float_delta: Some(1.5),
+        };
+        let incr_float_resp = incr_string(state.clone(), Path("f".to_string()), Json(incr_float))
+            .await
+            .unwrap();
         assert_eq!(incr_float_resp.0.data.unwrap().new_value, "1.5");
 
-        let decr_req = IncrementRequest { delta: 1, float: false, float_delta: None };
-        let decr_resp = decr_string(state.clone(), Path("counter".to_string()), Json(decr_req)).await.unwrap();
+        let decr_req = IncrementRequest {
+            delta: 1,
+            float: false,
+            float_delta: None,
+        };
+        let decr_resp = decr_string(state.clone(), Path("counter".to_string()), Json(decr_req))
+            .await
+            .unwrap();
         assert_eq!(decr_resp.0.data.unwrap().new_value, "1");
 
-        let append_req = AppendRequest { value: "x".to_string() };
-        let append_resp = append_string(state.clone(), Path("k1".to_string()), Json(append_req)).await.unwrap();
+        let append_req = AppendRequest {
+            value: "x".to_string(),
+        };
+        let append_resp = append_string(state.clone(), Path("k1".to_string()), Json(append_req))
+            .await
+            .unwrap();
         assert!(append_resp.0.data.unwrap().new_length > 0);
 
-        let len_resp = strlen_string(state.clone(), Path("k1".to_string())).await.unwrap();
+        let len_resp = strlen_string(state.clone(), Path("k1".to_string()))
+            .await
+            .unwrap();
         assert!(len_resp.0.data.unwrap().length > 0);
 
         let range_params = GetRangeParams { start: 0, end: 1 };
-        let range_resp = get_range(state.clone(), Path("k1".to_string()), Query(range_params)).await.unwrap();
+        let range_resp = get_range(state.clone(), Path("k1".to_string()), Query(range_params))
+            .await
+            .unwrap();
         assert_eq!(range_resp.0.data.unwrap().start, 0);
 
-        let set_range_req = SetRangeRequest { offset: 0, value: "zz".to_string() };
-        let set_range_resp = set_range(state.clone(), Path("k1".to_string()), Json(set_range_req)).await.unwrap();
+        let set_range_req = SetRangeRequest {
+            offset: 0,
+            value: "zz".to_string(),
+        };
+        let set_range_resp = set_range(state.clone(), Path("k1".to_string()), Json(set_range_req))
+            .await
+            .unwrap();
         assert!(set_range_resp.0.data.unwrap().new_length >= 2);
 
-        let get_ex_params = GetExParams { ttl_seconds: None, ttl_ms: None, persist: false };
-        let get_ex_resp = get_ex_string(state, Path("k1".to_string()), Query(get_ex_params)).await.unwrap();
+        let get_ex_params = GetExParams {
+            ttl_seconds: None,
+            ttl_ms: None,
+            persist: false,
+        };
+        let get_ex_resp = get_ex_string(state, Path("k1".to_string()), Query(get_ex_params))
+            .await
+            .unwrap();
         assert!(get_ex_resp.0.data.is_some());
     }
 
@@ -654,7 +706,9 @@ mod tests {
         let state = State(state);
 
         // Batch within limit should succeed
-        let small_req = MGetRequest { keys: vec!["a".to_string(), "b".to_string()] };
+        let small_req = MGetRequest {
+            keys: vec!["a".to_string(), "b".to_string()],
+        };
         let result = mget_strings(state.clone(), Json(small_req)).await;
         assert!(result.is_ok());
 
@@ -677,13 +731,19 @@ mod tests {
         string_repo.insert("key", "hello");
 
         // Append within limit should succeed (5 + 3 = 8 < 10)
-        let small_append = AppendRequest { value: "abc".to_string() };
-        let result = append_string(state.clone(), Path("key".to_string()), Json(small_append)).await;
+        let small_append = AppendRequest {
+            value: "abc".to_string(),
+        };
+        let result =
+            append_string(state.clone(), Path("key".to_string()), Json(small_append)).await;
         assert!(result.is_ok());
 
         // Append that would exceed limit should fail (8 + 5 = 13 > 10)
-        let large_append = AppendRequest { value: "world".to_string() };
-        let result = append_string(state.clone(), Path("key".to_string()), Json(large_append)).await;
+        let large_append = AppendRequest {
+            value: "world".to_string(),
+        };
+        let result =
+            append_string(state.clone(), Path("key".to_string()), Json(large_append)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
@@ -698,13 +758,19 @@ mod tests {
         string_repo.insert("key", "hello");
 
         // SETRANGE within current length should succeed
-        let in_range = SetRangeRequest { offset: 0, value: "hi".to_string() };
+        let in_range = SetRangeRequest {
+            offset: 0,
+            value: "hi".to_string(),
+        };
         let result = set_range(state.clone(), Path("key".to_string()), Json(in_range)).await;
         assert!(result.is_ok());
 
         // SETRANGE that would expand beyond limit should fail
         // offset 8 + value "xyz" (3 bytes) = 11 bytes > 10 limit
-        let expand = SetRangeRequest { offset: 8, value: "xyz".to_string() };
+        let expand = SetRangeRequest {
+            offset: 8,
+            value: "xyz".to_string(),
+        };
         let result = set_range(state.clone(), Path("key".to_string()), Json(expand)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
@@ -717,8 +783,13 @@ mod tests {
         string_repo.insert("key", "hello");
 
         // Negative offset should fail with InvalidInput
-        let neg_offset = SetRangeRequest { offset: -1, value: "x".to_string() };
+        let neg_offset = SetRangeRequest {
+            offset: -1,
+            value: "x".to_string(),
+        };
         let result = set_range(state.clone(), Path("key".to_string()), Json(neg_offset)).await;
-        assert!(matches!(result, Err(CacheError::InvalidInput(ref msg)) if msg.contains("non-negative")));
+        assert!(
+            matches!(result, Err(CacheError::InvalidInput(ref msg)) if msg.contains("non-negative"))
+        );
     }
 }

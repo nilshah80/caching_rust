@@ -293,10 +293,12 @@ pub trait SortedSetRepository: Send + Sync {
     // ========== Pop operations ==========
 
     /// ZPOPMIN - Remove and return members with lowest scores
-    async fn zpopmin(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError>;
+    async fn zpopmin(&self, key: &str, count: Option<i64>)
+    -> Result<Vec<ScoredMember>, CacheError>;
 
     /// ZPOPMAX - Remove and return members with highest scores
-    async fn zpopmax(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError>;
+    async fn zpopmax(&self, key: &str, count: Option<i64>)
+    -> Result<Vec<ScoredMember>, CacheError>;
 
     /// BZPOPMIN - Blocking pop of member with lowest score
     async fn bzpopmin(

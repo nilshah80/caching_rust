@@ -78,10 +78,7 @@ impl SetRepository for RedisSetRepository {
 
     async fn scard(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("SCARD")
-            .arg(key)
-            .query_async(&mut *conn)
-            .await?;
+        let result: i64 = redis::cmd("SCARD").arg(key).query_async(&mut *conn).await?;
         Ok(result)
     }
 
@@ -117,7 +114,12 @@ impl SetRepository for RedisSetRepository {
         }
     }
 
-    async fn smove(&self, source: &str, destination: &str, member: &str) -> Result<bool, CacheError> {
+    async fn smove(
+        &self,
+        source: &str,
+        destination: &str,
+        member: &str,
+    ) -> Result<bool, CacheError> {
         let mut conn = self.pool.get().await?;
         let result: i64 = redis::cmd("SMOVE")
             .arg(source)

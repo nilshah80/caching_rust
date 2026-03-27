@@ -16,9 +16,7 @@ use crate::domain::errors::CacheError;
 use crate::domain::repositories::StreamRepository;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisStreamRepository;
-
-/// Maximum allowed timeout for blocking operations (30 seconds) - Architecture Decision 3
-const MAX_BLOCKING_TIMEOUT_SECONDS: u64 = 30;
+use crate::shared::blocking::BlockingTimeoutEnforcer;
 
 /// Default blocking timeout for SSE streaming iterations
 const DEFAULT_SSE_BLOCK_MS: i64 = 5000;
@@ -26,7 +24,7 @@ const DEFAULT_SSE_BLOCK_MS: i64 = 5000;
 /// Service for stream operations
 pub struct StreamService {
     repository: Arc<dyn StreamRepository>,
-    max_blocking_timeout: Duration,
+    timeout_enforcer: BlockingTimeoutEnforcer,
 }
 
 impl StreamService {
@@ -39,31 +37,27 @@ impl StreamService {
     pub fn new_with_repository(repository: Arc<dyn StreamRepository>) -> Self {
         Self {
             repository,
-            max_blocking_timeout: Duration::from_secs(MAX_BLOCKING_TIMEOUT_SECONDS),
+            timeout_enforcer: BlockingTimeoutEnforcer::new(),
         }
     }
 
     /// Set custom max blocking timeout (for testing or configuration)
     #[allow(dead_code)]
     pub fn with_max_blocking_timeout(mut self, timeout: Duration) -> Self {
-        self.max_blocking_timeout = timeout;
+        self.timeout_enforcer = BlockingTimeoutEnforcer::with_max(timeout.as_secs());
         self
     }
 
-    /// Enforce maximum timeout for blocking operations (Architecture Decision 3)
+    /// Enforce timeout bounds for blocking operations
     fn enforce_timeout(&self, requested: Duration) -> Duration {
-        if requested > self.max_blocking_timeout {
-            self.max_blocking_timeout
-        } else {
-            requested
-        }
+        self.timeout_enforcer.enforce(requested)
     }
 
     /// Enforce maximum block_ms for XREAD/XREADGROUP options
     /// Clamps negative values to 0 and applies max_blocking_timeout
     fn enforce_block_ms(&self, block_ms: Option<i64>) -> Option<i64> {
         block_ms.map(|ms| {
-            let max_ms = self.max_blocking_timeout.as_millis() as i64;
+            let max_ms = self.timeout_enforcer.max_timeout().as_millis() as i64;
             // Clamp negative values to 0, then apply max
             ms.max(0).min(max_ms)
         })
@@ -568,12 +562,7 @@ mod tests {
             Ok(None)
         }
 
-        async fn xack(
-            &self,
-            _key: &str,
-            _group: &str,
-            ids: &[String],
-        ) -> Result<i64, CacheError> {
+        async fn xack(&self, _key: &str, _group: &str, ids: &[String]) -> Result<i64, CacheError> {
             Ok(ids.len() as i64)
         }
 
@@ -646,7 +635,9 @@ mod tests {
         let service = create_test_service();
 
         // Empty fields should fail
-        let result = service.xadd("stream", HashMap::new(), XAddOptions::default()).await;
+        let result = service
+            .xadd("stream", HashMap::new(), XAddOptions::default())
+            .await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
 
         // Valid fields should succeed
@@ -752,7 +743,13 @@ mod tests {
 
         // Empty IDs should fail
         let result = service
-            .xclaim("stream", "group", "consumer", vec![], XClaimOptions::default())
+            .xclaim(
+                "stream",
+                "group",
+                "consumer",
+                vec![],
+                XClaimOptions::default(),
+            )
             .await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
 
@@ -771,8 +768,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_max_blocking_timeout_applies() {
-        let service =
-            create_test_service().with_max_blocking_timeout(Duration::from_secs(5));
+        let service = create_test_service().with_max_blocking_timeout(Duration::from_secs(5));
         let enforced = service.enforce_timeout(Duration::from_secs(10));
         assert_eq!(enforced, Duration::from_secs(5));
     }
@@ -797,10 +793,13 @@ mod tests {
         assert_eq!(deleted, 1);
 
         let trimmed = service
-            .xtrim("stream", XTrimStrategy::MaxLen {
-                count: 10,
-                approximate: true,
-            })
+            .xtrim(
+                "stream",
+                XTrimStrategy::MaxLen {
+                    count: 10,
+                    approximate: true,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(trimmed, 5);
@@ -902,7 +901,14 @@ mod tests {
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
 
         let result = service
-            .xreadgroup_blocking("", "consumer", vec![("stream".to_string(), ">".to_string())], None, false, 1)
+            .xreadgroup_blocking(
+                "",
+                "consumer",
+                vec![("stream".to_string(), ">".to_string())],
+                None,
+                false,
+                1,
+            )
             .await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
 
@@ -987,14 +993,103 @@ mod tests {
     #[tokio::test]
     async fn test_xsetid_success() {
         let service = create_test_service();
-        let result = service
-            .xsetid("stream", "1-0", Some(1), Some("0-0"))
-            .await;
+        let result = service.xsetid("stream", "1-0", Some(1), Some("0-0")).await;
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_default_sse_block_ms() {
         assert_eq!(StreamService::default_sse_block_ms(), 5000);
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::sync::Arc;
+    use testcontainers::ContainerAsync;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+
+    async fn start_redis() -> (ContainerAsync<Redis>, String) {
+        let container = Redis::default().start().await.unwrap();
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
+        let url = format!("redis://{host}:{port}");
+        (container, url)
+    }
+
+    async fn create_service() -> (ContainerAsync<Redis>, StreamService) {
+        let (container, redis_url) = start_redis().await;
+        let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap());
+        let service = StreamService::new(pool);
+        (container, service)
+    }
+
+    #[tokio::test]
+    async fn test_xread_blocking_returns_none_on_timeout() {
+        let (_container, service) = create_service().await;
+
+        let start = std::time::Instant::now();
+        let result = service
+            .xread_blocking(
+                vec![("nonexistent_stream".to_string(), "0-0".to_string())],
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.is_none());
+        assert!(
+            elapsed.as_millis() >= 900,
+            "Expected ~1s wait, got {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_xread_blocking_returns_data() {
+        let (_container, service) = create_service().await;
+
+        // Add entries to the stream
+        let mut fields1 = HashMap::new();
+        fields1.insert("name".to_string(), "alice".to_string());
+        fields1.insert("age".to_string(), "30".to_string());
+        service
+            .xadd("mystream", fields1, XAddOptions::default())
+            .await
+            .unwrap();
+
+        let mut fields2 = HashMap::new();
+        fields2.insert("name".to_string(), "bob".to_string());
+        fields2.insert("age".to_string(), "25".to_string());
+        service
+            .xadd("mystream", fields2, XAddOptions::default())
+            .await
+            .unwrap();
+
+        // XREAD BLOCK from ID "0-0" should return both entries
+        let result = service
+            .xread_blocking(vec![("mystream".to_string(), "0-0".to_string())], None, 1)
+            .await
+            .unwrap();
+
+        assert!(result.is_some());
+        let streams = result.unwrap();
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].key, "mystream");
+        assert_eq!(streams[0].entries.len(), 2);
+
+        // Verify first entry fields
+        let entry1 = &streams[0].entries[0];
+        assert_eq!(entry1.fields.get("name").unwrap(), "alice");
+        assert_eq!(entry1.fields.get("age").unwrap(), "30");
+
+        // Verify second entry fields
+        let entry2 = &streams[0].entries[1];
+        assert_eq!(entry2.fields.get("name").unwrap(), "bob");
+        assert_eq!(entry2.fields.get("age").unwrap(), "25");
     }
 }

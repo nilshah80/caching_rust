@@ -8,6 +8,8 @@ use std::time::Duration;
 #[cfg(not(test))]
 use axum::extract::DefaultBodyLimit;
 #[cfg(not(test))]
+use axum::http::StatusCode;
+#[cfg(not(test))]
 use tokio::net::TcpListener;
 #[cfg(not(test))]
 use tokio::signal;
@@ -15,8 +17,6 @@ use tokio::signal;
 use tower::ServiceBuilder;
 #[cfg(not(test))]
 use tower_http::cors::{Any, CorsLayer};
-#[cfg(not(test))]
-use axum::http::StatusCode;
 #[cfg(not(test))]
 use tower_http::timeout::TimeoutLayer;
 #[cfg(not(test))]

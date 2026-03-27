@@ -5,7 +5,11 @@
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, ScriptingService, SearchService, SetService, SortedSetService, StreamService, StringService, TransactionService};
+use crate::application::services::{
+    AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService,
+    ListService, ProbabilisticService, PubSubService, ScriptingService, SearchService, SetService,
+    SortedSetService, StreamService, StringService, TransactionService,
+};
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -107,15 +111,38 @@ impl AppState {
         let geo_service = Arc::new(GeoService::new(pool.clone()));
 
         // Create PubSubManager for dedicated subscription connections
+        #[allow(clippy::expect_used)]
         let pubsub_manager = Arc::new(
             PubSubManager::new(&config.redis.url, config.pubsub.clone())
-                .expect("Failed to create PubSubManager")
+                .expect("Failed to create PubSubManager"),
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(TransactionService::new(pool.clone()));
         let scripting_service = Arc::new(ScriptingService::new(pool.clone()));
 
-        Self::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service, transaction_service, scripting_service)
+        Self::new_with_services(
+            pool,
+            config,
+            capabilities,
+            sse_semaphore,
+            string_service,
+            hash_service,
+            list_service,
+            set_service,
+            sorted_set_service,
+            bitmap_service,
+            key_service,
+            admin_service,
+            stream_service,
+            json_service,
+            search_service,
+            bloom_service,
+            probabilistic_service,
+            geo_service,
+            pubsub_service,
+            transaction_service,
+            scripting_service,
+        )
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -172,7 +199,12 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository, MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository};
+    use crate::test_support::{
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository,
+        MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
+        MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
+        MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+    };
 
     #[test]
     fn test_new_with_services() {
@@ -180,23 +212,51 @@ mod tests {
         let config = Arc::new(Settings::default());
         let capabilities = Arc::new(RedisCapabilities::default_capabilities());
         let sse_semaphore = Arc::new(Semaphore::new(config.blocking.max_sse_connections));
-        let string_service = Arc::new(StringService::new_with_repository(Arc::new(MockStringRepository::new())));
-        let hash_service = Arc::new(HashService::new_with_repository(Arc::new(MockHashRepository::new())));
-        let list_service = Arc::new(ListService::new_with_repository(Arc::new(MockListRepository::new())));
-        let set_service = Arc::new(SetService::new_with_repository(Arc::new(MockSetRepository::new())));
-        let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(MockSortedSetRepository::new())));
-        let bitmap_service = Arc::new(BitMapService::new_with_repository(Arc::new(MockBitMapRepository::new())));
-        let key_service = Arc::new(KeyService::new_with_repository(Arc::new(MockKeyRepository::new())));
-        let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(MockAdminRepository::default())));
-        let stream_service = Arc::new(StreamService::new_with_repository(Arc::new(MockStreamRepository::new())));
-        let json_service = Arc::new(JsonService::new_with_repository(Arc::new(MockJsonRepository::new())));
-        let search_service = Arc::new(SearchService::new_with_repository(Arc::new(MockSearchRepository::new())));
-        let bloom_service = Arc::new(BloomService::new_with_repository(Arc::new(MockBloomRepository::new())));
-        let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(Arc::new(MockProbabilisticRepository::new())));
-        let geo_service = Arc::new(GeoService::new_with_repository(Arc::new(MockGeoRepository::new())));
+        let string_service = Arc::new(StringService::new_with_repository(Arc::new(
+            MockStringRepository::new(),
+        )));
+        let hash_service = Arc::new(HashService::new_with_repository(Arc::new(
+            MockHashRepository::new(),
+        )));
+        let list_service = Arc::new(ListService::new_with_repository(Arc::new(
+            MockListRepository::new(),
+        )));
+        let set_service = Arc::new(SetService::new_with_repository(Arc::new(
+            MockSetRepository::new(),
+        )));
+        let sorted_set_service = Arc::new(SortedSetService::new_with_repository(Arc::new(
+            MockSortedSetRepository::new(),
+        )));
+        let bitmap_service = Arc::new(BitMapService::new_with_repository(Arc::new(
+            MockBitMapRepository::new(),
+        )));
+        let key_service = Arc::new(KeyService::new_with_repository(Arc::new(
+            MockKeyRepository::new(),
+        )));
+        let admin_service = Arc::new(AdminService::new_with_repository(Arc::new(
+            MockAdminRepository,
+        )));
+        let stream_service = Arc::new(StreamService::new_with_repository(Arc::new(
+            MockStreamRepository::new(),
+        )));
+        let json_service = Arc::new(JsonService::new_with_repository(Arc::new(
+            MockJsonRepository::new(),
+        )));
+        let search_service = Arc::new(SearchService::new_with_repository(Arc::new(
+            MockSearchRepository::new(),
+        )));
+        let bloom_service = Arc::new(BloomService::new_with_repository(Arc::new(
+            MockBloomRepository::new(),
+        )));
+        let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(Arc::new(
+            MockProbabilisticRepository::new(),
+        )));
+        let geo_service = Arc::new(GeoService::new_with_repository(Arc::new(
+            MockGeoRepository::new(),
+        )));
         let pubsub_manager = Arc::new(
             PubSubManager::new(&config.redis.url, config.pubsub.clone())
-                .expect("Failed to create PubSubManager for tests")
+                .expect("Failed to create PubSubManager for tests"),
         );
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(TransactionService::new(pool.clone()));

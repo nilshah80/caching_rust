@@ -3,9 +3,9 @@
 //! HTTP endpoints for Redis bitmap operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{get, post, put},
-    Json, Router,
 };
 
 use crate::api::http::schemas::bitmaps::{
@@ -78,7 +78,9 @@ pub async fn setbit(
         .bitmap_service
         .setbit(&key, offset, request.value)
         .await?;
-    Ok(Json(ApiResponse::success(BitSetResponse { original_value })))
+    Ok(Json(ApiResponse::success(BitSetResponse {
+        original_value,
+    })))
 }
 
 /// BITCOUNT - Count the number of set bits in a string

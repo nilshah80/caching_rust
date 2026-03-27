@@ -5,11 +5,28 @@
 use async_trait::async_trait;
 
 use crate::domain::entities::{
-    CopyOptions, CopyResult, DeleteResult, DumpResult, ExistsResult, ExpireOptions,
-    ExpireResult, KeyInfo, PersistResult, RandomKeyResult, RenameResult,
-    ScanResult, TouchResult,
+    CopyOptions, CopyResult, DeleteResult, DumpResult, ExistsResult, ExpireOptions, ExpireResult,
+    KeyInfo, PersistResult, RandomKeyResult, RenameResult, ScanResult, TouchResult,
 };
 use crate::domain::errors::CacheError;
+
+/// Options for SORT command
+#[derive(Debug, Clone, Default)]
+pub struct SortOptions {
+    pub by: Option<String>,
+    pub get: Vec<String>,
+    pub limit: Option<(i64, i64)>,
+    pub order: SortOrder,
+    pub alpha: bool,
+}
+
+/// Sort order for SORT command
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SortOrder {
+    #[default]
+    Asc,
+    Desc,
+}
 
 /// Repository trait for Redis key operations
 #[async_trait]
@@ -21,16 +38,36 @@ pub trait KeyRepository: Send + Sync {
     async fn exists(&self, keys: &[String]) -> Result<ExistsResult, CacheError>;
 
     /// EXPIRE - Set expiration in seconds
-    async fn expire(&self, key: &str, seconds: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError>;
+    async fn expire(
+        &self,
+        key: &str,
+        seconds: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError>;
 
     /// EXPIREAT - Set expiration as Unix timestamp (seconds)
-    async fn expire_at(&self, key: &str, timestamp: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError>;
+    async fn expire_at(
+        &self,
+        key: &str,
+        timestamp: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError>;
 
     /// PEXPIRE - Set expiration in milliseconds
-    async fn pexpire(&self, key: &str, milliseconds: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError>;
+    async fn pexpire(
+        &self,
+        key: &str,
+        milliseconds: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError>;
 
     /// PEXPIREAT - Set expiration as Unix timestamp (milliseconds)
-    async fn pexpire_at(&self, key: &str, timestamp: i64, options: ExpireOptions) -> Result<ExpireResult, CacheError>;
+    async fn pexpire_at(
+        &self,
+        key: &str,
+        timestamp: i64,
+        options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError>;
 
     /// TTL - Get time-to-live in seconds
     async fn ttl(&self, key: &str) -> Result<i64, CacheError>;
@@ -51,10 +88,21 @@ pub trait KeyRepository: Send + Sync {
     async fn rename_nx(&self, key: &str, new_key: &str) -> Result<RenameResult, CacheError>;
 
     /// COPY - Copy a key to a new key
-    async fn copy(&self, source: &str, destination: &str, options: CopyOptions) -> Result<CopyResult, CacheError>;
+    async fn copy(
+        &self,
+        source: &str,
+        destination: &str,
+        options: CopyOptions,
+    ) -> Result<CopyResult, CacheError>;
 
     /// SCAN - Incrementally iterate keys
-    async fn scan(&self, cursor: u64, pattern: Option<&str>, count: Option<u64>, key_type: Option<&str>) -> Result<ScanResult, CacheError>;
+    async fn scan(
+        &self,
+        cursor: u64,
+        pattern: Option<&str>,
+        count: Option<u64>,
+        key_type: Option<&str>,
+    ) -> Result<ScanResult, CacheError>;
 
     /// KEYS - Find all keys matching a pattern (use with caution in production)
     async fn keys(&self, pattern: &str) -> Result<Vec<String>, CacheError>;
@@ -72,7 +120,13 @@ pub trait KeyRepository: Send + Sync {
     async fn dump(&self, key: &str) -> Result<DumpResult, CacheError>;
 
     /// RESTORE - Deserialize a value into a key
-    async fn restore(&self, key: &str, ttl: i64, data: &[u8], replace: bool) -> Result<bool, CacheError>;
+    async fn restore(
+        &self,
+        key: &str,
+        ttl: i64,
+        data: &[u8],
+        replace: bool,
+    ) -> Result<bool, CacheError>;
 
     /// OBJECT ENCODING - Get the encoding of a key
     async fn object_encoding(&self, key: &str) -> Result<Option<String>, CacheError>;
@@ -94,4 +148,26 @@ pub trait KeyRepository: Send + Sync {
 
     /// PEXPIRETIME - Get absolute Unix timestamp in milliseconds when key will expire (Redis 7.0+)
     async fn pexpire_time(&self, key: &str) -> Result<i64, CacheError>;
+
+    /// SORT - Sort the elements in a list, set or sorted set
+    async fn sort(
+        &self,
+        key: &str,
+        options: SortOptions,
+    ) -> Result<Vec<Option<String>>, CacheError>;
+
+    /// SORT...STORE - Sort and store the result in a destination key
+    async fn sort_store(
+        &self,
+        key: &str,
+        destination: &str,
+        options: SortOptions,
+    ) -> Result<i64, CacheError>;
+
+    /// SORT_RO - Read-only variant of SORT (Redis 7.0+)
+    async fn sort_ro(
+        &self,
+        key: &str,
+        options: SortOptions,
+    ) -> Result<Vec<Option<String>>, CacheError>;
 }

@@ -20,7 +20,11 @@ use crate::domain::entities::{
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct BloomReserveRequest {
     /// Error rate (false positive rate), must be between 0 and 1
-    #[validate(range(min = 0.0001, max = 0.9999, message = "Error rate must be between 0.0001 and 0.9999"))]
+    #[validate(range(
+        min = 0.0001,
+        max = 0.9999,
+        message = "Error rate must be between 0.0001 and 0.9999"
+    ))]
     pub error_rate: f64,
 
     /// Expected capacity (number of items)

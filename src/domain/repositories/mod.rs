@@ -26,23 +26,21 @@ pub use bitmap_repository::{
 pub use bloom_repository::BloomRepository;
 pub use geo_repository::{
     GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,
-    GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder,
-    GeoUnit,
+    GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder, GeoUnit,
 };
 pub use hash_repository::HashRepository;
 pub use json_repository::JsonRepository;
-pub use key_repository::KeyRepository;
+pub use key_repository::{KeyRepository, SortOptions, SortOrder};
 pub use list_repository::{
-    BlockingPopResult, InsertPosition, ListDirection, ListRepository, LPosOptions,
+    BlockingPopResult, InsertPosition, LMPopResult, LPosOptions, ListDirection, ListRepository,
 };
 pub use probabilistic_repository::ProbabilisticRepository;
+pub use pubsub_repository::{NumSubResult, PubSubRepository, PublishResult};
 pub use search_repository::SearchRepository;
 pub use set_repository::{SetRepository, SetScanResult};
 pub use sorted_set_repository::{
-    LexRange, ScoreRange, ScoredMember, SortedSetRepository, ZAddOptions, ZAddResult,
-    ZAggregate, ZPopDirection, ZPopResult, ZRangeOptions, ZRangeType, ZScanResult,
-    ZSetAlgebraOptions,
+    LexRange, ScoreRange, ScoredMember, SortedSetRepository, ZAddOptions, ZAddResult, ZAggregate,
+    ZPopDirection, ZPopResult, ZRangeOptions, ZRangeType, ZScanResult, ZSetAlgebraOptions,
 };
-pub use pubsub_repository::{NumSubResult, PubSubRepository, PublishResult};
 pub use stream_repository::StreamRepository;
 pub use string_repository::StringRepository;

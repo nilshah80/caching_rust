@@ -106,28 +106,19 @@ impl HashRepository for RedisHashRepository {
 
     async fn hkeys(&self, key: &str) -> Result<Vec<String>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: Vec<String> = redis::cmd("HKEYS")
-            .arg(key)
-            .query_async(&mut *conn)
-            .await?;
+        let result: Vec<String> = redis::cmd("HKEYS").arg(key).query_async(&mut *conn).await?;
         Ok(result)
     }
 
     async fn hvals(&self, key: &str) -> Result<Vec<String>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: Vec<String> = redis::cmd("HVALS")
-            .arg(key)
-            .query_async(&mut *conn)
-            .await?;
+        let result: Vec<String> = redis::cmd("HVALS").arg(key).query_async(&mut *conn).await?;
         Ok(result)
     }
 
     async fn hlen(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("HLEN")
-            .arg(key)
-            .query_async(&mut *conn)
-            .await?;
+        let result: i64 = redis::cmd("HLEN").arg(key).query_async(&mut *conn).await?;
         Ok(result)
     }
 
@@ -163,7 +154,12 @@ impl HashRepository for RedisHashRepository {
         Ok(result)
     }
 
-    async fn hrand_field(&self, key: &str, count: Option<i64>, with_values: bool) -> Result<Vec<String>, CacheError> {
+    async fn hrand_field(
+        &self,
+        key: &str,
+        count: Option<i64>,
+        with_values: bool,
+    ) -> Result<Vec<String>, CacheError> {
         let mut conn = self.pool.get().await?;
         let mut cmd = redis::cmd("HRANDFIELD");
         cmd.arg(key);
@@ -180,7 +176,13 @@ impl HashRepository for RedisHashRepository {
         }
     }
 
-    async fn hscan(&self, key: &str, cursor: u64, pattern: Option<String>, count: Option<u64>) -> Result<(u64, Vec<String>), CacheError> {
+    async fn hscan(
+        &self,
+        key: &str,
+        cursor: u64,
+        pattern: Option<String>,
+        count: Option<u64>,
+    ) -> Result<(u64, Vec<String>), CacheError> {
         let mut conn = self.pool.get().await?;
         let mut cmd = redis::cmd("HSCAN");
         cmd.arg(key).arg(cursor);

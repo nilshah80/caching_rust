@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(dead_code, clippy::needless_range_loop)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -6,56 +7,173 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::application::services::{AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService, StreamService, StringService};
-use crate::infrastructure::redis::pubsub_manager::PubSubManager;
+use crate::application::services::{
+    AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService,
+    ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService,
+    StreamService, StringService,
+};
 use crate::domain::entities::{
-    // Bloom entities
-    BloomAddResult, BloomCardResult, BloomExistsResult, BloomInfo, BloomInsertOptions,
-    BloomInsertResult, BloomLoadChunkResult, BloomReserveOptions, BloomReserveResult,
-    BloomScanDumpResult, CuckooAddResult, CuckooCountResult, CuckooDelResult, CuckooExistsResult,
-    CuckooInfo, CuckooInsertOptions, CuckooInsertResult, CuckooLoadChunkResult,
-    CuckooReserveOptions, CuckooReserveResult, CuckooScanDumpResult,
-    AclLogEntry, AutoClaimResult, BgRewriteAofResult, BgSaveResult, ClaimResult, ClientInfo,
-    ClientKillOptions, ClientPauseOptions, ConsumerGroupInfo, ConsumerInfo, CopyKeyOptions,
-    CopyOptions, CopyResult, DeleteResult, DumpResult, ExistsResult, ExpireOptions, ExpireResult,
-    FlushOptions, FlushResult, KeyInfo, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
-    PendingEntry, PendingSummary, PersistResult, RandomKeyResult, RenameResult, ScanResult,
-    ServerInfo, ServerTime, SlowlogEntry, StreamEntry, StreamInfo, StreamReadResult, TouchResult,
-    XAddOptions, XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions,
-    XReadGroupOptions, XReadOptions, XTrimStrategy, AppendResult, GetExOptions, MGetResult,
-    RangeResult, SetOptions, SetRangeResult, SetResult, StringValue,
-    JsonArrAppendResult, JsonArrIndexResult, JsonArrInsertResult, JsonArrLenResult,
-    JsonArrPopResult, JsonArrTrimResult, JsonClearResult, JsonDebugMemoryResult, JsonDelResult,
-    JsonGetResult, JsonMGetItem, JsonMGetResult, JsonMSetItem, JsonNumResult, JsonObjKeysResult,
-    JsonObjLenResult, JsonRespResult, JsonSetOptions, JsonSetResult, JsonStrAppendResult,
-    JsonStrLenResult, JsonToggleResult, JsonTypeResult,
+    AclDryrunResult,
+    AclLogEntry,
     // Search entities
-    AggregateOptions, AggregateResult, AliasResult, DictDumpResult, DictResult, ExplainResult,
-    IndexAlterResult, IndexCreateOptions, IndexCreateResult, IndexDropResult, IndexInfo,
-    ProfileResult, ProfileType, SearchFieldSchema, SearchOptions, SearchResult, SpellcheckOptions,
-    SpellcheckResult, SugAddOptions, SugAddResult, SugDelResult, SugGetOptions, SugLenResult,
-    Suggestion, SynonymGroup, SynonymUpdateResult,
+    AggregateOptions,
+    AggregateResult,
+    AliasResult,
+    AppendResult,
+    AutoClaimResult,
+    BgRewriteAofResult,
+    BgSaveResult,
+    // Bloom entities
+    BloomAddResult,
+    BloomCardResult,
+    BloomExistsResult,
+    BloomInfo,
+    BloomInsertOptions,
+    BloomInsertResult,
+    BloomLoadChunkResult,
+    BloomReserveOptions,
+    BloomReserveResult,
+    BloomScanDumpResult,
+    ClaimResult,
+    ClientInfo,
+    ClientKillOptions,
+    ClientPauseOptions,
     // Probabilistic entities
-    CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult,
-    PfAddResult, PfCountResult, PfMergeResult,
-    TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo, TopKItem, TopKListResult,
-    TopKQueryResult, TopKReserveResult,
+    CmsIncrByResult,
+    CmsInfo,
+    CmsInitResult,
+    CmsMergeResult,
+    CmsQueryResult,
+    ConsumerGroupInfo,
+    ConsumerInfo,
+    CopyKeyOptions,
+    CopyOptions,
+    CopyResult,
+    CuckooAddResult,
+    CuckooCountResult,
+    CuckooDelResult,
+    CuckooExistsResult,
+    CuckooInfo,
+    CuckooInsertOptions,
+    CuckooInsertResult,
+    CuckooLoadChunkResult,
+    CuckooReserveOptions,
+    CuckooReserveResult,
+    CuckooScanDumpResult,
+    DeleteResult,
+    DictDumpResult,
+    DictResult,
+    DumpResult,
+    ExistsResult,
+    ExpireOptions,
+    ExpireResult,
+    ExplainResult,
+    FlushOptions,
+    FlushResult,
+    GetExOptions,
+    IndexAlterResult,
+    IndexCreateOptions,
+    IndexCreateResult,
+    IndexDropResult,
+    IndexInfo,
+    JsonArrAppendResult,
+    JsonArrIndexResult,
+    JsonArrInsertResult,
+    JsonArrLenResult,
+    JsonArrPopResult,
+    JsonArrTrimResult,
+    JsonClearResult,
+    JsonDebugMemoryResult,
+    JsonDelResult,
+    JsonGetResult,
+    JsonMGetItem,
+    JsonMGetResult,
+    JsonMSetItem,
+    JsonNumResult,
+    JsonObjKeysResult,
+    JsonObjLenResult,
+    JsonRespResult,
+    JsonSetOptions,
+    JsonSetResult,
+    JsonStrAppendResult,
+    JsonStrLenResult,
+    JsonToggleResult,
+    JsonTypeResult,
+    KeyInfo,
+    LatencyEvent,
+    MGetResult,
+    MemoryStats,
+    MemoryUsage,
+    MoveKeyOptions,
+    PendingEntry,
+    PendingSummary,
+    PersistResult,
+    PfAddResult,
+    PfCountResult,
+    PfMergeResult,
+    ProfileResult,
+    ProfileType,
+    RandomKeyResult,
+    RangeResult,
+    RenameResult,
+    ScanResult,
+    SearchFieldSchema,
+    SearchOptions,
+    SearchResult,
+    ServerInfo,
+    ServerTime,
+    SetOptions,
+    SetRangeResult,
+    SetResult,
+    SlowlogEntry,
+    SpellcheckOptions,
+    SpellcheckResult,
+    StreamEntry,
+    StreamInfo,
+    StreamReadResult,
+    StringValue,
+    SugAddOptions,
+    SugAddResult,
+    SugDelResult,
+    SugGetOptions,
+    SugLenResult,
+    Suggestion,
+    SynonymGroup,
+    SynonymUpdateResult,
+    TopKAddResult,
+    TopKCountResult,
+    TopKIncrByResult,
+    TopKInfo,
+    TopKItem,
+    TopKListResult,
+    TopKQueryResult,
+    TopKReserveResult,
+    TouchResult,
+    XAddOptions,
+    XAutoClaimOptions,
+    XClaimOptions,
+    XGroupCreateOptions,
+    XPendingOptions,
+    XReadGroupOptions,
+    XReadOptions,
+    XTrimStrategy,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
-    BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository, KeyRepository,
-    LexRange, ListDirection, ListRepository, LPosOptions, ProbabilisticRepository, PubSubRepository,
-    NumSubResult, PublishResult, ScoreRange, ScoredMember,
-    SearchRepository, SetRepository, SetScanResult, SortedSetRepository, StreamRepository, StringRepository,
-    ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
-    ZSetAlgebraOptions,
+    BlockingPopResult, BloomRepository, HashRepository, InsertPosition, JsonRepository,
+    KeyRepository, LMPopResult, LPosOptions, LexRange, ListDirection, ListRepository, NumSubResult,
+    ProbabilisticRepository, PubSubRepository, PublishResult, ScoreRange, ScoredMember,
+    SearchRepository, SetRepository, SetScanResult, SortOptions, SortedSetRepository,
+    StreamRepository, StringRepository, ZAddOptions, ZAddResult, ZPopDirection, ZPopResult,
+    ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
 };
-use serde_json::Value;
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
+use crate::infrastructure::redis::pubsub_manager::PubSubManager;
 use crate::shared::app_state::AppState;
+use serde_json::Value;
 
 #[derive(Default)]
 pub struct MockStringRepository {
@@ -70,7 +188,10 @@ impl MockStringRepository {
     }
 
     pub fn insert(&self, key: &str, value: &str) {
-        self.store.lock().expect("store lock").insert(key.to_string(), value.to_string());
+        self.store
+            .lock()
+            .expect("store lock")
+            .insert(key.to_string(), value.to_string());
     }
 }
 
@@ -78,10 +199,17 @@ impl MockStringRepository {
 impl StringRepository for MockStringRepository {
     async fn get(&self, key: &str) -> Result<Option<StringValue>, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(store.get(key).map(|value| StringValue::new(key.to_string(), value.clone())))
+        Ok(store
+            .get(key)
+            .map(|value| StringValue::new(key.to_string(), value.clone())))
     }
 
-    async fn set(&self, key: &str, value: &str, options: SetOptions) -> Result<SetResult, CacheError> {
+    async fn set(
+        &self,
+        key: &str,
+        value: &str,
+        options: SetOptions,
+    ) -> Result<SetResult, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         let exists = store.contains_key(key);
         if options.nx && exists {
@@ -113,7 +241,12 @@ impl StringRepository for MockStringRepository {
         })
     }
 
-    async fn set_nx(&self, key: &str, value: &str, _ttl: Option<Duration>) -> Result<bool, CacheError> {
+    async fn set_nx(
+        &self,
+        key: &str,
+        value: &str,
+        _ttl: Option<Duration>,
+    ) -> Result<bool, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         if store.contains_key(key) {
             return Ok(false);
@@ -217,7 +350,11 @@ impl StringRepository for MockStringRepository {
         let store = self.store.lock().expect("store lock");
         let value = store.get(key).cloned().unwrap_or_default();
         let len = value.len() as i64;
-        let start = if start < 0 { (len + start).max(0) } else { start };
+        let start = if start < 0 {
+            (len + start).max(0)
+        } else {
+            start
+        };
         let end = if end < 0 { len + end } else { end };
         let end = end.min(len.saturating_sub(1)).max(start - 1);
         let start_usize = start as usize;
@@ -236,7 +373,12 @@ impl StringRepository for MockStringRepository {
         })
     }
 
-    async fn set_range(&self, key: &str, offset: i64, value: &str) -> Result<SetRangeResult, CacheError> {
+    async fn set_range(
+        &self,
+        key: &str,
+        offset: i64,
+        value: &str,
+    ) -> Result<SetRangeResult, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         let mut current = store.get(key).cloned().unwrap_or_default();
         let offset_usize = offset.max(0) as usize;
@@ -256,7 +398,11 @@ impl StringRepository for MockStringRepository {
         })
     }
 
-    async fn get_ex(&self, key: &str, _options: GetExOptions) -> Result<Option<String>, CacheError> {
+    async fn get_ex(
+        &self,
+        key: &str,
+        _options: GetExOptions,
+    ) -> Result<Option<String>, CacheError> {
         let store = self.store.lock().expect("store lock");
         Ok(store.get(key).cloned())
     }
@@ -458,8 +604,23 @@ impl AdminRepository for MockAdminRepository {
         Ok(format!("pass-{bits}"))
     }
 
-    async fn acl_log(&self, _count: Option<i64>, _reset: bool) -> Result<Vec<AclLogEntry>, CacheError> {
+    async fn acl_log(
+        &self,
+        _count: Option<i64>,
+        _reset: bool,
+    ) -> Result<Vec<AclLogEntry>, CacheError> {
         Ok(vec![AclLogEntry::default()])
+    }
+
+    async fn acl_dryrun(
+        &self,
+        _username: &str,
+        _command: &[String],
+    ) -> Result<AclDryrunResult, CacheError> {
+        Ok(AclDryrunResult {
+            allowed: true,
+            reason: None,
+        })
     }
 }
 
@@ -476,7 +637,10 @@ impl MockKeyRepository {
     }
 
     pub fn insert(&self, key: &str, value: &str) {
-        self.store.lock().expect("store lock").insert(key.to_string(), value.to_string());
+        self.store
+            .lock()
+            .expect("store lock")
+            .insert(key.to_string(), value.to_string());
     }
 }
 
@@ -494,7 +658,11 @@ impl KeyRepository for MockKeyRepository {
             }
         }
         let count = deleted.len();
-        Ok(DeleteResult { deleted, not_found, count })
+        Ok(DeleteResult {
+            deleted,
+            not_found,
+            count,
+        })
     }
 
     async fn exists(&self, keys: &[String]) -> Result<ExistsResult, CacheError> {
@@ -509,27 +677,67 @@ impl KeyRepository for MockKeyRepository {
             }
         }
         let count = existing.len();
-        Ok(ExistsResult { existing, missing, count })
+        Ok(ExistsResult {
+            existing,
+            missing,
+            count,
+        })
     }
 
-    async fn expire(&self, key: &str, _seconds: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn expire(
+        &self,
+        key: &str,
+        _seconds: i64,
+        _options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+        Ok(ExpireResult {
+            key: key.to_string(),
+            success: store.contains_key(key),
+            new_ttl: None,
+        })
     }
 
-    async fn expire_at(&self, key: &str, _timestamp: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn expire_at(
+        &self,
+        key: &str,
+        _timestamp: i64,
+        _options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+        Ok(ExpireResult {
+            key: key.to_string(),
+            success: store.contains_key(key),
+            new_ttl: None,
+        })
     }
 
-    async fn pexpire(&self, key: &str, _milliseconds: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn pexpire(
+        &self,
+        key: &str,
+        _milliseconds: i64,
+        _options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+        Ok(ExpireResult {
+            key: key.to_string(),
+            success: store.contains_key(key),
+            new_ttl: None,
+        })
     }
 
-    async fn pexpire_at(&self, key: &str, _timestamp: i64, _options: ExpireOptions) -> Result<ExpireResult, CacheError> {
+    async fn pexpire_at(
+        &self,
+        key: &str,
+        _timestamp: i64,
+        _options: ExpireOptions,
+    ) -> Result<ExpireResult, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(ExpireResult { key: key.to_string(), success: store.contains_key(key), new_ttl: None })
+        Ok(ExpireResult {
+            key: key.to_string(),
+            success: store.contains_key(key),
+            new_ttl: None,
+        })
     }
 
     async fn ttl(&self, key: &str) -> Result<i64, CacheError> {
@@ -552,7 +760,10 @@ impl KeyRepository for MockKeyRepository {
 
     async fn persist(&self, key: &str) -> Result<PersistResult, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(PersistResult { key: key.to_string(), success: store.contains_key(key) })
+        Ok(PersistResult {
+            key: key.to_string(),
+            success: store.contains_key(key),
+        })
     }
 
     async fn key_type(&self, key: &str) -> Result<String, CacheError> {
@@ -568,7 +779,11 @@ impl KeyRepository for MockKeyRepository {
         let mut store = self.store.lock().expect("store lock");
         if let Some(value) = store.remove(key) {
             store.insert(new_key.to_string(), value);
-            Ok(RenameResult { old_key: key.to_string(), new_key: new_key.to_string(), success: true })
+            Ok(RenameResult {
+                old_key: key.to_string(),
+                new_key: new_key.to_string(),
+                success: true,
+            })
         } else {
             Err(CacheError::KeyNotFound(key.to_string()))
         }
@@ -577,32 +792,64 @@ impl KeyRepository for MockKeyRepository {
     async fn rename_nx(&self, key: &str, new_key: &str) -> Result<RenameResult, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         if store.contains_key(new_key) {
-            return Ok(RenameResult { old_key: key.to_string(), new_key: new_key.to_string(), success: false });
+            return Ok(RenameResult {
+                old_key: key.to_string(),
+                new_key: new_key.to_string(),
+                success: false,
+            });
         }
         if let Some(value) = store.remove(key) {
             store.insert(new_key.to_string(), value);
-            Ok(RenameResult { old_key: key.to_string(), new_key: new_key.to_string(), success: true })
+            Ok(RenameResult {
+                old_key: key.to_string(),
+                new_key: new_key.to_string(),
+                success: true,
+            })
         } else {
             Err(CacheError::KeyNotFound(key.to_string()))
         }
     }
 
-    async fn copy(&self, source: &str, destination: &str, options: CopyOptions) -> Result<CopyResult, CacheError> {
+    async fn copy(
+        &self,
+        source: &str,
+        destination: &str,
+        options: CopyOptions,
+    ) -> Result<CopyResult, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         if !options.replace && store.contains_key(destination) {
-            return Ok(CopyResult { source: source.to_string(), destination: destination.to_string(), success: false });
+            return Ok(CopyResult {
+                source: source.to_string(),
+                destination: destination.to_string(),
+                success: false,
+            });
         }
         if let Some(value) = store.get(source).cloned() {
             store.insert(destination.to_string(), value);
-            Ok(CopyResult { source: source.to_string(), destination: destination.to_string(), success: true })
+            Ok(CopyResult {
+                source: source.to_string(),
+                destination: destination.to_string(),
+                success: true,
+            })
         } else {
-            Ok(CopyResult { source: source.to_string(), destination: destination.to_string(), success: false })
+            Ok(CopyResult {
+                source: source.to_string(),
+                destination: destination.to_string(),
+                success: false,
+            })
         }
     }
 
-    async fn scan(&self, cursor: u64, pattern: Option<&str>, count: Option<u64>, _key_type: Option<&str>) -> Result<ScanResult, CacheError> {
+    async fn scan(
+        &self,
+        cursor: u64,
+        pattern: Option<&str>,
+        count: Option<u64>,
+        _key_type: Option<&str>,
+    ) -> Result<ScanResult, CacheError> {
         let store = self.store.lock().expect("store lock");
-        let keys: Vec<String> = store.keys()
+        let keys: Vec<String> = store
+            .keys()
             .filter(|k| {
                 if let Some(pat) = pattern {
                     let pat = pat.replace('*', "");
@@ -616,14 +863,23 @@ impl KeyRepository for MockKeyRepository {
             .collect();
 
         let key_count = keys.len();
-        let next_cursor = if cursor == 0 && !keys.is_empty() { 0 } else { 0 };
-        Ok(ScanResult { cursor: next_cursor, keys, count: key_count })
+        let next_cursor = if cursor == 0 && !keys.is_empty() {
+            0
+        } else {
+            0
+        };
+        Ok(ScanResult {
+            cursor: next_cursor,
+            keys,
+            count: key_count,
+        })
     }
 
     async fn keys(&self, pattern: &str) -> Result<Vec<String>, CacheError> {
         let store = self.store.lock().expect("store lock");
         let pat = pattern.replace('*', "");
-        Ok(store.keys()
+        Ok(store
+            .keys()
             .filter(|k| pat.is_empty() || k.contains(&pat))
             .cloned()
             .collect())
@@ -631,7 +887,9 @@ impl KeyRepository for MockKeyRepository {
 
     async fn random_key(&self) -> Result<RandomKeyResult, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(RandomKeyResult { key: store.keys().next().cloned() })
+        Ok(RandomKeyResult {
+            key: store.keys().next().cloned(),
+        })
     }
 
     async fn touch(&self, keys: &[String]) -> Result<TouchResult, CacheError> {
@@ -647,13 +905,25 @@ impl KeyRepository for MockKeyRepository {
     async fn dump(&self, key: &str) -> Result<DumpResult, CacheError> {
         let store = self.store.lock().expect("store lock");
         if let Some(value) = store.get(key) {
-            Ok(DumpResult { key: key.to_string(), data: Some(value.clone()) })
+            Ok(DumpResult {
+                key: key.to_string(),
+                data: Some(value.clone()),
+            })
         } else {
-            Ok(DumpResult { key: key.to_string(), data: None })
+            Ok(DumpResult {
+                key: key.to_string(),
+                data: None,
+            })
         }
     }
 
-    async fn restore(&self, key: &str, _ttl: i64, data: &[u8], replace: bool) -> Result<bool, CacheError> {
+    async fn restore(
+        &self,
+        key: &str,
+        _ttl: i64,
+        data: &[u8],
+        replace: bool,
+    ) -> Result<bool, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         if !replace && store.contains_key(key) {
             return Ok(false);
@@ -724,6 +994,31 @@ impl KeyRepository for MockKeyRepository {
         } else {
             Ok(-2)
         }
+    }
+
+    async fn sort(
+        &self,
+        _key: &str,
+        _options: SortOptions,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        Ok(vec![])
+    }
+
+    async fn sort_store(
+        &self,
+        _key: &str,
+        _destination: &str,
+        _options: SortOptions,
+    ) -> Result<i64, CacheError> {
+        Ok(0)
+    }
+
+    async fn sort_ro(
+        &self,
+        _key: &str,
+        _options: SortOptions,
+    ) -> Result<Vec<Option<String>>, CacheError> {
+        Ok(vec![])
     }
 }
 
@@ -813,9 +1108,7 @@ impl HashRepository for MockHashRepository {
 
     async fn hexists(&self, key: &str, field: &str) -> Result<bool, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(store
-            .get(key)
-            .map_or(false, |map| map.contains_key(field)))
+        Ok(store.get(key).is_some_and(|map| map.contains_key(field)))
     }
 
     async fn hkeys(&self, key: &str) -> Result<Vec<String>, CacheError> {
@@ -871,7 +1164,12 @@ impl HashRepository for MockHashRepository {
             .map_or(0, |value| value.len() as i64))
     }
 
-    async fn hrand_field(&self, key: &str, count: Option<i64>, with_values: bool) -> Result<Vec<String>, CacheError> {
+    async fn hrand_field(
+        &self,
+        key: &str,
+        count: Option<i64>,
+        with_values: bool,
+    ) -> Result<Vec<String>, CacheError> {
         let store = self.store.lock().expect("store lock");
         let map = match store.get(key) {
             Some(map) => map,
@@ -902,7 +1200,13 @@ impl HashRepository for MockHashRepository {
         }
     }
 
-    async fn hscan(&self, key: &str, _cursor: u64, pattern: Option<String>, count: Option<u64>) -> Result<(u64, Vec<String>), CacheError> {
+    async fn hscan(
+        &self,
+        key: &str,
+        _cursor: u64,
+        pattern: Option<String>,
+        count: Option<u64>,
+    ) -> Result<(u64, Vec<String>), CacheError> {
         let store = self.store.lock().expect("store lock");
         let map = match store.get(key) {
             Some(map) => map,
@@ -915,10 +1219,10 @@ impl HashRepository for MockHashRepository {
                 result.push(field.clone());
                 result.push(value.clone());
             }
-            if let Some(limit) = count {
-                if (result.len() / 2) as u64 >= limit {
-                    break;
-                }
+            if let Some(limit) = count
+                && (result.len() / 2) as u64 >= limit
+            {
+                break;
             }
         }
         Ok((0, result))
@@ -1008,7 +1312,11 @@ impl ListRepository for MockListRepository {
         let entry = store.get(key).cloned().unwrap_or_default();
         let len = entry.len() as i64;
 
-        let start = if start < 0 { (len + start).max(0) } else { start };
+        let start = if start < 0 {
+            (len + start).max(0)
+        } else {
+            start
+        };
         let stop = if stop < 0 { len + stop } else { stop };
 
         let start = start as usize;
@@ -1120,11 +1428,15 @@ impl ListRepository for MockListRepository {
         let entry = store.entry(key.to_string()).or_default();
         let len = entry.len() as i64;
 
-        let start = if start < 0 { (len + start).max(0) } else { start };
+        let start = if start < 0 {
+            (len + start).max(0)
+        } else {
+            start
+        };
         let stop = if stop < 0 { len + stop } else { stop };
 
         let start = start as usize;
-        let stop = (stop + 1).min(len as i64) as usize;
+        let stop = (stop + 1).min(len) as usize;
 
         if start >= entry.len() || start >= stop {
             entry.clear();
@@ -1186,8 +1498,18 @@ impl ListRepository for MockListRepository {
         Ok(value)
     }
 
-    async fn rpop_lpush(&self, source: &str, destination: &str) -> Result<Option<String>, CacheError> {
-        self.lmove(source, destination, ListDirection::Right, ListDirection::Left).await
+    async fn rpop_lpush(
+        &self,
+        source: &str,
+        destination: &str,
+    ) -> Result<Option<String>, CacheError> {
+        self.lmove(
+            source,
+            destination,
+            ListDirection::Right,
+            ListDirection::Left,
+        )
+        .await
     }
 
     async fn blpop(
@@ -1197,14 +1519,14 @@ impl ListRepository for MockListRepository {
     ) -> Result<Option<BlockingPopResult>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         for key in keys {
-            if let Some(list) = store.get_mut(key) {
-                if !list.is_empty() {
-                    let value = list.remove(0);
-                    return Ok(Some(BlockingPopResult {
-                        key: key.clone(),
-                        value,
-                    }));
-                }
+            if let Some(list) = store.get_mut(key)
+                && !list.is_empty()
+            {
+                let value = list.remove(0);
+                return Ok(Some(BlockingPopResult {
+                    key: key.clone(),
+                    value,
+                }));
             }
         }
         Ok(None)
@@ -1217,14 +1539,14 @@ impl ListRepository for MockListRepository {
     ) -> Result<Option<BlockingPopResult>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         for key in keys {
-            if let Some(list) = store.get_mut(key) {
-                if !list.is_empty() {
-                    let value = list.pop().unwrap();
-                    return Ok(Some(BlockingPopResult {
-                        key: key.clone(),
-                        value,
-                    }));
-                }
+            if let Some(list) = store.get_mut(key)
+                && !list.is_empty()
+            {
+                let value = list.pop().unwrap();
+                return Ok(Some(BlockingPopResult {
+                    key: key.clone(),
+                    value,
+                }));
             }
         }
         Ok(None)
@@ -1248,6 +1570,46 @@ impl ListRepository for MockListRepository {
         _timeout: Duration,
     ) -> Result<Option<String>, CacheError> {
         self.rpop_lpush(source, destination).await
+    }
+
+    async fn lmpop(
+        &self,
+        keys: &[String],
+        direction: ListDirection,
+        count: Option<u32>,
+    ) -> Result<Option<LMPopResult>, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let count = count.unwrap_or(1) as usize;
+        for key in keys {
+            if let Some(list) = store.get_mut(key.as_str())
+                && !list.is_empty()
+            {
+                let mut elements = Vec::new();
+                for _ in 0..count.min(list.len()) {
+                    let elem = match direction {
+                        ListDirection::Left => list.remove(0),
+                        ListDirection::Right => list.pop().unwrap(),
+                    };
+                    elements.push(elem);
+                }
+                return Ok(Some(LMPopResult {
+                    key: key.clone(),
+                    elements,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn blmpop(
+        &self,
+        keys: &[String],
+        direction: ListDirection,
+        _timeout: Duration,
+        count: Option<u32>,
+    ) -> Result<Option<LMPopResult>, CacheError> {
+        // Mock just delegates to lmpop (no actual blocking in tests)
+        self.lmpop(keys, direction, count).await
     }
 }
 
@@ -1304,18 +1666,23 @@ impl SetRepository for MockSetRepository {
 
     async fn smembers(&self, key: &str) -> Result<Vec<String>, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(store.get(key).map_or(Vec::new(), |s| s.iter().cloned().collect()))
+        Ok(store
+            .get(key)
+            .map_or(Vec::new(), |s| s.iter().cloned().collect()))
     }
 
     async fn sismember(&self, key: &str, member: &str) -> Result<bool, CacheError> {
         let store = self.store.lock().expect("store lock");
-        Ok(store.get(key).map_or(false, |s| s.contains(member)))
+        Ok(store.get(key).is_some_and(|s| s.contains(member)))
     }
 
     async fn smismember(&self, key: &str, members: &[String]) -> Result<Vec<bool>, CacheError> {
         let store = self.store.lock().expect("store lock");
         let set = store.get(key);
-        Ok(members.iter().map(|m| set.map_or(false, |s| s.contains(m))).collect())
+        Ok(members
+            .iter()
+            .map(|m| set.is_some_and(|s| s.contains(m)))
+            .collect())
     }
 
     async fn scard(&self, key: &str) -> Result<i64, CacheError> {
@@ -1347,11 +1714,19 @@ impl SetRepository for MockSetRepository {
         }
     }
 
-    async fn smove(&self, source: &str, destination: &str, member: &str) -> Result<bool, CacheError> {
+    async fn smove(
+        &self,
+        source: &str,
+        destination: &str,
+        member: &str,
+    ) -> Result<bool, CacheError> {
         let mut store = self.store.lock().expect("store lock");
-        let removed = store.get_mut(source).map_or(false, |s| s.remove(member));
+        let removed = store.get_mut(source).is_some_and(|s| s.remove(member));
         if removed {
-            store.entry(destination.to_string()).or_default().insert(member.to_string());
+            store
+                .entry(destination.to_string())
+                .or_default()
+                .insert(member.to_string());
         }
         Ok(removed)
     }
@@ -1363,7 +1738,11 @@ impl SetRepository for MockSetRepository {
         }
         let first = store.get(&keys[0]).cloned().unwrap_or_default();
         let result: std::collections::HashSet<String> = keys[1..].iter().fold(first, |acc, k| {
-            store.get(k).map_or_else(std::collections::HashSet::new, |s| acc.intersection(s).cloned().collect())
+            store
+                .get(k)
+                .map_or_else(std::collections::HashSet::new, |s| {
+                    acc.intersection(s).cloned().collect()
+                })
         });
         Ok(result.into_iter().collect())
     }
@@ -1408,7 +1787,9 @@ impl SetRepository for MockSetRepository {
         }
         let first = store.get(&keys[0]).cloned().unwrap_or_default();
         let result: std::collections::HashSet<String> = keys[1..].iter().fold(first, |acc, k| {
-            store.get(k).map_or(acc.clone(), |s| acc.difference(s).cloned().collect())
+            store
+                .get(k)
+                .map_or(acc.clone(), |s| acc.difference(s).cloned().collect())
         });
         Ok(result.into_iter().collect())
     }
@@ -1449,7 +1830,22 @@ pub fn test_state_with_repos(
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo)
+    test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1469,7 +1865,23 @@ pub fn test_state_with_all_repos(
     probabilistic_repo: Arc<MockProbabilisticRepository>,
     geo_repo: Arc<MockGeoRepository>,
 ) -> AppState {
-    test_state_with_all_repos_and_config(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo, Settings::default())
+    test_state_with_all_repos_and_config(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+        Settings::default(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1493,7 +1905,9 @@ pub fn test_state_with_all_repos_and_config(
     let pool = Arc::new(InstrumentedPool::new_for_tests());
     let config = Arc::new(config);
     let capabilities = Arc::new(RedisCapabilities::default_capabilities());
-    let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(config.blocking.max_sse_connections));
+    let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(
+        config.blocking.max_sse_connections,
+    ));
     let string_service = Arc::new(StringService::new_with_repository(string_repo));
     let hash_service = Arc::new(HashService::new_with_repository(hash_repo));
     let list_service = Arc::new(ListService::new_with_repository(list_repo));
@@ -1506,26 +1920,61 @@ pub fn test_state_with_all_repos_and_config(
     let json_service = Arc::new(JsonService::new_with_repository(json_repo));
     let search_service = Arc::new(SearchService::new_with_repository(search_repo));
     let bloom_service = Arc::new(BloomService::new_with_repository(bloom_repo));
-    let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(probabilistic_repo));
+    let probabilistic_service = Arc::new(ProbabilisticService::new_with_repository(
+        probabilistic_repo,
+    ));
     let geo_service = Arc::new(GeoService::new_with_repository(geo_repo));
 
     // Create PubSubManager and PubSubService for tests (uses localhost which may not be available)
     let pubsub_manager = Arc::new(
         PubSubManager::new(&config.redis.url, config.pubsub.clone())
-            .expect("Failed to create PubSubManager for tests")
+            .expect("Failed to create PubSubManager for tests"),
     );
     let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
-    let transaction_service = Arc::new(crate::application::services::TransactionService::new(pool.clone()));
-    let scripting_service = Arc::new(crate::application::services::ScriptingService::new(pool.clone()));
+    let transaction_service = Arc::new(crate::application::services::TransactionService::new(
+        pool.clone(),
+    ));
+    let scripting_service = Arc::new(crate::application::services::ScriptingService::new(
+        pool.clone(),
+    ));
 
-    AppState::new_with_services(pool, config, capabilities, sse_semaphore, string_service, hash_service, list_service, set_service, sorted_set_service, bitmap_service, key_service, admin_service, stream_service, json_service, search_service, bloom_service, probabilistic_service, geo_service, pubsub_service, transaction_service, scripting_service)
+    AppState::new_with_services(
+        pool,
+        config,
+        capabilities,
+        sse_semaphore,
+        string_service,
+        hash_service,
+        list_service,
+        set_service,
+        sorted_set_service,
+        bitmap_service,
+        key_service,
+        admin_service,
+        stream_service,
+        json_service,
+        search_service,
+        bloom_service,
+        probabilistic_service,
+        geo_service,
+        pubsub_service,
+        transaction_service,
+        scripting_service,
+    )
 }
 
 /// Create test state with custom config
-pub fn test_state_with_config(config: Settings) -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
+pub fn test_state_with_config(
+    config: Settings,
+) -> (
+    AppState,
+    Arc<MockStringRepository>,
+    Arc<MockKeyRepository>,
+    Arc<MockAdminRepository>,
+) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1537,14 +1986,35 @@ pub fn test_state_with_config(config: Settings) -> (AppState, Arc<MockStringRepo
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos_and_config(string_repo.clone(), hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo.clone(), admin_repo.clone(), stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo, config);
+    let state = test_state_with_all_repos_and_config(
+        string_repo.clone(),
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo.clone(),
+        admin_repo.clone(),
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+        config,
+    );
     (state, string_repo, key_repo, admin_repo)
 }
 
-pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyRepository>, Arc<MockAdminRepository>) {
+pub fn test_state() -> (
+    AppState,
+    Arc<MockStringRepository>,
+    Arc<MockKeyRepository>,
+    Arc<MockAdminRepository>,
+) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let state = test_state_with_repos(string_repo.clone(), key_repo.clone(), admin_repo.clone());
     (state, string_repo, key_repo, admin_repo)
 }
@@ -1552,7 +2022,7 @@ pub fn test_state() -> (AppState, Arc<MockStringRepository>, Arc<MockKeyReposito
 pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1564,14 +2034,29 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo.clone(), list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo.clone(),
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, hash_repo)
 }
 
 pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1583,14 +2068,29 @@ pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo.clone(), set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo.clone(),
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, list_repo)
 }
 
 pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1602,14 +2102,29 @@ pub fn test_state_with_set_repo() -> (AppState, Arc<MockSetRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo.clone(), sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo.clone(),
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, set_repo)
 }
 
 pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1621,14 +2136,29 @@ pub fn test_state_with_sorted_set_repo() -> (AppState, Arc<MockSortedSetReposito
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo.clone(), bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo.clone(),
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, sorted_set_repo)
 }
 
 pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1640,14 +2170,29 @@ pub fn test_state_with_stream_repo() -> (AppState, Arc<MockStreamRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo.clone(), json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo.clone(),
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, stream_repo)
 }
 
 pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1659,14 +2204,29 @@ pub fn test_state_with_json_repo() -> (AppState, Arc<MockJsonRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo.clone(), search_repo, bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo.clone(),
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, json_repo)
 }
 
 pub fn test_state_with_search_repo() -> (AppState, Arc<MockSearchRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1678,14 +2238,29 @@ pub fn test_state_with_search_repo() -> (AppState, Arc<MockSearchRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo.clone(), bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo.clone(),
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, search_repo)
 }
 
 pub fn test_state_with_bloom_repo() -> (AppState, Arc<MockBloomRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1697,14 +2272,29 @@ pub fn test_state_with_bloom_repo() -> (AppState, Arc<MockBloomRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo.clone(), probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo.clone(),
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, bloom_repo)
 }
 
 pub fn test_state_with_probabilistic_repo() -> (AppState, Arc<MockProbabilisticRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1716,14 +2306,29 @@ pub fn test_state_with_probabilistic_repo() -> (AppState, Arc<MockProbabilisticR
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo.clone(), geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo.clone(),
+        geo_repo,
+    );
     (state, probabilistic_repo)
 }
 
 pub fn test_state_with_bitmap_repo() -> (AppState, Arc<MockBitMapRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1735,14 +2340,29 @@ pub fn test_state_with_bitmap_repo() -> (AppState, Arc<MockBitMapRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo.clone(), key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo);
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo.clone(),
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo,
+    );
     (state, bitmap_repo)
 }
 
 pub fn test_state_with_geo_repo() -> (AppState, Arc<MockGeoRepository>) {
     let string_repo = Arc::new(MockStringRepository::new());
     let key_repo = Arc::new(MockKeyRepository::new());
-    let admin_repo = Arc::new(MockAdminRepository::default());
+    let admin_repo = Arc::new(MockAdminRepository);
     let hash_repo = Arc::new(MockHashRepository::new());
     let list_repo = Arc::new(MockListRepository::new());
     let set_repo = Arc::new(MockSetRepository::new());
@@ -1754,7 +2374,22 @@ pub fn test_state_with_geo_repo() -> (AppState, Arc<MockGeoRepository>) {
     let bloom_repo = Arc::new(MockBloomRepository::new());
     let probabilistic_repo = Arc::new(MockProbabilisticRepository::new());
     let geo_repo = Arc::new(MockGeoRepository::new());
-    let state = test_state_with_all_repos(string_repo, hash_repo, list_repo, set_repo, sorted_set_repo, bitmap_repo, key_repo, admin_repo, stream_repo, json_repo, search_repo, bloom_repo, probabilistic_repo, geo_repo.clone());
+    let state = test_state_with_all_repos(
+        string_repo,
+        hash_repo,
+        list_repo,
+        set_repo,
+        sorted_set_repo,
+        bitmap_repo,
+        key_repo,
+        admin_repo,
+        stream_repo,
+        json_repo,
+        search_repo,
+        bloom_repo,
+        probabilistic_repo,
+        geo_repo.clone(),
+    );
     (state, geo_repo)
 }
 
@@ -1773,7 +2408,9 @@ impl MockSortedSetRepository {
 
     fn sort_members(members: &mut [ScoredMember]) {
         members.sort_by(|a, b| {
-            a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal)
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.member.cmp(&b.member))
         });
     }
@@ -1805,7 +2442,10 @@ impl SortedSetRepository for MockSortedSetRepository {
         }
 
         Self::sort_members(entry);
-        Ok(ZAddResult { count: added, new_score: None })
+        Ok(ZAddResult {
+            count: added,
+            new_score: None,
+        })
     }
 
     async fn zadd_incr(
@@ -1858,9 +2498,7 @@ impl SortedSetRepository for MockSortedSetRepository {
         let entry = store.get(key);
         Ok(members
             .iter()
-            .map(|m| {
-                entry.and_then(|e| e.iter().find(|sm| sm.member == *m).map(|sm| sm.score))
-            })
+            .map(|m| entry.and_then(|e| e.iter().find(|sm| sm.member == *m).map(|sm| sm.score)))
             .collect())
     }
 
@@ -1945,7 +2583,11 @@ impl SortedSetRepository for MockSortedSetRepository {
         let entry = store.get(key).cloned().unwrap_or_default();
         let len = entry.len() as i64;
 
-        let start = if start < 0 { (len + start).max(0) } else { start };
+        let start = if start < 0 {
+            (len + start).max(0)
+        } else {
+            start
+        };
         let stop = if stop < 0 { len + stop } else { stop };
         let stop = (stop + 1).min(len) as usize;
         let start = start as usize;
@@ -1956,10 +2598,10 @@ impl SortedSetRepository for MockSortedSetRepository {
 
         let mut result: Vec<ScoredMember> = entry[start..stop].to_vec();
 
-        if let Some(opts) = options {
-            if opts.rev {
-                result.reverse();
-            }
+        if let Some(opts) = options
+            && opts.rev
+        {
+            result.reverse();
         }
 
         Ok(result)
@@ -2039,7 +2681,11 @@ impl SortedSetRepository for MockSortedSetRepository {
         let mut store = self.store.lock().expect("store lock");
         if let Some(entry) = store.get_mut(key) {
             let len = entry.len() as i64;
-            let start = if start < 0 { (len + start).max(0) } else { start };
+            let start = if start < 0 {
+                (len + start).max(0)
+            } else {
+                start
+            };
             let stop = if stop < 0 { len + stop } else { stop };
             let stop = (stop + 1).min(len) as usize;
             let start = start as usize;
@@ -2084,7 +2730,11 @@ impl SortedSetRepository for MockSortedSetRepository {
         Ok(store.get(key).map_or(0, |_| 0))
     }
 
-    async fn zpopmin(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError> {
+    async fn zpopmin(
+        &self,
+        key: &str,
+        count: Option<i64>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         if let Some(entry) = store.get_mut(key) {
             let count = count.unwrap_or(1) as usize;
@@ -2095,7 +2745,11 @@ impl SortedSetRepository for MockSortedSetRepository {
         }
     }
 
-    async fn zpopmax(&self, key: &str, count: Option<i64>) -> Result<Vec<ScoredMember>, CacheError> {
+    async fn zpopmax(
+        &self,
+        key: &str,
+        count: Option<i64>,
+    ) -> Result<Vec<ScoredMember>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         if let Some(entry) = store.get_mut(key) {
             let count = count.unwrap_or(1) as usize;
@@ -2114,14 +2768,14 @@ impl SortedSetRepository for MockSortedSetRepository {
     ) -> Result<Option<ZPopResult>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         for key in keys {
-            if let Some(entry) = store.get_mut(key) {
-                if !entry.is_empty() {
-                    let member = entry.remove(0);
-                    return Ok(Some(ZPopResult {
-                        key: key.clone(),
-                        members: vec![member],
-                    }));
-                }
+            if let Some(entry) = store.get_mut(key)
+                && !entry.is_empty()
+            {
+                let member = entry.remove(0);
+                return Ok(Some(ZPopResult {
+                    key: key.clone(),
+                    members: vec![member],
+                }));
             }
         }
         Ok(None)
@@ -2134,14 +2788,14 @@ impl SortedSetRepository for MockSortedSetRepository {
     ) -> Result<Option<ZPopResult>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         for key in keys {
-            if let Some(entry) = store.get_mut(key) {
-                if !entry.is_empty() {
-                    let member = entry.pop().unwrap();
-                    return Ok(Some(ZPopResult {
-                        key: key.clone(),
-                        members: vec![member],
-                    }));
-                }
+            if let Some(entry) = store.get_mut(key)
+                && !entry.is_empty()
+            {
+                let member = entry.pop().unwrap();
+                return Ok(Some(ZPopResult {
+                    key: key.clone(),
+                    members: vec![member],
+                }));
             }
         }
         Ok(None)
@@ -2155,22 +2809,22 @@ impl SortedSetRepository for MockSortedSetRepository {
     ) -> Result<Option<ZPopResult>, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         for key in keys {
-            if let Some(entry) = store.get_mut(key) {
-                if !entry.is_empty() {
-                    let count = count.unwrap_or(1) as usize;
-                    let count = count.min(entry.len());
-                    let members = match direction {
-                        ZPopDirection::Min => entry.drain(..count).collect(),
-                        ZPopDirection::Max => {
-                            let start = entry.len() - count;
-                            entry.drain(start..).rev().collect()
-                        }
-                    };
-                    return Ok(Some(ZPopResult {
-                        key: key.clone(),
-                        members,
-                    }));
-                }
+            if let Some(entry) = store.get_mut(key)
+                && !entry.is_empty()
+            {
+                let count = count.unwrap_or(1) as usize;
+                let count = count.min(entry.len());
+                let members = match direction {
+                    ZPopDirection::Min => entry.drain(..count).collect(),
+                    ZPopDirection::Max => {
+                        let start = entry.len() - count;
+                        entry.drain(start..).rev().collect()
+                    }
+                };
+                return Ok(Some(ZPopResult {
+                    key: key.clone(),
+                    members,
+                }));
             }
         }
         Ok(None)
@@ -2249,10 +2903,8 @@ impl SortedSetRepository for MockSortedSetRepository {
         }
 
         let first = store.get(&keys[0]).cloned().unwrap_or_default();
-        let mut result: HashMap<String, f64> = first
-            .into_iter()
-            .map(|m| (m.member, m.score))
-            .collect();
+        let mut result: HashMap<String, f64> =
+            first.into_iter().map(|m| (m.member, m.score)).collect();
 
         for key in &keys[1..] {
             if let Some(entry) = store.get(key) {
@@ -2509,12 +3161,7 @@ impl StreamRepository for MockStreamRepository {
         Ok(None)
     }
 
-    async fn xack(
-        &self,
-        _key: &str,
-        _group: &str,
-        ids: &[String],
-    ) -> Result<i64, CacheError> {
+    async fn xack(&self, _key: &str, _group: &str, ids: &[String]) -> Result<i64, CacheError> {
         Ok(ids.len() as i64)
     }
 
@@ -2604,7 +3251,11 @@ impl JsonRepository for MockJsonRepository {
         })
     }
 
-    async fn json_get(&self, key: &str, paths: &[String]) -> Result<Option<JsonGetResult>, CacheError> {
+    async fn json_get(
+        &self,
+        key: &str,
+        paths: &[String],
+    ) -> Result<Option<JsonGetResult>, CacheError> {
         Ok(Some(JsonGetResult {
             key: key.to_string(),
             paths: paths.to_vec(),
@@ -2614,7 +3265,13 @@ impl JsonRepository for MockJsonRepository {
 
     async fn json_mget(&self, keys: &[String], path: &str) -> Result<JsonMGetResult, CacheError> {
         Ok(JsonMGetResult {
-            results: keys.iter().map(|k| JsonMGetItem { key: k.clone(), value: Some(Value::Null) }).collect(),
+            results: keys
+                .iter()
+                .map(|k| JsonMGetItem {
+                    key: k.clone(),
+                    value: Some(Value::Null),
+                })
+                .collect(),
             path: path.to_string(),
         })
     }
@@ -3073,7 +3730,11 @@ impl Default for MockBloomRepository {
 
 #[async_trait]
 impl BloomRepository for MockBloomRepository {
-    async fn bf_reserve(&self, key: &str, _options: BloomReserveOptions) -> Result<BloomReserveResult, CacheError> {
+    async fn bf_reserve(
+        &self,
+        key: &str,
+        _options: BloomReserveOptions,
+    ) -> Result<BloomReserveResult, CacheError> {
         Ok(BloomReserveResult {
             key: key.to_string(),
             success: true,
@@ -3101,14 +3762,23 @@ impl BloomRepository for MockBloomRepository {
         })
     }
 
-    async fn bf_mexists(&self, key: &str, items: Vec<String>) -> Result<BloomExistsResult, CacheError> {
+    async fn bf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<BloomExistsResult, CacheError> {
         Ok(BloomExistsResult {
             key: key.to_string(),
             results: vec![true; items.len()],
         })
     }
 
-    async fn bf_insert(&self, key: &str, _options: BloomInsertOptions, items: Vec<String>) -> Result<BloomInsertResult, CacheError> {
+    async fn bf_insert(
+        &self,
+        key: &str,
+        _options: BloomInsertOptions,
+        items: Vec<String>,
+    ) -> Result<BloomInsertResult, CacheError> {
         Ok(BloomInsertResult {
             key: key.to_string(),
             results: vec![true; items.len()],
@@ -3132,7 +3802,11 @@ impl BloomRepository for MockBloomRepository {
         })
     }
 
-    async fn bf_scandump(&self, _key: &str, iterator: u64) -> Result<BloomScanDumpResult, CacheError> {
+    async fn bf_scandump(
+        &self,
+        _key: &str,
+        iterator: u64,
+    ) -> Result<BloomScanDumpResult, CacheError> {
         if iterator == 0 {
             Ok(BloomScanDumpResult {
                 iterator: 1,
@@ -3146,14 +3820,23 @@ impl BloomRepository for MockBloomRepository {
         }
     }
 
-    async fn bf_loadchunk(&self, key: &str, _iterator: u64, _data: &[u8]) -> Result<BloomLoadChunkResult, CacheError> {
+    async fn bf_loadchunk(
+        &self,
+        key: &str,
+        _iterator: u64,
+        _data: &[u8],
+    ) -> Result<BloomLoadChunkResult, CacheError> {
         Ok(BloomLoadChunkResult {
             key: key.to_string(),
             success: true,
         })
     }
 
-    async fn cf_reserve(&self, key: &str, _options: CuckooReserveOptions) -> Result<CuckooReserveResult, CacheError> {
+    async fn cf_reserve(
+        &self,
+        key: &str,
+        _options: CuckooReserveOptions,
+    ) -> Result<CuckooReserveResult, CacheError> {
         Ok(CuckooReserveResult {
             key: key.to_string(),
             success: true,
@@ -3174,14 +3857,24 @@ impl BloomRepository for MockBloomRepository {
         })
     }
 
-    async fn cf_insert(&self, key: &str, _options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+    async fn cf_insert(
+        &self,
+        key: &str,
+        _options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError> {
         Ok(CuckooInsertResult {
             key: key.to_string(),
             results: vec![true; items.len()],
         })
     }
 
-    async fn cf_insertnx(&self, key: &str, _options: CuckooInsertOptions, items: Vec<String>) -> Result<CuckooInsertResult, CacheError> {
+    async fn cf_insertnx(
+        &self,
+        key: &str,
+        _options: CuckooInsertOptions,
+        items: Vec<String>,
+    ) -> Result<CuckooInsertResult, CacheError> {
         Ok(CuckooInsertResult {
             key: key.to_string(),
             results: vec![true; items.len()],
@@ -3195,7 +3888,11 @@ impl BloomRepository for MockBloomRepository {
         })
     }
 
-    async fn cf_mexists(&self, key: &str, items: Vec<String>) -> Result<CuckooExistsResult, CacheError> {
+    async fn cf_mexists(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<CuckooExistsResult, CacheError> {
         Ok(CuckooExistsResult {
             key: key.to_string(),
             results: vec![true; items.len()],
@@ -3229,7 +3926,11 @@ impl BloomRepository for MockBloomRepository {
         })
     }
 
-    async fn cf_scandump(&self, _key: &str, iterator: u64) -> Result<CuckooScanDumpResult, CacheError> {
+    async fn cf_scandump(
+        &self,
+        _key: &str,
+        iterator: u64,
+    ) -> Result<CuckooScanDumpResult, CacheError> {
         if iterator == 0 {
             Ok(CuckooScanDumpResult {
                 iterator: 1,
@@ -3243,7 +3944,12 @@ impl BloomRepository for MockBloomRepository {
         }
     }
 
-    async fn cf_loadchunk(&self, key: &str, _iterator: u64, _data: &[u8]) -> Result<CuckooLoadChunkResult, CacheError> {
+    async fn cf_loadchunk(
+        &self,
+        key: &str,
+        _iterator: u64,
+        _data: &[u8],
+    ) -> Result<CuckooLoadChunkResult, CacheError> {
         Ok(CuckooLoadChunkResult {
             key: key.to_string(),
             success: true,
@@ -3269,21 +3975,35 @@ impl Default for MockProbabilisticRepository {
 #[async_trait]
 impl ProbabilisticRepository for MockProbabilisticRepository {
     // Count-Min Sketch operations
-    async fn cms_init_by_dim(&self, key: &str, _width: u64, _depth: u64) -> Result<CmsInitResult, CacheError> {
+    async fn cms_init_by_dim(
+        &self,
+        key: &str,
+        _width: u64,
+        _depth: u64,
+    ) -> Result<CmsInitResult, CacheError> {
         Ok(CmsInitResult {
             key: key.to_string(),
             success: true,
         })
     }
 
-    async fn cms_init_by_prob(&self, key: &str, _error: f64, _probability: f64) -> Result<CmsInitResult, CacheError> {
+    async fn cms_init_by_prob(
+        &self,
+        key: &str,
+        _error: f64,
+        _probability: f64,
+    ) -> Result<CmsInitResult, CacheError> {
         Ok(CmsInitResult {
             key: key.to_string(),
             success: true,
         })
     }
 
-    async fn cms_incr_by(&self, key: &str, items: Vec<(String, u64)>) -> Result<CmsIncrByResult, CacheError> {
+    async fn cms_incr_by(
+        &self,
+        key: &str,
+        items: Vec<(String, u64)>,
+    ) -> Result<CmsIncrByResult, CacheError> {
         Ok(CmsIncrByResult {
             key: key.to_string(),
             counts: items.iter().map(|(_, count)| *count).collect(),
@@ -3297,7 +4017,12 @@ impl ProbabilisticRepository for MockProbabilisticRepository {
         })
     }
 
-    async fn cms_merge(&self, dest: &str, _sources: Vec<String>, _weights: Option<Vec<u64>>) -> Result<CmsMergeResult, CacheError> {
+    async fn cms_merge(
+        &self,
+        dest: &str,
+        _sources: Vec<String>,
+        _weights: Option<Vec<u64>>,
+    ) -> Result<CmsMergeResult, CacheError> {
         Ok(CmsMergeResult {
             key: dest.to_string(),
             success: true,
@@ -3313,7 +4038,14 @@ impl ProbabilisticRepository for MockProbabilisticRepository {
     }
 
     // Top-K operations
-    async fn topk_reserve(&self, key: &str, _k: u64, _width: Option<u64>, _depth: Option<u64>, _decay: Option<f64>) -> Result<TopKReserveResult, CacheError> {
+    async fn topk_reserve(
+        &self,
+        key: &str,
+        _k: u64,
+        _width: Option<u64>,
+        _depth: Option<u64>,
+        _decay: Option<f64>,
+    ) -> Result<TopKReserveResult, CacheError> {
         Ok(TopKReserveResult {
             key: key.to_string(),
             success: true,
@@ -3327,21 +4059,33 @@ impl ProbabilisticRepository for MockProbabilisticRepository {
         })
     }
 
-    async fn topk_incr_by(&self, key: &str, items: Vec<(String, u64)>) -> Result<TopKIncrByResult, CacheError> {
+    async fn topk_incr_by(
+        &self,
+        key: &str,
+        items: Vec<(String, u64)>,
+    ) -> Result<TopKIncrByResult, CacheError> {
         Ok(TopKIncrByResult {
             key: key.to_string(),
             dropped: vec![None; items.len()],
         })
     }
 
-    async fn topk_query(&self, key: &str, items: Vec<String>) -> Result<TopKQueryResult, CacheError> {
+    async fn topk_query(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<TopKQueryResult, CacheError> {
         Ok(TopKQueryResult {
             key: key.to_string(),
             results: vec![true; items.len()],
         })
     }
 
-    async fn topk_count(&self, key: &str, items: Vec<String>) -> Result<TopKCountResult, CacheError> {
+    async fn topk_count(
+        &self,
+        key: &str,
+        items: Vec<String>,
+    ) -> Result<TopKCountResult, CacheError> {
         Ok(TopKCountResult {
             key: key.to_string(),
             counts: vec![10; items.len()],
@@ -3352,8 +4096,14 @@ impl ProbabilisticRepository for MockProbabilisticRepository {
         Ok(TopKListResult {
             key: key.to_string(),
             items: vec![
-                TopKItem { item: "item1".to_string(), count: if with_count { 100 } else { 0 } },
-                TopKItem { item: "item2".to_string(), count: if with_count { 50 } else { 0 } },
+                TopKItem {
+                    item: "item1".to_string(),
+                    count: if with_count { 100 } else { 0 },
+                },
+                TopKItem {
+                    item: "item2".to_string(),
+                    count: if with_count { 50 } else { 0 },
+                },
             ],
         })
     }
@@ -3376,13 +4126,14 @@ impl ProbabilisticRepository for MockProbabilisticRepository {
     }
 
     async fn pf_count(&self, keys: Vec<String>) -> Result<PfCountResult, CacheError> {
-        Ok(PfCountResult {
-            keys,
-            count: 1000,
-        })
+        Ok(PfCountResult { keys, count: 1000 })
     }
 
-    async fn pf_merge(&self, dest: &str, _sources: Vec<String>) -> Result<PfMergeResult, CacheError> {
+    async fn pf_merge(
+        &self,
+        dest: &str,
+        _sources: Vec<String>,
+    ) -> Result<PfMergeResult, CacheError> {
         Ok(PfMergeResult {
             dest_key: dest.to_string(),
             success: true,
@@ -3438,7 +4189,7 @@ impl MockBitMapRepository {
 impl BitMapRepository for MockBitMapRepository {
     async fn setbit(&self, key: &str, offset: u64, value: bool) -> Result<i64, CacheError> {
         let mut store = self.store.lock().expect("store lock");
-        let bytes = store.entry(key.to_string()).or_insert_with(Vec::new);
+        let bytes = store.entry(key.to_string()).or_default();
         let old_value = self.set_bit(bytes, offset, value);
         Ok(old_value)
     }
@@ -3467,7 +4218,11 @@ impl BitMapRepository for MockBitMapRepository {
             (Some(s), Some(e)) => {
                 let len = bytes.len() as i64;
                 let s = if s < 0 { (len + s).max(0) } else { s.min(len) } as usize;
-                let e = if e < 0 { (len + e).max(0) } else { e.min(len.saturating_sub(1)) } as usize;
+                let e = if e < 0 {
+                    (len + e).max(0)
+                } else {
+                    e.min(len.saturating_sub(1))
+                } as usize;
                 (s, e)
             }
             _ => (0, bytes.len().saturating_sub(1)),
@@ -3583,7 +4338,7 @@ impl BitMapRepository for MockBitMapRepository {
         commands: &[BitfieldCommand],
     ) -> Result<BitfieldResult, CacheError> {
         let mut store = self.store.lock().expect("store lock");
-        let bytes = store.entry(key.to_string()).or_insert_with(Vec::new);
+        let bytes = store.entry(key.to_string()).or_default();
 
         let mut results = Vec::new();
 
@@ -3688,7 +4443,7 @@ impl GeoRepository for MockGeoRepository {
         _options: GeoAddOptions,
     ) -> Result<GeoAddResult, CacheError> {
         let mut store = self.store.lock().expect("store lock");
-        let entry = store.entry(key.to_string()).or_insert_with(Vec::new);
+        let entry = store.entry(key.to_string()).or_default();
         let mut added = 0i64;
 
         for member in members {
@@ -3721,11 +4476,7 @@ impl GeoRepository for MockGeoRepository {
         let positions: Vec<Option<GeoPosition>> = members
             .iter()
             .map(|name| {
-                geo_members.and_then(|gm| {
-                    gm.iter()
-                        .find(|m| &m.member == name)
-                        .map(|m| m.position.clone())
-                })
+                geo_members.and_then(|gm| gm.iter().find(|m| &m.member == name).map(|m| m.position))
             })
             .collect();
 
@@ -3794,10 +4545,10 @@ impl GeoRepository for MockGeoRepository {
 
         // Get center position
         let center_pos = match &center {
-            GeoSearchCenter::FromLonLat(pos) => pos.clone(),
+            GeoSearchCenter::FromLonLat(pos) => *pos,
             GeoSearchCenter::FromMember(member_name) => {
                 match geo_members.iter().find(|m| &m.member == member_name) {
-                    Some(m) => m.position.clone(),
+                    Some(m) => m.position,
                     None => return Ok(Vec::new()),
                 }
             }
@@ -3805,15 +4556,17 @@ impl GeoRepository for MockGeoRepository {
 
         // Filter members based on shape
         let radius_meters = match &shape {
-            GeoSearchShape::ByRadius { radius, unit } => {
-                match unit {
-                    GeoUnit::Meters => *radius,
-                    GeoUnit::Kilometers => radius * 1000.0,
-                    GeoUnit::Miles => radius * 1609.344,
-                    GeoUnit::Feet => radius / 3.28084,
-                }
-            }
-            GeoSearchShape::ByBox { width, height, unit } => {
+            GeoSearchShape::ByRadius { radius, unit } => match unit {
+                GeoUnit::Meters => *radius,
+                GeoUnit::Kilometers => radius * 1000.0,
+                GeoUnit::Miles => radius * 1609.344,
+                GeoUnit::Feet => radius / 3.28084,
+            },
+            GeoSearchShape::ByBox {
+                width,
+                height,
+                unit,
+            } => {
                 // Approximate: use half the diagonal as radius
                 let w = match unit {
                     GeoUnit::Meters => *width,
@@ -3838,13 +4591,9 @@ impl GeoRepository for MockGeoRepository {
                 if dist <= radius_meters {
                     Some(GeoSearchResult {
                         member: m.member.clone(),
-                        distance: if options.with_dist {
-                            Some(dist)
-                        } else {
-                            None
-                        },
+                        distance: if options.with_dist { Some(dist) } else { None },
                         position: if options.with_coord {
-                            Some(m.position.clone())
+                            Some(m.position)
                         } else {
                             None
                         },
@@ -3866,15 +4615,43 @@ impl GeoRepository for MockGeoRepository {
             match sort {
                 GeoSortOrder::Asc => {
                     results.sort_by(|a, b| {
-                        let da = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == a.member).unwrap().position);
-                        let db = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == b.member).unwrap().position);
+                        let da = Self::haversine_distance(
+                            &center_pos,
+                            &geo_members
+                                .iter()
+                                .find(|m| m.member == a.member)
+                                .unwrap()
+                                .position,
+                        );
+                        let db = Self::haversine_distance(
+                            &center_pos,
+                            &geo_members
+                                .iter()
+                                .find(|m| m.member == b.member)
+                                .unwrap()
+                                .position,
+                        );
                         da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
                     });
                 }
                 GeoSortOrder::Desc => {
                     results.sort_by(|a, b| {
-                        let da = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == a.member).unwrap().position);
-                        let db = Self::haversine_distance(&center_pos, &geo_members.iter().find(|m| m.member == b.member).unwrap().position);
+                        let da = Self::haversine_distance(
+                            &center_pos,
+                            &geo_members
+                                .iter()
+                                .find(|m| m.member == a.member)
+                                .unwrap()
+                                .position,
+                        );
+                        let db = Self::haversine_distance(
+                            &center_pos,
+                            &geo_members
+                                .iter()
+                                .find(|m| m.member == b.member)
+                                .unwrap()
+                                .position,
+                        );
                         db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
                     });
                 }
@@ -3899,16 +4676,19 @@ impl GeoRepository for MockGeoRepository {
         _store_dist: bool,
     ) -> Result<GeoSearchStoreResult, CacheError> {
         // Search for results
-        let search_results = self
-            .geo_search(source_key, center, shape, options)
-            .await?;
+        let search_results = self.geo_search(source_key, center, shape, options).await?;
 
         // Store results in destination key
         let mut store = self.store.lock().expect("store lock");
         let source_members = store.get(source_key).cloned().unwrap_or_default();
         let dest_members: Vec<GeoMember> = search_results
             .iter()
-            .filter_map(|r| source_members.iter().find(|m| m.member == r.member).cloned())
+            .filter_map(|r| {
+                source_members
+                    .iter()
+                    .find(|m| m.member == r.member)
+                    .cloned()
+            })
             .collect();
 
         let stored = dest_members.len() as i64;
@@ -4006,12 +4786,18 @@ impl PubSubRepository for MockPubSubRepository {
         Ok(*self.patterns.lock().expect("patterns lock"))
     }
 
-    async fn pubsub_shardchannels(&self, _pattern: Option<&str>) -> Result<Vec<String>, CacheError> {
+    async fn pubsub_shardchannels(
+        &self,
+        _pattern: Option<&str>,
+    ) -> Result<Vec<String>, CacheError> {
         let channels = self.channels.lock().expect("channels lock");
         Ok(channels.keys().cloned().collect())
     }
 
-    async fn pubsub_shardnumsub(&self, channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+    async fn pubsub_shardnumsub(
+        &self,
+        channels: &[String],
+    ) -> Result<Vec<NumSubResult>, CacheError> {
         self.pubsub_numsub(channels).await
     }
 }

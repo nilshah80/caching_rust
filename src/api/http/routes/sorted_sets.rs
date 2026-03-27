@@ -3,32 +3,36 @@
 //! HTTP endpoints for Redis sorted set (ZSET) operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{
+        IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{delete, get, post},
-    Json, Router,
 };
+use std::time::Duration;
 
 use validator::Validate;
 
 use crate::api::http::schemas::sorted_sets::{
-    LexRangeDto, ScoreRangeDto, ScoredMemberDto, ZAddIncrRequest, ZAddIncrResponse,
-    ZAddOptionsDto, ZAddRequest, ZAddResponse, ZBMPopRequest, ZBPopRequest, ZBPopResponse,
-    ZCardResponse, ZCountRequest, ZCountResponse, ZDiffRequest, ZDiffStoreRequest,
-    ZIncrByRequest, ZIncrByResponse, ZInterCardRequest, ZInterCardResponse, ZLexCountRequest,
-    ZMPopRequest, ZMPopResponse, ZMScoreRequest, ZMScoreResponse, ZPopQuery, ZPopResponse,
-    ZRandMemberQuery, ZRandMemberResponse, ZRangeByLexRequest, ZRangeByLexResponse,
+    LexRangeDto, ScoreRangeDto, ScoredMemberDto, ZAddIncrRequest, ZAddIncrResponse, ZAddOptionsDto,
+    ZAddRequest, ZAddResponse, ZAggregateDto, ZBMPopRequest, ZBPopRequest, ZBPopResponse,
+    ZBPopStreamQuery, ZCardResponse, ZCountRequest, ZCountResponse, ZDiffRequest,
+    ZDiffStoreRequest, ZIncrByRequest, ZIncrByResponse, ZInterCardRequest, ZInterCardResponse,
+    ZLexCountRequest, ZMPopRequest, ZMPopResponse, ZMScoreRequest, ZMScoreResponse, ZPopQuery,
+    ZPopResponse, ZRandMemberQuery, ZRandMemberResponse, ZRangeByLexRequest, ZRangeByLexResponse,
     ZRangeByScoreRequest, ZRangeQuery, ZRangeResponse, ZRangeStoreRequest, ZRangeStoreResponse,
     ZRankResponse, ZRemRangeByLexRequest, ZRemRangeByRankRequest, ZRemRangeByScoreRequest,
     ZRemRangeResponse, ZRemRequest, ZRemResponse, ZScanQuery, ZScanResponse, ZScoreResponse,
     ZSetAlgebraOptionsDto, ZSetAlgebraRequest, ZSetAlgebraResponse, ZSetAlgebraStoreRequest,
-    ZSetAlgebraStoreResponse, ZAggregateDto,
+    ZSetAlgebraStoreResponse,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    LexRange, ScoreRange, ScoredMember, ZAddOptions, ZAggregate, ZPopDirection,
-    ZRangeOptions, ZSetAlgebraOptions,
+    LexRange, ScoreRange, ScoredMember, ZAddOptions, ZAggregate, ZPopDirection, ZRangeOptions,
+    ZSetAlgebraOptions,
 };
 use crate::shared::app_state::AppState;
 use crate::shared::response::ApiResponse;
@@ -51,13 +55,25 @@ pub fn sorted_set_routes() -> Router<AppState> {
         .route("/api/v1/sorted-sets/{key}/revrank/{member}", get(zrevrank))
         // Range operations
         .route("/api/v1/sorted-sets/{key}/range", get(zrange))
-        .route("/api/v1/sorted-sets/{key}/rangebyscore", post(zrangebyscore))
+        .route(
+            "/api/v1/sorted-sets/{key}/rangebyscore",
+            post(zrangebyscore),
+        )
         .route("/api/v1/sorted-sets/{key}/rangebylex", post(zrangebylex))
         .route("/api/v1/sorted-sets/{key}/rangestore", post(zrangestore))
         // Remove range operations
-        .route("/api/v1/sorted-sets/{key}/remrangebyrank", post(zremrangebyrank))
-        .route("/api/v1/sorted-sets/{key}/remrangebyscore", post(zremrangebyscore))
-        .route("/api/v1/sorted-sets/{key}/remrangebylex", post(zremrangebylex))
+        .route(
+            "/api/v1/sorted-sets/{key}/remrangebyrank",
+            post(zremrangebyrank),
+        )
+        .route(
+            "/api/v1/sorted-sets/{key}/remrangebyscore",
+            post(zremrangebyscore),
+        )
+        .route(
+            "/api/v1/sorted-sets/{key}/remrangebylex",
+            post(zremrangebylex),
+        )
         // Pop operations
         .route("/api/v1/sorted-sets/{key}/popmin", post(zpopmin))
         .route("/api/v1/sorted-sets/{key}/popmax", post(zpopmax))
@@ -77,6 +93,15 @@ pub fn sorted_set_routes() -> Router<AppState> {
         .route("/api/v1/sorted-sets/diffstore", post(zdiffstore))
         // Scan operation
         .route("/api/v1/sorted-sets/{key}/scan", get(zscan))
+        // SSE streaming endpoints for blocking operations
+        .route(
+            "/api/v1/sorted-sets/{key}/bzpopmin/stream",
+            get(bzpopmin_stream),
+        )
+        .route(
+            "/api/v1/sorted-sets/{key}/bzpopmax/stream",
+            get(bzpopmax_stream),
+        )
 }
 
 // ========== Helper functions ==========
@@ -111,14 +136,14 @@ fn convert_score_range(range: &ScoreRangeDto) -> ScoreRange {
     let min_str = range.min.trim();
     let max_str = range.max.trim();
 
-    let (min, min_exclusive) = if min_str.starts_with('(') {
-        (parse_score(&min_str[1..]), true)
+    let (min, min_exclusive) = if let Some(stripped) = min_str.strip_prefix('(') {
+        (parse_score(stripped), true)
     } else {
         (parse_score(min_str), false)
     };
 
-    let (max, max_exclusive) = if max_str.starts_with('(') {
-        (parse_score(&max_str[1..]), true)
+    let (max, max_exclusive) = if let Some(stripped) = max_str.strip_prefix('(') {
+        (parse_score(stripped), true)
     } else {
         (parse_score(max_str), false)
     };
@@ -181,7 +206,10 @@ pub async fn zadd(
         .map(convert_to_scored_member)
         .collect();
     let options = convert_zadd_options(request.options);
-    let result = state.sorted_set_service.zadd(&key, members, options).await?;
+    let result = state
+        .sorted_set_service
+        .zadd(&key, members, options)
+        .await?;
     Ok(Json(ApiResponse::success(ZAddResponse {
         count: result.count,
         new_score: result.new_score,
@@ -278,7 +306,10 @@ pub async fn zmscore(
     Path(key): Path<String>,
     Json(request): Json<ZMScoreRequest>,
 ) -> Result<Json<ApiResponse<ZMScoreResponse>>, CacheError> {
-    let scores = state.sorted_set_service.zmscore(&key, request.members).await?;
+    let scores = state
+        .sorted_set_service
+        .zmscore(&key, request.members)
+        .await?;
     Ok(Json(ApiResponse::success(ZMScoreResponse { scores })))
 }
 
@@ -545,7 +576,13 @@ pub async fn zrangestore(
     });
     let count = state
         .sorted_set_service
-        .zrangestore(&request.destination, &key, request.start, request.stop, options)
+        .zrangestore(
+            &request.destination,
+            &key,
+            request.start,
+            request.stop,
+            options,
+        )
         .await?;
     Ok(Json(ApiResponse::success(ZRangeStoreResponse { count })))
 }
@@ -622,10 +659,7 @@ pub async fn zremrangebylex(
     Json(request): Json<ZRemRangeByLexRequest>,
 ) -> Result<Json<ApiResponse<ZRemRangeResponse>>, CacheError> {
     let range = convert_lex_range(&request.range);
-    let removed = state
-        .sorted_set_service
-        .zremrangebylex(&key, range)
-        .await?;
+    let removed = state.sorted_set_service.zremrangebylex(&key, range).await?;
     Ok(Json(ApiResponse::success(ZRemRangeResponse { removed })))
 }
 
@@ -695,7 +729,9 @@ pub async fn bzpopmin(
     State(state): State<AppState>,
     Json(request): Json<ZBPopRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .sorted_set_service
         .bzpopmin(request.keys, request.timeout_seconds)
@@ -729,7 +765,9 @@ pub async fn bzpopmax(
     State(state): State<AppState>,
     Json(request): Json<ZBPopRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let result = state
         .sorted_set_service
         .bzpopmax(request.keys, request.timeout_seconds)
@@ -765,10 +803,13 @@ pub async fn zmpop(
         _ => {
             return Err(CacheError::InvalidInput(
                 "Direction must be 'min' or 'max'".to_string(),
-            ))
+            ));
         }
     };
-    let result = state.sorted_set_service.zmpop(request.keys, direction, request.count).await?;
+    let result = state
+        .sorted_set_service
+        .zmpop(request.keys, direction, request.count)
+        .await?;
     let (key, members) = match result {
         Some(r) => (
             Some(r.key),
@@ -797,17 +838,27 @@ pub async fn bzmpop(
     State(state): State<AppState>,
     Json(request): Json<ZBMPopRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
-    request.validate().map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let direction = match request.direction.to_lowercase().as_str() {
         "min" => ZPopDirection::Min,
         "max" => ZPopDirection::Max,
         _ => {
             return Err(CacheError::InvalidInput(
                 "Direction must be 'min' or 'max'".to_string(),
-            ))
+            ));
         }
     };
-    let result = state.sorted_set_service.bzmpop(request.keys, direction, request.timeout_seconds, request.count).await?;
+    let result = state
+        .sorted_set_service
+        .bzmpop(
+            request.keys,
+            direction,
+            request.timeout_seconds,
+            request.count,
+        )
+        .await?;
 
     match result {
         Some(r) => Ok(Json(ApiResponse::success(ZMPopResponse {
@@ -866,7 +917,10 @@ pub async fn zunion(
     Json(request): Json<ZSetAlgebraRequest>,
 ) -> Result<Json<ApiResponse<ZSetAlgebraResponse>>, CacheError> {
     let options = convert_algebra_options(request.options);
-    let members = state.sorted_set_service.zunion(request.keys, options).await?;
+    let members = state
+        .sorted_set_service
+        .zunion(request.keys, options)
+        .await?;
     let members = members.into_iter().map(convert_scored_member).collect();
     Ok(Json(ApiResponse::success(ZSetAlgebraResponse { members })))
 }
@@ -891,7 +945,9 @@ pub async fn zunionstore(
         .sorted_set_service
         .zunionstore(&request.destination, request.keys, options)
         .await?;
-    Ok(Json(ApiResponse::success(ZSetAlgebraStoreResponse { count })))
+    Ok(Json(ApiResponse::success(ZSetAlgebraStoreResponse {
+        count,
+    })))
 }
 
 /// ZINTER - Get the intersection of multiple sorted sets
@@ -910,7 +966,10 @@ pub async fn zinter(
     Json(request): Json<ZSetAlgebraRequest>,
 ) -> Result<Json<ApiResponse<ZSetAlgebraResponse>>, CacheError> {
     let options = convert_algebra_options(request.options);
-    let members = state.sorted_set_service.zinter(request.keys, options).await?;
+    let members = state
+        .sorted_set_service
+        .zinter(request.keys, options)
+        .await?;
     let members = members.into_iter().map(convert_scored_member).collect();
     Ok(Json(ApiResponse::success(ZSetAlgebraResponse { members })))
 }
@@ -935,7 +994,9 @@ pub async fn zinterstore(
         .sorted_set_service
         .zinterstore(&request.destination, request.keys, options)
         .await?;
-    Ok(Json(ApiResponse::success(ZSetAlgebraStoreResponse { count })))
+    Ok(Json(ApiResponse::success(ZSetAlgebraStoreResponse {
+        count,
+    })))
 }
 
 /// ZINTERCARD - Get the cardinality of the intersection
@@ -957,7 +1018,9 @@ pub async fn zintercard(
         .sorted_set_service
         .zintercard(request.keys, request.limit)
         .await?;
-    Ok(Json(ApiResponse::success(ZInterCardResponse { cardinality })))
+    Ok(Json(ApiResponse::success(ZInterCardResponse {
+        cardinality,
+    })))
 }
 
 /// ZDIFF - Get the difference of sorted sets
@@ -1002,7 +1065,9 @@ pub async fn zdiffstore(
         .sorted_set_service
         .zdiffstore(&request.destination, request.keys)
         .await?;
-    Ok(Json(ApiResponse::success(ZSetAlgebraStoreResponse { count })))
+    Ok(Json(ApiResponse::success(ZSetAlgebraStoreResponse {
+        count,
+    })))
 }
 
 // ========== Scan operation ==========
@@ -1031,19 +1096,143 @@ pub async fn zscan(
         .sorted_set_service
         .zscan(&key, query.cursor, query.pattern.as_deref(), query.count)
         .await?;
-    let members = result.members.into_iter().map(convert_scored_member).collect();
+    let members = result
+        .members
+        .into_iter()
+        .map(convert_scored_member)
+        .collect();
     Ok(Json(ApiResponse::success(ZScanResponse {
         cursor: result.cursor,
         members,
     })))
 }
 
+// ========== SSE Streaming Endpoints ==========
+
+/// GET /api/v1/sorted-sets/{key}/bzpopmin/stream
+///
+/// SSE stream that repeatedly polls BZPOPMIN and streams results.
+#[utoipa::path(
+    get,
+    path = "/api/v1/sorted-sets/{key}/bzpopmin/stream",
+    params(
+        ("key" = String, Path, description = "The sorted set key"),
+        ZBPopStreamQuery
+    ),
+    responses(
+        (status = 200, description = "SSE stream of BZPOPMIN results", content_type = "text/event-stream"),
+        (status = 503, description = "Too many concurrent SSE connections")
+    ),
+    tag = "Sorted Sets"
+)]
+pub async fn bzpopmin_stream(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(query): Query<ZBPopStreamQuery>,
+) -> Result<impl IntoResponse, CacheError> {
+    let permit = state
+        .sse_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| CacheError::SubscriptionLimitReached)?;
+
+    let poll_secs = query.poll_seconds.unwrap_or(5).clamp(1, 30);
+    let stream = async_stream::stream! {
+        let _permit = permit;
+        loop {
+            match state.sorted_set_service.bzpopmin(vec![key.clone()], poll_secs).await {
+                Ok(Some(result)) => {
+                    let members: Vec<serde_json::Value> = result.members.iter().map(|m| {
+                        serde_json::json!({"member": m.member, "score": m.score})
+                    }).collect();
+                    let data = serde_json::json!({"key": result.key, "members": members});
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("message").data(data.to_string()));
+                }
+                Ok(None) => {
+                    // Timeout, continue polling
+                }
+                Err(e) => {
+                    let error_data = serde_json::json!({"error": e.to_string()}).to_string();
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("error").data(error_data));
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    ))
+}
+
+/// GET /api/v1/sorted-sets/{key}/bzpopmax/stream
+///
+/// SSE stream that repeatedly polls BZPOPMAX and streams results.
+#[utoipa::path(
+    get,
+    path = "/api/v1/sorted-sets/{key}/bzpopmax/stream",
+    params(
+        ("key" = String, Path, description = "The sorted set key"),
+        ZBPopStreamQuery
+    ),
+    responses(
+        (status = 200, description = "SSE stream of BZPOPMAX results", content_type = "text/event-stream"),
+        (status = 503, description = "Too many concurrent SSE connections")
+    ),
+    tag = "Sorted Sets"
+)]
+pub async fn bzpopmax_stream(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(query): Query<ZBPopStreamQuery>,
+) -> Result<impl IntoResponse, CacheError> {
+    let permit = state
+        .sse_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| CacheError::SubscriptionLimitReached)?;
+
+    let poll_secs = query.poll_seconds.unwrap_or(5).clamp(1, 30);
+    let stream = async_stream::stream! {
+        let _permit = permit;
+        loop {
+            match state.sorted_set_service.bzpopmax(vec![key.clone()], poll_secs).await {
+                Ok(Some(result)) => {
+                    let members: Vec<serde_json::Value> = result.members.iter().map(|m| {
+                        serde_json::json!({"member": m.member, "score": m.score})
+                    }).collect();
+                    let data = serde_json::json!({"key": result.key, "members": members});
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("message").data(data.to_string()));
+                }
+                Ok(None) => {
+                    // Timeout, continue polling
+                }
+                Err(e) => {
+                    let error_data = serde_json::json!({"error": e.to_string()}).to_string();
+                    yield Ok::<_, std::convert::Infallible>(Event::default().event("error").data(error_data));
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::test_state_with_sorted_set_repo;
-    use axum::extract::{Path, Query, State};
     use axum::Json;
+    use axum::extract::{Path, Query, State};
     use std::collections::HashSet;
 
     fn member(name: &str, score: f64) -> ScoredMemberDto {
@@ -1101,9 +1290,18 @@ mod tests {
         assert_eq!(lex.min, "[a");
         assert_eq!(lex.max, "[z");
 
-        assert!(matches!(convert_aggregate(&ZAggregateDto::Sum), ZAggregate::Sum));
-        assert!(matches!(convert_aggregate(&ZAggregateDto::Min), ZAggregate::Min));
-        assert!(matches!(convert_aggregate(&ZAggregateDto::Max), ZAggregate::Max));
+        assert!(matches!(
+            convert_aggregate(&ZAggregateDto::Sum),
+            ZAggregate::Sum
+        ));
+        assert!(matches!(
+            convert_aggregate(&ZAggregateDto::Min),
+            ZAggregate::Min
+        ));
+        assert!(matches!(
+            convert_aggregate(&ZAggregateDto::Max),
+            ZAggregate::Max
+        ));
 
         let algebra_opts = convert_algebra_options(Some(ZSetAlgebraOptionsDto {
             weights: Some(vec![1.0, 2.0]),
@@ -1216,20 +1414,14 @@ mod tests {
         .unwrap();
         assert_eq!(lexcount.0.data.expect("data").count, 3);
 
-        let rank = zrank(
-            state.clone(),
-            Path(("zset".to_string(), "a".to_string())),
-        )
-        .await
-        .unwrap();
+        let rank = zrank(state.clone(), Path(("zset".to_string(), "a".to_string())))
+            .await
+            .unwrap();
         assert_eq!(rank.0.data.expect("data").rank, Some(0));
 
-        let revrank = zrevrank(
-            state.clone(),
-            Path(("zset".to_string(), "a".to_string())),
-        )
-        .await
-        .unwrap();
+        let revrank = zrevrank(state.clone(), Path(("zset".to_string(), "a".to_string())))
+            .await
+            .unwrap();
         assert_eq!(revrank.0.data.expect("data").rank, Some(2));
 
         let removed = zrem(
@@ -1499,7 +1691,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(popped.0.data.expect("data").key, Some("mpopset".to_string()));
+        assert_eq!(
+            popped.0.data.expect("data").key,
+            Some("mpopset".to_string())
+        );
 
         let popped = zmpop(
             state.clone(),
@@ -1605,8 +1800,7 @@ mod tests {
         .unwrap();
         let random_members = random.0.data.expect("data").members;
         assert_eq!(random_members.len(), 2);
-        let allowed: HashSet<String> =
-            ["x", "y", "z"].iter().map(|m| m.to_string()).collect();
+        let allowed: HashSet<String> = ["x", "y", "z"].iter().map(|m| m.to_string()).collect();
         for m in random_members {
             assert!(allowed.contains(&m.member));
         }

@@ -846,3 +846,115 @@ mod tests {
         assert_eq!(query.count, Some(10));
     }
 }
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use validator::Validate;
+
+    #[test]
+    fn stream_read_blocking_empty_streams_fails() {
+        let req = StreamReadBlockingRequest {
+            streams: vec![],
+            count: None,
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_blocking_timeout_zero_fails() {
+        let req = StreamReadBlockingRequest {
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: "0".into(),
+            }],
+            count: None,
+            timeout_seconds: 0,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_blocking_timeout_31_fails() {
+        let req = StreamReadBlockingRequest {
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: "0".into(),
+            }],
+            count: None,
+            timeout_seconds: 31,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_blocking_valid_passes() {
+        let req = StreamReadBlockingRequest {
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: "0".into(),
+            }],
+            count: None,
+            timeout_seconds: 5,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn stream_read_group_blocking_empty_streams_fails() {
+        let req = StreamReadGroupBlockingRequest {
+            consumer: "c1".into(),
+            streams: vec![],
+            count: None,
+            timeout_seconds: 5,
+            no_ack: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_group_blocking_timeout_zero_fails() {
+        let req = StreamReadGroupBlockingRequest {
+            consumer: "c1".into(),
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: ">".into(),
+            }],
+            count: None,
+            timeout_seconds: 0,
+            no_ack: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_group_blocking_timeout_31_fails() {
+        let req = StreamReadGroupBlockingRequest {
+            consumer: "c1".into(),
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: ">".into(),
+            }],
+            count: None,
+            timeout_seconds: 31,
+            no_ack: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_group_blocking_valid_passes() {
+        let req = StreamReadGroupBlockingRequest {
+            consumer: "c1".into(),
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: ">".into(),
+            }],
+            count: None,
+            timeout_seconds: 5,
+            no_ack: false,
+        };
+        assert!(req.validate().is_ok());
+    }
+}

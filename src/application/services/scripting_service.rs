@@ -36,10 +36,10 @@
 use std::sync::Arc;
 
 use crate::api::http::schemas::scripting::{
-    EvalRequest, EvalResponse, EvalShaRequest, FlushMode, ScriptDebugMode,
-    ScriptDebugRequest, ScriptDebugResponse, ScriptExistsRequest, ScriptExistsResponse,
-    ScriptExistsResult, ScriptFlushRequest, ScriptFlushResponse, ScriptKillResponse,
-    ScriptLoadRequest, ScriptLoadResponse,
+    EvalRequest, EvalResponse, EvalShaRequest, FlushMode, ScriptDebugMode, ScriptDebugRequest,
+    ScriptDebugResponse, ScriptExistsRequest, ScriptExistsResponse, ScriptExistsResult,
+    ScriptFlushRequest, ScriptFlushResponse, ScriptKillResponse, ScriptLoadRequest,
+    ScriptLoadResponse,
 };
 use crate::domain::errors::CacheError;
 use crate::infrastructure::redis::connection::InstrumentedPool;
@@ -71,27 +71,30 @@ impl ScriptingService {
         use redis::ErrorKind;
         match e.kind() {
             // Script-specific errors -> 400
-            ErrorKind::NoScriptError => {
-                CacheError::ScriptError("Script not found in cache. Use SCRIPT LOAD first.".to_string())
-            }
+            ErrorKind::NoScriptError => CacheError::ScriptError(
+                "Script not found in cache. Use SCRIPT LOAD first.".to_string(),
+            ),
             // NotBusy error from SCRIPT KILL when no script is running
             ErrorKind::NotBusy => {
                 CacheError::ScriptError("No script is currently running".to_string())
             }
             // Extension errors include Lua runtime errors
-            ErrorKind::ExtensionError => {
-                CacheError::ScriptError(format!("Script error: {}", e))
-            }
+            ErrorKind::ExtensionError => CacheError::ScriptError(format!("Script error: {}", e)),
             // Response errors from Redis (including Lua errors returned by Redis)
             ErrorKind::ResponseError => {
                 let msg = e.to_string();
                 // Check if it's a script-related error
-                if msg.contains("NOSCRIPT") || msg.contains("ERR Error") || msg.contains("@user_script") {
+                if msg.contains("NOSCRIPT")
+                    || msg.contains("ERR Error")
+                    || msg.contains("@user_script")
+                {
                     CacheError::ScriptError(format!("Script error: {}", e))
                 } else if msg.contains("NOTBUSY") || msg.contains("No scripts in execution") {
                     CacheError::ScriptError("No script is currently running".to_string())
                 } else if msg.contains("UNKILLABLE") {
-                    CacheError::ScriptError("Cannot kill script that has performed writes".to_string())
+                    CacheError::ScriptError(
+                        "Cannot kill script that has performed writes".to_string(),
+                    )
                 } else {
                     CacheError::RedisError(e)
                 }
@@ -131,8 +134,7 @@ impl ScriptingService {
         let cmd_name = if request.readonly { "EVAL_RO" } else { "EVAL" };
 
         let mut cmd = redis::cmd(cmd_name);
-        cmd.arg(&request.script)
-            .arg(request.keys.len());
+        cmd.arg(&request.script).arg(request.keys.len());
 
         // Add keys
         for key in &request.keys {
@@ -177,11 +179,14 @@ impl ScriptingService {
         let mut conn = self.pool.get().await?;
 
         // Build the command based on readonly flag
-        let cmd_name = if request.readonly { "EVALSHA_RO" } else { "EVALSHA" };
+        let cmd_name = if request.readonly {
+            "EVALSHA_RO"
+        } else {
+            "EVALSHA"
+        };
 
         let mut cmd = redis::cmd(cmd_name);
-        cmd.arg(&request.sha)
-            .arg(request.keys.len());
+        cmd.arg(&request.sha).arg(request.keys.len());
 
         // Add keys
         for key in &request.keys {
@@ -213,7 +218,10 @@ impl ScriptingService {
     ///
     /// # Returns
     /// The SHA1 hash of the cached script
-    pub async fn script_load(&self, request: ScriptLoadRequest) -> Result<ScriptLoadResponse, CacheError> {
+    pub async fn script_load(
+        &self,
+        request: ScriptLoadRequest,
+    ) -> Result<ScriptLoadResponse, CacheError> {
         self.validate_script(&request.script)?;
 
         let mut conn = self.pool.get().await?;
@@ -237,9 +245,14 @@ impl ScriptingService {
     ///
     /// # Returns
     /// Existence status for each SHA
-    pub async fn script_exists(&self, request: ScriptExistsRequest) -> Result<ScriptExistsResponse, CacheError> {
+    pub async fn script_exists(
+        &self,
+        request: ScriptExistsRequest,
+    ) -> Result<ScriptExistsResponse, CacheError> {
         if request.shas.is_empty() {
-            return Err(CacheError::InvalidInput("At least one SHA is required".to_string()));
+            return Err(CacheError::InvalidInput(
+                "At least one SHA is required".to_string(),
+            ));
         }
 
         // Validate all SHAs
@@ -283,7 +296,10 @@ impl ScriptingService {
     ///
     /// # Arguments
     /// * `request` - Optional flush mode (ASYNC or SYNC). If not specified, Redis default is used.
-    pub async fn script_flush(&self, request: ScriptFlushRequest) -> Result<ScriptFlushResponse, CacheError> {
+    pub async fn script_flush(
+        &self,
+        request: ScriptFlushRequest,
+    ) -> Result<ScriptFlushResponse, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("SCRIPT");
@@ -336,7 +352,10 @@ impl ScriptingService {
     ///
     /// # Warning
     /// This is primarily for development use. In production, debugging should be disabled.
-    pub async fn script_debug(&self, request: ScriptDebugRequest) -> Result<ScriptDebugResponse, CacheError> {
+    pub async fn script_debug(
+        &self,
+        request: ScriptDebugRequest,
+    ) -> Result<ScriptDebugResponse, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mode_arg = match request.mode {
@@ -360,7 +379,9 @@ impl ScriptingService {
     /// Validate script content
     fn validate_script(&self, script: &str) -> Result<(), CacheError> {
         if script.is_empty() {
-            return Err(CacheError::InvalidInput("Script cannot be empty".to_string()));
+            return Err(CacheError::InvalidInput(
+                "Script cannot be empty".to_string(),
+            ));
         }
         if script.len() > MAX_SCRIPT_SIZE {
             return Err(CacheError::InvalidInput(format!(
@@ -382,7 +403,7 @@ impl ScriptingService {
         }
         if !sha.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(CacheError::InvalidInput(
-                "SHA must contain only hexadecimal characters".to_string()
+                "SHA must contain only hexadecimal characters".to_string(),
             ));
         }
         Ok(())
@@ -416,7 +437,13 @@ impl ScriptingService {
     fn json_to_redis_arg(value: &serde_json::Value) -> String {
         match value {
             serde_json::Value::Null => String::new(),
-            serde_json::Value::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
+            serde_json::Value::Bool(b) => {
+                if *b {
+                    "1".to_string()
+                } else {
+                    "0".to_string()
+                }
+            }
             serde_json::Value::Number(n) => n.to_string(),
             serde_json::Value::String(s) => s.clone(),
             serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
@@ -453,10 +480,8 @@ impl ScriptingService {
             }
             redis::Value::SimpleString(s) => serde_json::Value::String(s),
             redis::Value::Array(arr) => {
-                let items: Vec<serde_json::Value> = arr
-                    .into_iter()
-                    .map(Self::redis_value_to_json)
-                    .collect();
+                let items: Vec<serde_json::Value> =
+                    arr.into_iter().map(Self::redis_value_to_json).collect();
                 serde_json::Value::Array(items)
             }
             redis::Value::Double(d) => serde_json::json!(d),
@@ -474,28 +499,21 @@ impl ScriptingService {
                 serde_json::Value::Object(obj)
             }
             redis::Value::Set(s) => {
-                let items: Vec<serde_json::Value> = s
-                    .into_iter()
-                    .map(Self::redis_value_to_json)
-                    .collect();
+                let items: Vec<serde_json::Value> =
+                    s.into_iter().map(Self::redis_value_to_json).collect();
                 serde_json::Value::Array(items)
             }
-            redis::Value::Attribute { data, attributes: _ } => {
-                Self::redis_value_to_json(*data)
-            }
+            redis::Value::Attribute {
+                data,
+                attributes: _,
+            } => Self::redis_value_to_json(*data),
             redis::Value::Push { kind: _, data } => {
-                let items: Vec<serde_json::Value> = data
-                    .into_iter()
-                    .map(Self::redis_value_to_json)
-                    .collect();
+                let items: Vec<serde_json::Value> =
+                    data.into_iter().map(Self::redis_value_to_json).collect();
                 serde_json::Value::Array(items)
             }
-            redis::Value::BigNumber(bn) => {
-                serde_json::Value::String(bn.to_string())
-            }
-            redis::Value::VerbatimString { format: _, text } => {
-                serde_json::Value::String(text)
-            }
+            redis::Value::BigNumber(bn) => serde_json::Value::String(bn.to_string()),
+            redis::Value::VerbatimString { format: _, text } => serde_json::Value::String(text),
             redis::Value::ServerError(e) => {
                 serde_json::json!({"error": format!("{:?}", e)})
             }
@@ -510,7 +528,7 @@ mod tests {
     use serde_json::json;
     use testcontainers::ContainerAsync;
     use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{Redis, REDIS_PORT};
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
 
     async fn start_redis() -> (ContainerAsync<Redis>, String) {
         let container = Redis::default().start().await.unwrap();
@@ -595,7 +613,9 @@ mod tests {
     fn test_validate_keys_exceeds_limit() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let service = ScriptingService::new(pool);
-        let keys: Vec<String> = (0..MAX_SCRIPT_KEYS + 1).map(|i| format!("key:{}", i)).collect();
+        let keys: Vec<String> = (0..MAX_SCRIPT_KEYS + 1)
+            .map(|i| format!("key:{}", i))
+            .collect();
         let result = service.validate_keys(&keys);
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
@@ -613,31 +633,51 @@ mod tests {
     fn test_validate_args_exceeds_limit() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let service = ScriptingService::new(pool);
-        let args: Vec<serde_json::Value> = (0..MAX_SCRIPT_ARGS + 1).map(|i| serde_json::json!(i)).collect();
+        let args: Vec<serde_json::Value> = (0..MAX_SCRIPT_ARGS + 1)
+            .map(|i| serde_json::json!(i))
+            .collect();
         let result = service.validate_args(&args);
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
     #[test]
     fn test_json_to_redis_arg_null() {
-        assert_eq!(ScriptingService::json_to_redis_arg(&serde_json::Value::Null), "");
+        assert_eq!(
+            ScriptingService::json_to_redis_arg(&serde_json::Value::Null),
+            ""
+        );
     }
 
     #[test]
     fn test_json_to_redis_arg_bool() {
-        assert_eq!(ScriptingService::json_to_redis_arg(&serde_json::json!(true)), "1");
-        assert_eq!(ScriptingService::json_to_redis_arg(&serde_json::json!(false)), "0");
+        assert_eq!(
+            ScriptingService::json_to_redis_arg(&serde_json::json!(true)),
+            "1"
+        );
+        assert_eq!(
+            ScriptingService::json_to_redis_arg(&serde_json::json!(false)),
+            "0"
+        );
     }
 
     #[test]
     fn test_json_to_redis_arg_number() {
-        assert_eq!(ScriptingService::json_to_redis_arg(&serde_json::json!(42)), "42");
-        assert_eq!(ScriptingService::json_to_redis_arg(&serde_json::json!(3.14)), "3.14");
+        assert_eq!(
+            ScriptingService::json_to_redis_arg(&serde_json::json!(42)),
+            "42"
+        );
+        assert_eq!(
+            ScriptingService::json_to_redis_arg(&serde_json::json!(3.14)),
+            "3.14"
+        );
     }
 
     #[test]
     fn test_json_to_redis_arg_string() {
-        assert_eq!(ScriptingService::json_to_redis_arg(&serde_json::json!("hello")), "hello");
+        assert_eq!(
+            ScriptingService::json_to_redis_arg(&serde_json::json!("hello")),
+            "hello"
+        );
     }
 
     #[test]
@@ -655,12 +695,18 @@ mod tests {
 
     #[test]
     fn test_redis_value_to_json_nil() {
-        assert_eq!(ScriptingService::redis_value_to_json(redis::Value::Nil), serde_json::Value::Null);
+        assert_eq!(
+            ScriptingService::redis_value_to_json(redis::Value::Nil),
+            serde_json::Value::Null
+        );
     }
 
     #[test]
     fn test_redis_value_to_json_int() {
-        assert_eq!(ScriptingService::redis_value_to_json(redis::Value::Int(42)), serde_json::json!(42));
+        assert_eq!(
+            ScriptingService::redis_value_to_json(redis::Value::Int(42)),
+            serde_json::json!(42)
+        );
     }
 
     #[test]
@@ -772,7 +818,8 @@ mod tests {
             CacheError::ScriptError(_)
         ));
 
-        let response_other = redis::RedisError::from((redis::ErrorKind::ResponseError, "WRONGTYPE"));
+        let response_other =
+            redis::RedisError::from((redis::ErrorKind::ResponseError, "WRONGTYPE"));
         assert!(matches!(
             ScriptingService::map_redis_error(response_other),
             CacheError::RedisError(_)
@@ -794,7 +841,10 @@ mod tests {
     #[test]
     fn test_redis_value_to_json_map_and_set() {
         let map_value = redis::Value::Map(vec![
-            (redis::Value::Int(1), redis::Value::SimpleString("one".to_string())),
+            (
+                redis::Value::Int(1),
+                redis::Value::SimpleString("one".to_string()),
+            ),
             (redis::Value::Boolean(true), redis::Value::Int(2)),
             (
                 redis::Value::Array(vec![redis::Value::Int(3)]),
@@ -828,7 +878,10 @@ mod tests {
 
         let push_value = redis::Value::Push {
             kind: redis::PushKind::Message,
-            data: vec![redis::Value::Int(1), redis::Value::BulkString(b"x".to_vec())],
+            data: vec![
+                redis::Value::Int(1),
+                redis::Value::BulkString(b"x".to_vec()),
+            ],
         };
         assert_eq!(
             ScriptingService::redis_value_to_json(push_value),
@@ -888,7 +941,10 @@ mod tests {
 
         let exists_response = service
             .script_exists(ScriptExistsRequest {
-                shas: vec![load_response.sha, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()],
+                shas: vec![
+                    load_response.sha,
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+                ],
             })
             .await
             .unwrap();
@@ -899,10 +955,7 @@ mod tests {
                 mode: Some(FlushMode::Sync),
             })
             .await;
-        assert!(matches!(
-            flush_sync,
-            Ok(_) | Err(CacheError::RedisError(_))
-        ));
+        assert!(matches!(flush_sync, Ok(_) | Err(CacheError::RedisError(_))));
 
         let flush_async = service
             .script_flush(ScriptFlushRequest {

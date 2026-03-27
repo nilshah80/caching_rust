@@ -180,7 +180,9 @@ impl SearchService {
         self.validate_key(key)?;
         self.validate_suggestion_string(string)?;
         self.validate_score(score)?;
-        self.repository.ft_sugadd(key, string, score, &options).await
+        self.repository
+            .ft_sugadd(key, string, score, &options)
+            .await
     }
 
     /// Get suggestions for a prefix
@@ -413,12 +415,12 @@ impl SearchService {
             ));
         }
         // Validate weight if present
-        if let Some(weight) = field.weight {
-            if weight < 0.0 {
-                return Err(CacheError::InvalidInput(
-                    "Field weight must be non-negative".to_string(),
-                ));
-            }
+        if let Some(weight) = field.weight
+            && weight < 0.0
+        {
+            return Err(CacheError::InvalidInput(
+                "Field weight must be non-negative".to_string(),
+            ));
         }
         Ok(())
     }
@@ -429,7 +431,7 @@ mod tests {
     use super::*;
     use crate::domain::entities::{
         AggregateOptions, IndexCreateOptions, ProfileType, SearchFieldType, SearchOptions,
-        SugAddOptions, SugGetOptions, SpellcheckOptions,
+        SpellcheckOptions, SugAddOptions, SugGetOptions,
     };
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::MockSearchRepository;
@@ -693,9 +695,7 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        let result = service
-            .ft_dictdel("dict", vec!["a".to_string()])
-            .await;
+        let result = service.ft_dictdel("dict", vec!["a".to_string()]).await;
         assert!(result.is_ok());
 
         let result = service.ft_dictdump("dict").await;

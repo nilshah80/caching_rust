@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 use crate::domain::entities::{
-    AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent, MemoryStats,
+    MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 
@@ -169,5 +169,16 @@ pub trait AdminRepository: Send + Sync {
     async fn acl_genpass(&self, bits: u32) -> Result<String, CacheError>;
 
     /// Get ACL log entries (ACL LOG command)
-    async fn acl_log(&self, count: Option<i64>, reset: bool) -> Result<Vec<AclLogEntry>, CacheError>;
+    async fn acl_log(
+        &self,
+        count: Option<i64>,
+        reset: bool,
+    ) -> Result<Vec<AclLogEntry>, CacheError>;
+
+    /// Test if a user has permission to run a command (ACL DRYRUN command, Redis 7.0+)
+    async fn acl_dryrun(
+        &self,
+        username: &str,
+        command: &[String],
+    ) -> Result<AclDryrunResult, CacheError>;
 }

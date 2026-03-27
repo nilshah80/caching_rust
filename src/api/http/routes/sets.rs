@@ -3,22 +3,22 @@
 //! HTTP endpoints for Redis set operations.
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::{delete, get, post},
-    Json, Router,
 };
 
-use crate::shared::response::ApiResponse;
 use crate::api::http::schemas::sets::{
-    SetAddRequest, SetAddResponse, SetAlgebraRequest, SetAlgebraResponse,
-    SetAlgebraStoreRequest, SetAlgebraStoreResponse, SetCardResponse,
-    SetInterCardRequest, SetInterCardResponse, SetIsMemberRequest, SetIsMemberResponse,
-    SetMIsMemberRequest, SetMIsMemberResponse, SetMembersResponse, SetMoveRequest,
-    SetMoveResponse, SetPopRequest, SetPopResponse, SetRandMemberQuery,
-    SetRandMemberResponse, SetRemoveRequest, SetRemoveResponse, SetScanQuery, SetScanResponse,
+    SetAddRequest, SetAddResponse, SetAlgebraRequest, SetAlgebraResponse, SetAlgebraStoreRequest,
+    SetAlgebraStoreResponse, SetCardResponse, SetInterCardRequest, SetInterCardResponse,
+    SetIsMemberRequest, SetIsMemberResponse, SetMIsMemberRequest, SetMIsMemberResponse,
+    SetMembersResponse, SetMoveRequest, SetMoveResponse, SetPopRequest, SetPopResponse,
+    SetRandMemberQuery, SetRandMemberResponse, SetRemoveRequest, SetRemoveResponse, SetScanQuery,
+    SetScanResponse,
 };
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
+use crate::shared::response::ApiResponse;
 
 /// Create Set routes
 pub fn set_routes() -> Router<AppState> {
@@ -131,7 +131,9 @@ pub async fn sismember(
     Json(request): Json<SetIsMemberRequest>,
 ) -> Result<Json<ApiResponse<SetIsMemberResponse>>, CacheError> {
     let is_member = state.set_service.sismember(&key, &request.member).await?;
-    Ok(Json(ApiResponse::success(SetIsMemberResponse { is_member })))
+    Ok(Json(ApiResponse::success(SetIsMemberResponse {
+        is_member,
+    })))
 }
 
 /// SMISMEMBER - Check if multiple members exist in a set
@@ -196,7 +198,9 @@ pub async fn srandmember(
     Query(query): Query<SetRandMemberQuery>,
 ) -> Result<Json<ApiResponse<SetRandMemberResponse>>, CacheError> {
     let members = state.set_service.srandmember(&key, query.count).await?;
-    Ok(Json(ApiResponse::success(SetRandMemberResponse { members })))
+    Ok(Json(ApiResponse::success(SetRandMemberResponse {
+        members,
+    })))
 }
 
 /// SPOP - Remove and return random members from a set
@@ -281,7 +285,9 @@ pub async fn sinterstore(
         .set_service
         .sinterstore(&request.destination, request.keys)
         .await?;
-    Ok(Json(ApiResponse::success(SetAlgebraStoreResponse { count })))
+    Ok(Json(ApiResponse::success(SetAlgebraStoreResponse {
+        count,
+    })))
 }
 
 /// SINTERCARD - Get the cardinality of the intersection
@@ -303,7 +309,9 @@ pub async fn sintercard(
         .set_service
         .sintercard(request.keys, request.limit)
         .await?;
-    Ok(Json(ApiResponse::success(SetInterCardResponse { cardinality })))
+    Ok(Json(ApiResponse::success(SetInterCardResponse {
+        cardinality,
+    })))
 }
 
 /// SUNION - Get the union of multiple sets
@@ -344,7 +352,9 @@ pub async fn sunionstore(
         .set_service
         .sunionstore(&request.destination, request.keys)
         .await?;
-    Ok(Json(ApiResponse::success(SetAlgebraStoreResponse { count })))
+    Ok(Json(ApiResponse::success(SetAlgebraStoreResponse {
+        count,
+    })))
 }
 
 /// SDIFF - Get the difference of sets
@@ -385,7 +395,9 @@ pub async fn sdiffstore(
         .set_service
         .sdiffstore(&request.destination, request.keys)
         .await?;
-    Ok(Json(ApiResponse::success(SetAlgebraStoreResponse { count })))
+    Ok(Json(ApiResponse::success(SetAlgebraStoreResponse {
+        count,
+    })))
 }
 
 /// SSCAN - Incrementally iterate set members
@@ -421,11 +433,11 @@ pub async fn sscan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::StatusCode;
     use crate::test_support::{test_state, test_state_with_set_repo};
+    use axum::Json;
     use axum::extract::{Path, Query, State};
     use axum::http::Request;
-    use axum::Json;
+    use axum::http::StatusCode;
     use std::collections::HashSet;
     use tower::ServiceExt;
 
@@ -595,8 +607,7 @@ mod tests {
         .unwrap();
         let members = random.0.data.expect("data").members;
         assert_eq!(members.len(), 2);
-        let allowed: HashSet<String> =
-            ["x", "y", "z"].iter().map(|m| m.to_string()).collect();
+        let allowed: HashSet<String> = ["x", "y", "z"].iter().map(|m| m.to_string()).collect();
         for member in &members {
             assert!(allowed.contains(member));
         }

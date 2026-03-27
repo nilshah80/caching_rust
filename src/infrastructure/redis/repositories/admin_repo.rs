@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::entities::{
-    AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent, MemoryStats,
+    MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -36,9 +36,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn get_server_info(&self) -> Result<ServerInfo, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let info: String = redis::cmd("INFO")
-            .query_async(&mut conn)
-            .await?;
+        let info: String = redis::cmd("INFO").query_async(&mut conn).await?;
 
         Ok(parse_server_info(&info))
     }
@@ -46,9 +44,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn get_server_time(&self) -> Result<ServerTime, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let time: (i64, i64) = redis::cmd("TIME")
-            .query_async(&mut conn)
-            .await?;
+        let time: (i64, i64) = redis::cmd("TIME").query_async(&mut conn).await?;
 
         Ok(ServerTime {
             timestamp: time.0,
@@ -59,9 +55,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn get_db_size(&self) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let keys: i64 = redis::cmd("DBSIZE")
-            .query_async(&mut conn)
-            .await?;
+        let keys: i64 = redis::cmd("DBSIZE").query_async(&mut conn).await?;
 
         Ok(keys)
     }
@@ -69,9 +63,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn get_last_save(&self) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let timestamp: i64 = redis::cmd("LASTSAVE")
-            .query_async(&mut conn)
-            .await?;
+        let timestamp: i64 = redis::cmd("LASTSAVE").query_async(&mut conn).await?;
 
         Ok(timestamp)
     }
@@ -277,9 +269,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn save(&self) -> Result<(), CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let _: () = redis::cmd("SAVE")
-            .query_async(&mut conn)
-            .await?;
+        let _: () = redis::cmd("SAVE").query_async(&mut conn).await?;
 
         Ok(())
     }
@@ -287,9 +277,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let result: String = redis::cmd("BGSAVE")
-            .query_async(&mut conn)
-            .await?;
+        let result: String = redis::cmd("BGSAVE").query_async(&mut conn).await?;
 
         Ok(BgSaveResult {
             started: true,
@@ -300,9 +288,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn bgrewriteaof(&self) -> Result<BgRewriteAofResult, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let result: String = redis::cmd("BGREWRITEAOF")
-            .query_async(&mut conn)
-            .await?;
+        let result: String = redis::cmd("BGREWRITEAOF").query_async(&mut conn).await?;
 
         Ok(BgRewriteAofResult {
             started: true,
@@ -524,10 +510,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn acl_list(&self) -> Result<Vec<String>, CacheError> {
         let mut conn = self.pool.get().await?;
 
-        let rules: Vec<String> = redis::cmd("ACL")
-            .arg("LIST")
-            .query_async(&mut conn)
-            .await?;
+        let rules: Vec<String> = redis::cmd("ACL").arg("LIST").query_async(&mut conn).await?;
 
         Ok(rules)
     }
@@ -580,7 +563,11 @@ impl AdminRepository for RedisAdminRepository {
         Ok(password)
     }
 
-    async fn acl_log(&self, count: Option<i64>, reset: bool) -> Result<Vec<AclLogEntry>, CacheError> {
+    async fn acl_log(
+        &self,
+        count: Option<i64>,
+        reset: bool,
+    ) -> Result<Vec<AclLogEntry>, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("ACL");
@@ -595,6 +582,34 @@ impl AdminRepository for RedisAdminRepository {
         let result: Vec<Vec<redis::Value>> = cmd.query_async(&mut conn).await?;
 
         Ok(parse_acl_log_entries(&result))
+    }
+
+    async fn acl_dryrun(
+        &self,
+        username: &str,
+        command: &[String],
+    ) -> Result<AclDryrunResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut cmd = redis::cmd("ACL");
+        cmd.arg("DRYRUN").arg(username);
+        for arg in command {
+            cmd.arg(arg.as_str());
+        }
+
+        // ACL DRYRUN returns "OK" on success, or an error string on denial
+        let result: String = cmd.query_async(&mut conn).await?;
+        if result == "OK" {
+            Ok(AclDryrunResult {
+                allowed: true,
+                reason: None,
+            })
+        } else {
+            Ok(AclDryrunResult {
+                allowed: false,
+                reason: Some(result),
+            })
+        }
     }
 }
 
@@ -621,10 +636,10 @@ fn parse_server_info(info: &str) -> ServerInfo {
                 "keyspace_misses" => response.keyspace_misses = value.parse().unwrap_or(0),
                 key if key.starts_with("db") => {
                     // Parse keyspace info like "db0:keys=5,expires=0,avg_ttl=0"
-                    if let Some(keys_str) = value.split(',').next() {
-                        if let Some(count) = keys_str.strip_prefix("keys=") {
-                            response.total_keys += count.parse::<i64>().unwrap_or(0);
-                        }
+                    if let Some(keys_str) = value.split(',').next()
+                        && let Some(count) = keys_str.strip_prefix("keys=")
+                    {
+                        response.total_keys += count.parse::<i64>().unwrap_or(0);
                     }
                 }
                 _ => {}
@@ -641,84 +656,83 @@ fn parse_memory_stats(stats: &[redis::Value]) -> MemoryStats {
 
     let mut iter = stats.iter();
     while let Some(key) = iter.next() {
-        if let redis::Value::BulkString(key_bytes) = key {
-            if let Ok(key_str) = std::str::from_utf8(key_bytes) {
-                if let Some(value) = iter.next() {
-                    match key_str {
-                        "peak.allocated" => {
-                            if let redis::Value::Int(v) = value {
-                                response.peak_allocated = *v;
-                            }
-                        }
-                        "total.allocated" => {
-                            if let redis::Value::Int(v) = value {
-                                response.total_allocated = *v;
-                            }
-                        }
-                        "startup.allocated" => {
-                            if let redis::Value::Int(v) = value {
-                                response.startup_allocated = *v;
-                            }
-                        }
-                        "replication.backlog" => {
-                            if let redis::Value::Int(v) = value {
-                                response.replication_backlog = *v;
-                            }
-                        }
-                        "clients.normal" => {
-                            if let redis::Value::Int(v) = value {
-                                response.clients_normal = *v;
-                            }
-                        }
-                        "clients.slaves" => {
-                            if let redis::Value::Int(v) = value {
-                                response.clients_slaves = *v;
-                            }
-                        }
-                        "aof.buffer" => {
-                            if let redis::Value::Int(v) = value {
-                                response.aof_buffer = *v;
-                            }
-                        }
-                        "lua.caches" => {
-                            if let redis::Value::Int(v) = value {
-                                response.lua_caches = *v;
-                            }
-                        }
-                        "overhead.total" => {
-                            if let redis::Value::Int(v) = value {
-                                response.overhead_total = *v;
-                            }
-                        }
-                        "dataset.bytes" => {
-                            if let redis::Value::Int(v) = value {
-                                response.dataset_bytes = *v;
-                            }
-                        }
-                        "dataset.percentage" => {
-                            if let redis::Value::BulkString(v) = value {
-                                if let Ok(s) = std::str::from_utf8(v) {
-                                    response.dataset_perc = s.parse().unwrap_or(0.0);
-                                }
-                            }
-                        }
-                        "peak.percentage" => {
-                            if let redis::Value::BulkString(v) = value {
-                                if let Ok(s) = std::str::from_utf8(v) {
-                                    response.peak_perc = s.parse().unwrap_or(0.0);
-                                }
-                            }
-                        }
-                        "fragmentation" => {
-                            if let redis::Value::BulkString(v) = value {
-                                if let Ok(s) = std::str::from_utf8(v) {
-                                    response.fragmentation = s.parse().unwrap_or(0.0);
-                                }
-                            }
-                        }
-                        _ => {}
+        if let redis::Value::BulkString(key_bytes) = key
+            && let Ok(key_str) = std::str::from_utf8(key_bytes)
+            && let Some(value) = iter.next()
+        {
+            match key_str {
+                "peak.allocated" => {
+                    if let redis::Value::Int(v) = value {
+                        response.peak_allocated = *v;
                     }
                 }
+                "total.allocated" => {
+                    if let redis::Value::Int(v) = value {
+                        response.total_allocated = *v;
+                    }
+                }
+                "startup.allocated" => {
+                    if let redis::Value::Int(v) = value {
+                        response.startup_allocated = *v;
+                    }
+                }
+                "replication.backlog" => {
+                    if let redis::Value::Int(v) = value {
+                        response.replication_backlog = *v;
+                    }
+                }
+                "clients.normal" => {
+                    if let redis::Value::Int(v) = value {
+                        response.clients_normal = *v;
+                    }
+                }
+                "clients.slaves" => {
+                    if let redis::Value::Int(v) = value {
+                        response.clients_slaves = *v;
+                    }
+                }
+                "aof.buffer" => {
+                    if let redis::Value::Int(v) = value {
+                        response.aof_buffer = *v;
+                    }
+                }
+                "lua.caches" => {
+                    if let redis::Value::Int(v) = value {
+                        response.lua_caches = *v;
+                    }
+                }
+                "overhead.total" => {
+                    if let redis::Value::Int(v) = value {
+                        response.overhead_total = *v;
+                    }
+                }
+                "dataset.bytes" => {
+                    if let redis::Value::Int(v) = value {
+                        response.dataset_bytes = *v;
+                    }
+                }
+                "dataset.percentage" => {
+                    if let redis::Value::BulkString(v) = value
+                        && let Ok(s) = std::str::from_utf8(v)
+                    {
+                        response.dataset_perc = s.parse().unwrap_or(0.0);
+                    }
+                }
+                "peak.percentage" => {
+                    if let redis::Value::BulkString(v) = value
+                        && let Ok(s) = std::str::from_utf8(v)
+                    {
+                        response.peak_perc = s.parse().unwrap_or(0.0);
+                    }
+                }
+                "fragmentation" => {
+                    if let redis::Value::BulkString(v) = value
+                        && let Ok(s) = std::str::from_utf8(v)
+                    {
+                        response.fragmentation = s.parse().unwrap_or(0.0);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -731,7 +745,7 @@ fn parse_client_list(output: &str) -> Vec<ClientInfo> {
     output
         .lines()
         .filter(|line| !line.is_empty())
-        .filter_map(|line| {
+        .map(|line| {
             let mut info = ClientInfo::default();
 
             for part in line.split_whitespace() {
@@ -757,7 +771,7 @@ fn parse_client_list(output: &str) -> Vec<ClientInfo> {
                 }
             }
 
-            Some(info)
+            info
         })
         .collect()
 }
@@ -849,75 +863,72 @@ fn parse_latency_events(entries: &[Vec<redis::Value>]) -> Vec<LatencyEvent> {
 fn parse_acl_log_entries(entries: &[Vec<redis::Value>]) -> Vec<AclLogEntry> {
     entries
         .iter()
-        .filter_map(|entry| {
+        .map(|entry| {
             let mut log_entry = AclLogEntry::default();
 
             let mut iter = entry.iter();
             while let Some(key) = iter.next() {
-                if let redis::Value::BulkString(key_bytes) = key {
-                    if let Ok(key_str) = std::str::from_utf8(key_bytes) {
-                        if let Some(value) = iter.next() {
-                            match key_str {
-                                "count" => {
-                                    if let redis::Value::Int(v) = value {
-                                        log_entry.count = *v;
-                                    }
-                                }
-                                "reason" => {
-                                    if let redis::Value::BulkString(v) = value {
-                                        log_entry.reason =
-                                            String::from_utf8(v.clone()).unwrap_or_default();
-                                    }
-                                }
-                                "context" => {
-                                    if let redis::Value::BulkString(v) = value {
-                                        log_entry.context =
-                                            String::from_utf8(v.clone()).unwrap_or_default();
-                                    }
-                                }
-                                "object" => {
-                                    if let redis::Value::BulkString(v) = value {
-                                        log_entry.object =
-                                            String::from_utf8(v.clone()).unwrap_or_default();
-                                    }
-                                }
-                                "username" => {
-                                    if let redis::Value::BulkString(v) = value {
-                                        log_entry.username =
-                                            String::from_utf8(v.clone()).unwrap_or_default();
-                                    }
-                                }
-                                "age-seconds" => {
-                                    if let redis::Value::BulkString(v) = value {
-                                        if let Ok(s) = std::str::from_utf8(v) {
-                                            log_entry.age_seconds = s.parse().unwrap_or(0.0);
-                                        }
-                                    }
-                                }
-                                "client-info" => {
-                                    if let redis::Value::BulkString(v) = value {
-                                        log_entry.client_info =
-                                            String::from_utf8(v.clone()).unwrap_or_default();
-                                    }
-                                }
-                                "entry-id" => {
-                                    if let redis::Value::Int(v) = value {
-                                        log_entry.entry_timestamp = *v;
-                                    }
-                                }
-                                "timestamp-created" => {
-                                    if let redis::Value::Int(v) = value {
-                                        log_entry.timestamp_us = *v;
-                                    }
-                                }
-                                _ => {}
+                if let redis::Value::BulkString(key_bytes) = key
+                    && let Ok(key_str) = std::str::from_utf8(key_bytes)
+                    && let Some(value) = iter.next()
+                {
+                    match key_str {
+                        "count" => {
+                            if let redis::Value::Int(v) = value {
+                                log_entry.count = *v;
                             }
                         }
+                        "reason" => {
+                            if let redis::Value::BulkString(v) = value {
+                                log_entry.reason = String::from_utf8(v.clone()).unwrap_or_default();
+                            }
+                        }
+                        "context" => {
+                            if let redis::Value::BulkString(v) = value {
+                                log_entry.context =
+                                    String::from_utf8(v.clone()).unwrap_or_default();
+                            }
+                        }
+                        "object" => {
+                            if let redis::Value::BulkString(v) = value {
+                                log_entry.object = String::from_utf8(v.clone()).unwrap_or_default();
+                            }
+                        }
+                        "username" => {
+                            if let redis::Value::BulkString(v) = value {
+                                log_entry.username =
+                                    String::from_utf8(v.clone()).unwrap_or_default();
+                            }
+                        }
+                        "age-seconds" => {
+                            if let redis::Value::BulkString(v) = value
+                                && let Ok(s) = std::str::from_utf8(v)
+                            {
+                                log_entry.age_seconds = s.parse().unwrap_or(0.0);
+                            }
+                        }
+                        "client-info" => {
+                            if let redis::Value::BulkString(v) = value {
+                                log_entry.client_info =
+                                    String::from_utf8(v.clone()).unwrap_or_default();
+                            }
+                        }
+                        "entry-id" => {
+                            if let redis::Value::Int(v) = value {
+                                log_entry.entry_timestamp = *v;
+                            }
+                        }
+                        "timestamp-created" => {
+                            if let redis::Value::Int(v) = value {
+                                log_entry.timestamp_us = *v;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
 
-            Some(log_entry)
+            log_entry
         })
         .collect()
 }

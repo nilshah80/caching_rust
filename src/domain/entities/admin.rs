@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 // ============================================================================
 
 /// Server information from Redis INFO command
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct ServerInfo {
     pub redis_version: String,
     pub uptime_seconds: i64,
@@ -23,24 +23,6 @@ pub struct ServerInfo {
     pub expired_keys: i64,
     pub keyspace_hits: i64,
     pub keyspace_misses: i64,
-}
-
-impl Default for ServerInfo {
-    fn default() -> Self {
-        Self {
-            redis_version: String::new(),
-            uptime_seconds: 0,
-            connected_clients: 0,
-            used_memory: 0,
-            used_memory_human: String::new(),
-            total_system_memory: 0,
-            used_memory_peak: 0,
-            total_keys: 0,
-            expired_keys: 0,
-            keyspace_hits: 0,
-            keyspace_misses: 0,
-        }
-    }
 }
 
 /// Server time response
@@ -277,6 +259,15 @@ impl Default for AclLogEntry {
             timestamp_us: 0,
         }
     }
+}
+
+/// Result of ACL DRYRUN command
+#[derive(Debug, Clone)]
+pub struct AclDryrunResult {
+    /// Whether the command would be allowed
+    pub allowed: bool,
+    /// Reason for denial, if not allowed
+    pub reason: Option<String>,
 }
 
 /// Flush options

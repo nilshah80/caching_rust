@@ -2,13 +2,13 @@
 //!
 //! Tracing setup and configuration.
 
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use crate::infrastructure::config::Settings;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initialize the tracing/logging infrastructure
 pub fn init(settings: &Settings) -> anyhow::Result<()> {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&settings.log.level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&settings.log.level));
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)

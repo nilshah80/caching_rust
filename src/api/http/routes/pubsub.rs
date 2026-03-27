@@ -5,19 +5,23 @@
 //! - WebSocket endpoints use dedicated connections (SUBSCRIBE, PSUBSCRIBE)
 
 use axum::{
+    Json, Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use futures::StreamExt;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::api::http::schemas::pubsub::*;
+use crate::api::http::schemas::pubsub::{
+    ChannelsQuery, ChannelsResponse, NumPatResponse, NumSubItem, NumSubRequest, NumSubResponse,
+    PSubscribeQuery, PubSubMessage, PubSubStatsResponse, PublishRequest, PublishResponse,
+    SubscribeQuery, SubscriptionConfirmation, WebSocketError,
+};
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
 use crate::shared::response::ApiResponse;
@@ -60,7 +64,10 @@ pub async fn publish(
     State(state): State<AppState>,
     Json(req): Json<PublishRequest>,
 ) -> Result<Json<ApiResponse<PublishResponse>>, CacheError> {
-    let result = state.pubsub_service.publish(&req.channel, &req.message).await?;
+    let result = state
+        .pubsub_service
+        .publish(&req.channel, &req.message)
+        .await?;
 
     Ok(Json(ApiResponse::success(PublishResponse {
         channel: result.channel,
@@ -85,7 +92,10 @@ pub async fn channels(
     State(state): State<AppState>,
     Query(query): Query<ChannelsQuery>,
 ) -> Result<Json<ApiResponse<ChannelsResponse>>, CacheError> {
-    let channels = state.pubsub_service.channels(query.pattern.as_deref()).await?;
+    let channels = state
+        .pubsub_service
+        .channels(query.pattern.as_deref())
+        .await?;
 
     Ok(Json(ApiResponse::success(ChannelsResponse { channels })))
 }
@@ -183,7 +193,10 @@ pub async fn spublish(
     State(state): State<AppState>,
     Json(req): Json<PublishRequest>,
 ) -> Result<Json<ApiResponse<PublishResponse>>, CacheError> {
-    let result = state.pubsub_service.spublish(&req.channel, &req.message).await?;
+    let result = state
+        .pubsub_service
+        .spublish(&req.channel, &req.message)
+        .await?;
 
     Ok(Json(ApiResponse::success(PublishResponse {
         channel: result.channel,
@@ -208,7 +221,10 @@ pub async fn shardchannels(
     State(state): State<AppState>,
     Query(query): Query<ChannelsQuery>,
 ) -> Result<Json<ApiResponse<ChannelsResponse>>, CacheError> {
-    let channels = state.pubsub_service.shardchannels(query.pattern.as_deref()).await?;
+    let channels = state
+        .pubsub_service
+        .shardchannels(query.pattern.as_deref())
+        .await?;
 
     Ok(Json(ApiResponse::success(ChannelsResponse { channels })))
 }
@@ -321,7 +337,9 @@ pub async fn ws_subscribe(
     let channels = query.parse_channels();
 
     if channels.is_empty() {
-        return Err(CacheError::InvalidInput("No channels specified".to_string()));
+        return Err(CacheError::InvalidInput(
+            "No channels specified".to_string(),
+        ));
     }
 
     // Validate channel names
@@ -357,7 +375,9 @@ pub async fn ws_psubscribe(
     let patterns = query.parse_patterns();
 
     if patterns.is_empty() {
-        return Err(CacheError::InvalidInput("No patterns specified".to_string()));
+        return Err(CacheError::InvalidInput(
+            "No patterns specified".to_string(),
+        ));
     }
 
     // Validate pattern names
@@ -394,7 +414,8 @@ pub async fn ws_ssubscribe(
     // SSUBSCRIBE requires cluster-aware connection handling that the redis crate
     // doesn't natively support. Return 501 until proper implementation.
     Err(CacheError::ModuleNotAvailable(
-        "Sharded pub/sub (SSUBSCRIBE) is not yet implemented. Use /subscribe for regular pub/sub.".to_string()
+        "Sharded pub/sub (SSUBSCRIBE) is not yet implemented. Use /subscribe for regular pub/sub."
+            .to_string(),
     ))
 }
 
@@ -447,7 +468,10 @@ fn extract_payload(msg: &redis::Msg) -> String {
     // Fall back to bytes and base64 encode
     if let Ok(bytes) = msg.get_payload::<Vec<u8>>() {
         use base64::Engine;
-        return format!("base64:{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        return format!(
+            "base64:{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        );
     }
 
     // If all else fails, return empty string (shouldn't happen)
@@ -461,8 +485,7 @@ async fn handle_subscribe(
     mut pubsub: PubSubConnection,
 ) {
     // Subscribe to all channels with incremental count (Redis semantics)
-    let mut subscribed_count: i64 = 0;
-    for channel in &channels {
+    for (subscribed_count, channel) in (0_i64..).zip(channels.iter()) {
         if let Err(e) = pubsub.subscribe(channel).await {
             let error = WebSocketError {
                 error: "subscribe_failed".to_string(),
@@ -477,17 +500,19 @@ async fn handle_subscribe(
             return;
         }
 
-        subscribed_count += 1;
-
         // Send confirmation with incremental count (like Redis)
         let confirmation = SubscriptionConfirmation {
             r#type: "subscribed".to_string(),
             target: channel.clone(),
-            count: subscribed_count,
+            count: subscribed_count + 1,
         };
         if send_ws(
             &mut socket,
-            Message::Text(serde_json::to_string(&confirmation).unwrap_or_default().into()),
+            Message::Text(
+                serde_json::to_string(&confirmation)
+                    .unwrap_or_default()
+                    .into(),
+            ),
         )
         .await
         .is_err()
@@ -553,8 +578,7 @@ async fn handle_psubscribe(
     mut pubsub: PubSubConnection,
 ) {
     // Subscribe to all patterns with incremental count (Redis semantics)
-    let mut subscribed_count: i64 = 0;
-    for pattern in &patterns {
+    for (subscribed_count, pattern) in (0_i64..).zip(patterns.iter()) {
         if let Err(e) = pubsub.psubscribe(pattern).await {
             let error = WebSocketError {
                 error: "psubscribe_failed".to_string(),
@@ -569,17 +593,19 @@ async fn handle_psubscribe(
             return;
         }
 
-        subscribed_count += 1;
-
         // Send confirmation with incremental count (like Redis)
         let confirmation = SubscriptionConfirmation {
             r#type: "psubscribed".to_string(),
             target: pattern.clone(),
-            count: subscribed_count,
+            count: subscribed_count + 1,
         };
         if send_ws(
             &mut socket,
-            Message::Text(serde_json::to_string(&confirmation).unwrap_or_default().into()),
+            Message::Text(
+                serde_json::to_string(&confirmation)
+                    .unwrap_or_default()
+                    .into(),
+            ),
         )
         .await
         .is_err()
@@ -643,7 +669,7 @@ async fn handle_psubscribe(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use axum::body::{to_bytes, Body};
+    use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use futures::{SinkExt, StreamExt};
     use serde_json::Value;
@@ -651,22 +677,25 @@ mod tests {
     use std::sync::Arc;
     use testcontainers::ContainerAsync;
     use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{Redis, REDIS_PORT};
+    use testcontainers_modules::redis::{REDIS_PORT, Redis};
     use tokio::net::TcpListener;
-    use tokio::sync::{oneshot, Mutex};
-    use tokio::time::{timeout, Duration};
+    use tokio::sync::{Mutex, oneshot};
+    use tokio::time::{Duration, timeout};
     use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tower::ServiceExt;
 
     use crate::application::services::PubSubService;
     use crate::domain::repositories::{NumSubResult, PubSubRepository, PublishResult};
     use crate::infrastructure::config::Settings;
-    use crate::infrastructure::redis::pubsub_manager::{PubSubConnection, PubSubManager, PubSubStats};
+    use crate::infrastructure::redis::pubsub_manager::{
+        PubSubConnection, PubSubManager, PubSubStats,
+    };
     use crate::test_support::{
-        test_state_with_all_repos_and_config, MockAdminRepository, MockBitMapRepository,
-        MockBloomRepository, MockGeoRepository, MockHashRepository, MockJsonRepository,
-        MockKeyRepository, MockListRepository, MockProbabilisticRepository, MockSearchRepository,
-        MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository,
+        MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
+        MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
+        MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+        test_state_with_all_repos_and_config,
     };
 
     struct StubPubSubRepository {
@@ -678,11 +707,19 @@ mod tests {
 
     #[async_trait]
     impl PubSubRepository for StubPubSubRepository {
-        async fn publish(&self, _channel: &str, _message: &str) -> Result<PublishResult, CacheError> {
+        async fn publish(
+            &self,
+            _channel: &str,
+            _message: &str,
+        ) -> Result<PublishResult, CacheError> {
             Ok(self.publish_result.clone())
         }
 
-        async fn spublish(&self, _channel: &str, _message: &str) -> Result<PublishResult, CacheError> {
+        async fn spublish(
+            &self,
+            _channel: &str,
+            _message: &str,
+        ) -> Result<PublishResult, CacheError> {
             Ok(self.publish_result.clone())
         }
 
@@ -690,7 +727,10 @@ mod tests {
             Ok(self.channels_result.clone())
         }
 
-        async fn pubsub_numsub(&self, _channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+        async fn pubsub_numsub(
+            &self,
+            _channels: &[String],
+        ) -> Result<Vec<NumSubResult>, CacheError> {
             Ok(self.numsub_result.clone())
         }
 
@@ -698,11 +738,17 @@ mod tests {
             Ok(self.numpat_result)
         }
 
-        async fn pubsub_shardchannels(&self, _pattern: Option<&str>) -> Result<Vec<String>, CacheError> {
+        async fn pubsub_shardchannels(
+            &self,
+            _pattern: Option<&str>,
+        ) -> Result<Vec<String>, CacheError> {
             Ok(self.channels_result.clone())
         }
 
-        async fn pubsub_shardnumsub(&self, _channels: &[String]) -> Result<Vec<NumSubResult>, CacheError> {
+        async fn pubsub_shardnumsub(
+            &self,
+            _channels: &[String],
+        ) -> Result<Vec<NumSubResult>, CacheError> {
             Ok(self.numsub_result.clone())
         }
     }
@@ -762,7 +808,7 @@ mod tests {
         let sorted_set_repo = Arc::new(MockSortedSetRepository::new());
         let bitmap_repo = Arc::new(MockBitMapRepository::new());
         let key_repo = Arc::new(MockKeyRepository::new());
-        let admin_repo = Arc::new(MockAdminRepository::default());
+        let admin_repo = Arc::new(MockAdminRepository);
         let stream_repo = Arc::new(MockStreamRepository::new());
         let json_repo = Arc::new(MockJsonRepository::new());
         let search_repo = Arc::new(MockSearchRepository::new());
@@ -1002,14 +1048,14 @@ mod tests {
 
     #[test]
     fn test_validate_channels() {
-        let ok = validate_channels(&vec!["news".to_string()]);
+        let ok = validate_channels(&["news".to_string()]);
         assert!(ok.is_ok());
 
-        let err = validate_channels(&vec!["".to_string()]).unwrap_err();
+        let err = validate_channels(&["".to_string()]).unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let too_long = "x".repeat(MAX_CHANNEL_NAME_LENGTH + 1);
-        let err = validate_channels(&vec![too_long]).unwrap_err();
+        let err = validate_channels(&[too_long]).unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let too_many = (0..(MAX_CHANNELS_PER_REQUEST + 1))
@@ -1021,14 +1067,14 @@ mod tests {
 
     #[test]
     fn test_validate_patterns() {
-        let ok = validate_patterns(&vec!["user:*".to_string()]);
+        let ok = validate_patterns(&["user:*".to_string()]);
         assert!(ok.is_ok());
 
-        let err = validate_patterns(&vec!["".to_string()]).unwrap_err();
+        let err = validate_patterns(&["".to_string()]).unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let too_long = "x".repeat(MAX_CHANNEL_NAME_LENGTH + 1);
-        let err = validate_patterns(&vec![too_long]).unwrap_err();
+        let err = validate_patterns(&[too_long]).unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let too_many = (0..(MAX_CHANNELS_PER_REQUEST + 1))
@@ -1105,7 +1151,10 @@ mod tests {
         assert_eq!(confirmation["target"], "news");
 
         socket.send(WsMessage::Text("noop".into())).await.unwrap();
-        socket.send(WsMessage::Ping(vec![1, 2, 3].into())).await.unwrap();
+        socket
+            .send(WsMessage::Ping(vec![1, 2, 3].into()))
+            .await
+            .unwrap();
         let pong = timeout(Duration::from_secs(3), socket.next())
             .await
             .unwrap()
@@ -1166,7 +1215,10 @@ mod tests {
         assert_eq!(confirmation["target"], "user:*");
 
         socket.send(WsMessage::Text("noop".into())).await.unwrap();
-        socket.send(WsMessage::Ping(vec![9, 9, 9].into())).await.unwrap();
+        socket
+            .send(WsMessage::Ping(vec![9, 9, 9].into()))
+            .await
+            .unwrap();
         let pong = timeout(Duration::from_secs(3), socket.next())
             .await
             .unwrap()
@@ -1396,28 +1448,33 @@ mod tests {
             numsub_result: Vec::new(),
         });
         let state = build_state(repo);
-        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let stats = Arc::new(PubSubStats {
+            max_subscriptions: 1,
+            ..Default::default()
+        });
         let pubsub = PubSubConnection::new_for_tests(None, stats);
         let connection = Arc::new(Mutex::new(Some(pubsub)));
         let channels = Arc::new(vec!["news".to_string()]);
 
-        let router = Router::new().route(
-            "/ws",
-            get({
-                let connection = connection.clone();
-                let channels = channels.clone();
-                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+        let router = Router::new()
+            .route(
+                "/ws",
+                get({
                     let connection = connection.clone();
                     let channels = channels.clone();
-                    async move {
-                        let pubsub = connection.lock().await.take().expect("pubsub");
-                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
-                            handle_subscribe(socket, state, channels.as_ref().clone(), pubsub)
-                        }))
+                    move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                        let connection = connection.clone();
+                        let channels = channels.clone();
+                        async move {
+                            let pubsub = connection.lock().await.take().expect("pubsub");
+                            Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                                handle_subscribe(socket, state, channels.as_ref().clone(), pubsub)
+                            }))
+                        }
                     }
-                }
-            }),
-        ).with_state(state);
+                }),
+            )
+            .with_state(state);
 
         let (addr, shutdown_tx) = spawn_router(router).await;
         let ws_url = format!("ws://{addr}/ws");
@@ -1444,28 +1501,33 @@ mod tests {
             numsub_result: Vec::new(),
         });
         let state = build_state(repo);
-        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let stats = Arc::new(PubSubStats {
+            max_subscriptions: 1,
+            ..Default::default()
+        });
         let pubsub = PubSubConnection::new_for_tests(None, stats);
         let connection = Arc::new(Mutex::new(Some(pubsub)));
         let channels = Arc::new(Vec::new());
 
-        let router = Router::new().route(
-            "/ws",
-            get({
-                let connection = connection.clone();
-                let channels = channels.clone();
-                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+        let router = Router::new()
+            .route(
+                "/ws",
+                get({
                     let connection = connection.clone();
                     let channels = channels.clone();
-                    async move {
-                        let pubsub = connection.lock().await.take().expect("pubsub");
-                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
-                            handle_subscribe(socket, state, channels.as_ref().clone(), pubsub)
-                        }))
+                    move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                        let connection = connection.clone();
+                        let channels = channels.clone();
+                        async move {
+                            let pubsub = connection.lock().await.take().expect("pubsub");
+                            Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                                handle_subscribe(socket, state, channels.as_ref().clone(), pubsub)
+                            }))
+                        }
                     }
-                }
-            }),
-        ).with_state(state);
+                }),
+            )
+            .with_state(state);
 
         let (addr, shutdown_tx) = spawn_router(router).await;
         let ws_url = format!("ws://{addr}/ws");
@@ -1492,28 +1554,33 @@ mod tests {
             numsub_result: Vec::new(),
         });
         let state = build_state(repo);
-        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let stats = Arc::new(PubSubStats {
+            max_subscriptions: 1,
+            ..Default::default()
+        });
         let pubsub = PubSubConnection::new_for_tests(None, stats);
         let connection = Arc::new(Mutex::new(Some(pubsub)));
         let patterns = Arc::new(vec!["user:*".to_string()]);
 
-        let router = Router::new().route(
-            "/ws",
-            get({
-                let connection = connection.clone();
-                let patterns = patterns.clone();
-                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+        let router = Router::new()
+            .route(
+                "/ws",
+                get({
                     let connection = connection.clone();
                     let patterns = patterns.clone();
-                    async move {
-                        let pubsub = connection.lock().await.take().expect("pubsub");
-                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
-                            handle_psubscribe(socket, state, patterns.as_ref().clone(), pubsub)
-                        }))
+                    move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                        let connection = connection.clone();
+                        let patterns = patterns.clone();
+                        async move {
+                            let pubsub = connection.lock().await.take().expect("pubsub");
+                            Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                                handle_psubscribe(socket, state, patterns.as_ref().clone(), pubsub)
+                            }))
+                        }
                     }
-                }
-            }),
-        ).with_state(state);
+                }),
+            )
+            .with_state(state);
 
         let (addr, shutdown_tx) = spawn_router(router).await;
         let ws_url = format!("ws://{addr}/ws");
@@ -1540,28 +1607,33 @@ mod tests {
             numsub_result: Vec::new(),
         });
         let state = build_state(repo);
-        let stats = Arc::new(PubSubStats { max_subscriptions: 1, ..Default::default() });
+        let stats = Arc::new(PubSubStats {
+            max_subscriptions: 1,
+            ..Default::default()
+        });
         let pubsub = PubSubConnection::new_for_tests(None, stats);
         let connection = Arc::new(Mutex::new(Some(pubsub)));
         let patterns = Arc::new(Vec::new());
 
-        let router = Router::new().route(
-            "/ws",
-            get({
-                let connection = connection.clone();
-                let patterns = patterns.clone();
-                move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+        let router = Router::new()
+            .route(
+                "/ws",
+                get({
                     let connection = connection.clone();
                     let patterns = patterns.clone();
-                    async move {
-                        let pubsub = connection.lock().await.take().expect("pubsub");
-                        Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
-                            handle_psubscribe(socket, state, patterns.as_ref().clone(), pubsub)
-                        }))
+                    move |ws: WebSocketUpgrade, State(state): State<AppState>| {
+                        let connection = connection.clone();
+                        let patterns = patterns.clone();
+                        async move {
+                            let pubsub = connection.lock().await.take().expect("pubsub");
+                            Ok::<_, CacheError>(ws.on_upgrade(move |socket| {
+                                handle_psubscribe(socket, state, patterns.as_ref().clone(), pubsub)
+                            }))
+                        }
                     }
-                }
-            }),
-        ).with_state(state);
+                }),
+            )
+            .with_state(state);
 
         let (addr, shutdown_tx) = spawn_router(router).await;
         let ws_url = format!("ws://{addr}/ws");

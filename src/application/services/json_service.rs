@@ -164,11 +164,7 @@ impl JsonService {
     }
 
     /// Toggle boolean value at path
-    pub async fn json_toggle(
-        &self,
-        key: &str,
-        path: &str,
-    ) -> Result<JsonToggleResult, CacheError> {
+    pub async fn json_toggle(&self, key: &str, path: &str) -> Result<JsonToggleResult, CacheError> {
         self.validate_path(path)?;
         self.repository.json_toggle(key, path).await
     }
@@ -312,9 +308,7 @@ impl JsonService {
     /// The legacy dot-notation (e.g., `.foo`) is deprecated and not recommended.
     fn validate_path(&self, path: &str) -> Result<(), CacheError> {
         if path.is_empty() {
-            return Err(CacheError::InvalidInput(
-                "Path cannot be empty".to_string(),
-            ));
+            return Err(CacheError::InvalidInput("Path cannot be empty".to_string()));
         }
 
         // RedisJSON expects paths to start with $

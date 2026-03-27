@@ -9,8 +9,7 @@ use std::sync::Arc;
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,
-    GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder,
-    GeoUnit,
+    GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder, GeoUnit,
 };
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
@@ -71,15 +70,15 @@ impl RedisGeoRepository {
                     idx += 1;
                 }
 
-                if with_coord && idx < arr.len() {
-                    if let Value::Array(coords) = &arr[idx] {
-                        if coords.len() >= 2 {
-                            let lon = Self::parse_f64(&coords[0]);
-                            let lat = Self::parse_f64(&coords[1]);
-                            if let (Some(lon), Some(lat)) = (lon, lat) {
-                                position = Some(GeoPosition::new(lon, lat));
-                            }
-                        }
+                if with_coord
+                    && idx < arr.len()
+                    && let Value::Array(coords) = &arr[idx]
+                    && coords.len() >= 2
+                {
+                    let lon = Self::parse_f64(&coords[0]);
+                    let lat = Self::parse_f64(&coords[1]);
+                    if let (Some(lon), Some(lat)) = (lon, lat) {
+                        position = Some(GeoPosition::new(lon, lat));
                     }
                 }
 
@@ -249,10 +248,7 @@ impl GeoRepository for RedisGeoRepository {
                 height,
                 unit,
             } => {
-                cmd.arg("BYBOX")
-                    .arg(*width)
-                    .arg(*height)
-                    .arg(unit.as_str());
+                cmd.arg("BYBOX").arg(*width).arg(*height).arg(unit.as_str());
             }
         }
 
@@ -288,7 +284,12 @@ impl GeoRepository for RedisGeoRepository {
         let results: Vec<GeoSearchResult> = result
             .into_iter()
             .filter_map(|v| {
-                Self::parse_search_result(v, options.with_dist, options.with_coord, options.with_hash)
+                Self::parse_search_result(
+                    v,
+                    options.with_dist,
+                    options.with_coord,
+                    options.with_hash,
+                )
             })
             .collect();
 
@@ -328,10 +329,7 @@ impl GeoRepository for RedisGeoRepository {
                 height,
                 unit,
             } => {
-                cmd.arg("BYBOX")
-                    .arg(*width)
-                    .arg(*height)
-                    .arg(unit.as_str());
+                cmd.arg("BYBOX").arg(*width).arg(*height).arg(unit.as_str());
             }
         }
 
@@ -409,7 +407,12 @@ impl GeoRepository for RedisGeoRepository {
         let results: Vec<GeoSearchResult> = result
             .into_iter()
             .filter_map(|v| {
-                Self::parse_search_result(v, options.with_dist, options.with_coord, options.with_hash)
+                Self::parse_search_result(
+                    v,
+                    options.with_dist,
+                    options.with_coord,
+                    options.with_hash,
+                )
             })
             .collect();
 
@@ -460,7 +463,12 @@ impl GeoRepository for RedisGeoRepository {
         let results: Vec<GeoSearchResult> = result
             .into_iter()
             .filter_map(|v| {
-                Self::parse_search_result(v, options.with_dist, options.with_coord, options.with_hash)
+                Self::parse_search_result(
+                    v,
+                    options.with_dist,
+                    options.with_coord,
+                    options.with_hash,
+                )
             })
             .collect();
 

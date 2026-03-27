@@ -83,10 +83,7 @@ impl RedisCapabilities {
     pub fn parse_version(info: &str) -> String {
         for line in info.lines() {
             if line.starts_with("redis_version:") {
-                return line
-                    .trim_start_matches("redis_version:")
-                    .trim()
-                    .to_string();
+                return line.trim_start_matches("redis_version:").trim().to_string();
             }
         }
         "unknown".to_string()
@@ -94,11 +91,8 @@ impl RedisCapabilities {
 
     /// Check if version is greater than or equal to target
     pub fn version_gte(version: &str, target: &str) -> bool {
-        let parse_version = |v: &str| -> Vec<u32> {
-            v.split('.')
-                .filter_map(|s| s.parse().ok())
-                .collect()
-        };
+        let parse_version =
+            |v: &str| -> Vec<u32> { v.split('.').filter_map(|s| s.parse().ok()).collect() };
 
         let current = parse_version(version);
         let target = parse_version(target);
@@ -116,9 +110,9 @@ impl RedisCapabilities {
     /// Detect module from MODULE LIST output
     pub fn detect_module(modules: &[Vec<String>], name_pattern: &str) -> bool {
         modules.iter().any(|module| {
-            module.iter().any(|field| {
-                field.to_lowercase().contains(name_pattern)
-            })
+            module
+                .iter()
+                .any(|field| field.to_lowercase().contains(name_pattern))
         })
     }
 }
@@ -189,5 +183,116 @@ mod tests {
     #[test]
     fn test_version_comparison_shorter_current() {
         assert!(!RedisCapabilities::version_gte("7.0", "7.0.1"));
+    }
+
+    // --- Version parsing edge cases ---
+
+    #[test]
+    fn test_parse_version_with_prerelease_suffix() {
+        let info = "# Server\nredis_version:7.2.4-rc1\nredis_git_sha1:00000000";
+        assert_eq!(RedisCapabilities::parse_version(info), "7.2.4-rc1");
+    }
+
+    #[test]
+    fn test_parse_version_empty_string() {
+        assert_eq!(RedisCapabilities::parse_version(""), "unknown");
+    }
+
+    #[test]
+    fn test_parse_version_multiline_finds_version() {
+        let info = "# Server\r\nos:Linux\r\nredis_version:6.2.7\r\nredis_mode:standalone\r\n";
+        assert_eq!(RedisCapabilities::parse_version(info), "6.2.7");
+    }
+
+    // --- Version comparison edge cases ---
+
+    #[test]
+    fn test_version_gte_equal_versions() {
+        assert!(RedisCapabilities::version_gte("7.0.0", "7.0.0"));
+    }
+
+    #[test]
+    fn test_version_gte_single_digit_current() {
+        // "7" parses as [7], target "7.0.0" parses as [7, 0, 0].
+        // After zip comparison all equal, but current.len() (1) < target.len() (3) => false.
+        assert!(!RedisCapabilities::version_gte("7", "7.0.0"));
+    }
+
+    #[test]
+    fn test_version_gte_major_dominates() {
+        assert!(RedisCapabilities::version_gte("8.0.0", "7.9.9"));
+    }
+
+    #[test]
+    fn test_version_gte_patch_matters() {
+        assert!(!RedisCapabilities::version_gte("7.0.1", "7.0.2"));
+    }
+
+    #[test]
+    fn test_version_gte_prerelease_ignored_in_parse() {
+        // "7.2.4-rc1" — the "4-rc1" segment fails u32 parse, so version becomes [7, 2].
+        // Target "7.2.4" becomes [7, 2, 4]. After zip: equal, but len 2 < 3 => false.
+        assert!(!RedisCapabilities::version_gte("7.2.4-rc1", "7.2.4"));
+    }
+
+    // --- Module detection edge cases ---
+
+    #[test]
+    fn test_detect_module_empty_list() {
+        let modules: Vec<Vec<String>> = vec![];
+        assert!(!RedisCapabilities::detect_module(&modules, "rejson"));
+    }
+
+    #[test]
+    fn test_detect_module_case_insensitive() {
+        let modules = vec![vec!["name".to_string(), "ReJSON".to_string()]];
+        assert!(RedisCapabilities::detect_module(&modules, "rejson"));
+    }
+
+    #[test]
+    fn test_detect_module_name_at_different_position() {
+        // Module info where the name field is not at index 1
+        let modules = vec![vec![
+            "ver".to_string(),
+            "2".to_string(),
+            "name".to_string(),
+            "search".to_string(),
+        ]];
+        // detect_module checks any field, so "search" will be found
+        assert!(RedisCapabilities::detect_module(&modules, "search"));
+    }
+
+    // --- Feature capabilities from version ---
+
+    #[test]
+    fn test_features_redis_4x() {
+        let v = "4.0.14";
+        assert!(!RedisCapabilities::version_gte(v, "5.0.0")); // streams
+        assert!(!RedisCapabilities::version_gte(v, "6.0.0")); // acl
+        assert!(!RedisCapabilities::version_gte(v, "7.0.0")); // functions
+    }
+
+    #[test]
+    fn test_features_redis_5() {
+        let v = "5.0.0";
+        assert!(RedisCapabilities::version_gte(v, "5.0.0")); // streams
+        assert!(!RedisCapabilities::version_gte(v, "6.0.0")); // acl
+        assert!(!RedisCapabilities::version_gte(v, "7.0.0")); // functions
+    }
+
+    #[test]
+    fn test_features_redis_6() {
+        let v = "6.0.0";
+        assert!(RedisCapabilities::version_gte(v, "5.0.0")); // streams
+        assert!(RedisCapabilities::version_gte(v, "6.0.0")); // acl
+        assert!(!RedisCapabilities::version_gte(v, "7.0.0")); // functions
+    }
+
+    #[test]
+    fn test_features_redis_7() {
+        let v = "7.0.0";
+        assert!(RedisCapabilities::version_gte(v, "5.0.0")); // streams
+        assert!(RedisCapabilities::version_gte(v, "6.0.0")); // acl
+        assert!(RedisCapabilities::version_gte(v, "7.0.0")); // functions
     }
 }

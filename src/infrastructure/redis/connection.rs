@@ -2,14 +2,14 @@
 //!
 //! Instrumented connection pool with metrics tracking and TLS support.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 #[cfg(not(test))]
 use std::time::Instant;
 #[cfg(test)]
 use std::time::Instant;
 
-use deadpool_redis::{Config, Pool, Runtime, Connection};
+use deadpool_redis::{Config, Connection, Pool, Runtime};
 use serde::Serialize;
 #[cfg(not(test))]
 use tracing::{debug, info, warn};
@@ -91,7 +91,10 @@ impl InstrumentedPool {
     /// - Failed to connect to Redis
     /// - TLS configuration is invalid
     #[cfg(not(test))]
-    pub async fn new(redis_config: &RedisConfig, pool_config: &PoolConfig) -> Result<Self, CacheError> {
+    pub async fn new(
+        redis_config: &RedisConfig,
+        pool_config: &PoolConfig,
+    ) -> Result<Self, CacheError> {
         // Build connection URL with TLS if enabled
         let connection_url = Self::build_connection_url(redis_config)?;
 
@@ -138,7 +141,10 @@ impl InstrumentedPool {
     }
 
     #[cfg(test)]
-    pub async fn new(_redis_config: &RedisConfig, _pool_config: &PoolConfig) -> Result<Self, CacheError> {
+    pub async fn new(
+        _redis_config: &RedisConfig,
+        _pool_config: &PoolConfig,
+    ) -> Result<Self, CacheError> {
         Ok(Self::new_for_tests())
     }
 
@@ -272,12 +278,12 @@ impl InstrumentedPool {
     /// Mask password in URL for logging
     fn mask_password(url: &str) -> String {
         // Simple regex-free password masking
-        if let Some(at_pos) = url.find('@') {
-            if let Some(scheme_end) = url.find("://") {
-                let prefix = &url[..scheme_end + 3];
-                let suffix = &url[at_pos..];
-                return format!("{prefix}***{suffix}");
-            }
+        if let Some(at_pos) = url.find('@')
+            && let Some(scheme_end) = url.find("://")
+        {
+            let prefix = &url[..scheme_end + 3];
+            let suffix = &url[at_pos..];
+            return format!("{prefix}***{suffix}");
         }
         url.to_string()
     }
@@ -286,13 +292,17 @@ impl InstrumentedPool {
     #[cfg(not(test))]
     pub async fn get(&self) -> Result<Connection, CacheError> {
         self.metrics.current_waiting.fetch_add(1, Ordering::Relaxed);
-        self.metrics.total_wait_count.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .total_wait_count
+            .fetch_add(1, Ordering::Relaxed);
 
         let start = Instant::now();
         let result = self.inner.get().await;
         let wait_ms = start.elapsed().as_millis() as u64;
 
-        self.metrics.total_wait_duration_ms.fetch_add(wait_ms, Ordering::Relaxed);
+        self.metrics
+            .total_wait_duration_ms
+            .fetch_add(wait_ms, Ordering::Relaxed);
         self.metrics.current_waiting.fetch_sub(1, Ordering::Relaxed);
 
         match result {
@@ -301,7 +311,9 @@ impl InstrumentedPool {
                 Ok(conn)
             }
             Err(e) => {
-                self.metrics.failed_checkouts.fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .failed_checkouts
+                    .fetch_add(1, Ordering::Relaxed);
                 warn!(error = %e, wait_ms, "Failed to get connection from pool");
                 Err(CacheError::PoolError(e.to_string()))
             }
@@ -317,13 +329,17 @@ impl InstrumentedPool {
         }
 
         self.metrics.current_waiting.fetch_add(1, Ordering::Relaxed);
-        self.metrics.total_wait_count.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .total_wait_count
+            .fetch_add(1, Ordering::Relaxed);
 
         let start = Instant::now();
         let result = self.inner.get().await;
         let wait_ms = start.elapsed().as_millis() as u64;
 
-        self.metrics.total_wait_duration_ms.fetch_add(wait_ms, Ordering::Relaxed);
+        self.metrics
+            .total_wait_duration_ms
+            .fetch_add(wait_ms, Ordering::Relaxed);
         self.metrics.current_waiting.fetch_sub(1, Ordering::Relaxed);
 
         match result {
@@ -332,7 +348,9 @@ impl InstrumentedPool {
                 Ok(conn)
             }
             Err(e) => {
-                self.metrics.failed_checkouts.fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .failed_checkouts
+                    .fetch_add(1, Ordering::Relaxed);
                 warn!(error = %e, wait_ms, "Failed to get connection from pool");
                 Err(CacheError::PoolError(e.to_string()))
             }
@@ -355,7 +373,10 @@ impl InstrumentedPool {
             size: status.size,
             available: status.available,
             max_size: self.max_size,
-            total_connections_created: self.metrics.total_connections_created.load(Ordering::Relaxed),
+            total_connections_created: self
+                .metrics
+                .total_connections_created
+                .load(Ordering::Relaxed),
             total_wait_count: total_wait,
             avg_wait_ms,
             current_waiting: self.metrics.current_waiting.load(Ordering::Relaxed),
@@ -389,9 +410,15 @@ impl InstrumentedPool {
         debug!(?module_names, "Detected Redis modules");
 
         let module_capabilities = ModuleCapabilities {
-            json: module_names.iter().any(|n| n.contains("rejson") || n.contains("redisjson")),
-            search: module_names.iter().any(|n| n.contains("search") || n == "ft"),
-            bloom: module_names.iter().any(|n| n == "bf" || n.contains("bloom")),
+            json: module_names
+                .iter()
+                .any(|n| n.contains("rejson") || n.contains("redisjson")),
+            search: module_names
+                .iter()
+                .any(|n| n.contains("search") || n == "ft"),
+            bloom: module_names
+                .iter()
+                .any(|n| n == "bf" || n.contains("bloom")),
             timeseries: module_names.iter().any(|n| n.contains("timeseries")),
             graph: module_names.iter().any(|n| n.contains("graph")),
         };
@@ -449,15 +476,15 @@ fn extract_module_names(value: Option<redis::Value>) -> Vec<String> {
                 // Look for "name" key and get the next value
                 let mut iter = fields.iter();
                 while let Some(field) = iter.next() {
-                    if let redis::Value::BulkString(key) = field {
-                        if key == b"name" {
-                            if let Some(redis::Value::BulkString(name_bytes)) = iter.next() {
-                                if let Ok(name) = String::from_utf8(name_bytes.clone()) {
-                                    names.push(name.to_lowercase());
-                                }
-                            }
-                            break;
+                    if let redis::Value::BulkString(key) = field
+                        && key == b"name"
+                    {
+                        if let Some(redis::Value::BulkString(name_bytes)) = iter.next()
+                            && let Ok(name) = String::from_utf8(name_bytes.clone())
+                        {
+                            names.push(name.to_lowercase());
                         }
+                        break;
                     }
                 }
             }
@@ -693,7 +720,9 @@ mod tests {
     fn test_get_stats_with_waits() {
         let pool = InstrumentedPool::new_for_tests();
         pool.metrics.total_wait_count.store(2, Ordering::Relaxed);
-        pool.metrics.total_wait_duration_ms.store(10, Ordering::Relaxed);
+        pool.metrics
+            .total_wait_duration_ms
+            .store(10, Ordering::Relaxed);
         let stats = pool.get_stats();
         assert_eq!(stats.avg_wait_ms, 5.0);
     }

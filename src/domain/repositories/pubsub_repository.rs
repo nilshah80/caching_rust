@@ -67,5 +67,8 @@ pub trait PubSubRepository: Send + Sync {
     /// Get subscriber count for sharded channels (PUBSUB SHARDNUMSUB)
     ///
     /// For Redis Cluster (Redis 7.0+).
-    async fn pubsub_shardnumsub(&self, channels: &[String]) -> Result<Vec<NumSubResult>, CacheError>;
+    async fn pubsub_shardnumsub(
+        &self,
+        channels: &[String],
+    ) -> Result<Vec<NumSubResult>, CacheError>;
 }
