@@ -22,6 +22,7 @@ pub struct HealthResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ReadinessResponse {
     pub status: String,
+    pub mode: String,
     pub redis: RedisHealthStatus,
     pub capabilities: RedisCapabilities,
 }
@@ -95,7 +96,7 @@ async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<Readiness
     let pool_stats = state.pool.get_stats();
 
     // Check if we can get a connection
-    let connected = state.pool.get().await.is_ok();
+    let connected = state.pool.get_standalone().await.is_ok();
 
     let status = if connected {
         StatusCode::OK
@@ -103,10 +104,19 @@ async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<Readiness
         StatusCode::SERVICE_UNAVAILABLE
     };
 
+    let mode = if state.config.redis.cluster_enabled {
+        "cluster"
+    } else if state.config.redis.sentinel_enabled {
+        "sentinel"
+    } else {
+        "standalone"
+    };
+
     (
         status,
         Json(ReadinessResponse {
             status: if connected { "ready" } else { "not_ready" }.to_string(),
+            mode: mode.to_string(),
             redis: RedisHealthStatus {
                 connected,
                 pool: pool_stats,

@@ -274,7 +274,7 @@ impl TransactionService {
             }
             redis::cmd("WATCH")
                 .arg(keys)
-                .query_async::<()>(&mut *conn)
+                .query_async::<()>(&mut conn)
                 .await?;
             watched = true;
 
@@ -300,14 +300,14 @@ impl TransactionService {
             if let Err(e) = Self::add_command_to_pipe(&mut pipe, cmd) {
                 // Clear WATCH state before returning error to prevent state leak
                 if watched {
-                    let _ = redis::cmd("UNWATCH").query_async::<()>(&mut *conn).await;
+                    let _ = redis::cmd("UNWATCH").query_async::<()>(&mut conn).await;
                 }
                 return Err(e);
             }
         }
 
         // Execute atomically
-        let results: Vec<redis::Value> = match pipe.query_async(&mut *conn).await {
+        let results: Vec<redis::Value> = match pipe.query_async(&mut conn).await {
             Ok(r) => r,
             Err(e) => return Self::handle_exec_error(&mut conn, e).await,
         };
@@ -330,14 +330,14 @@ impl TransactionService {
     }
 
     async fn handle_exec_error(
-        conn: &mut deadpool_redis::Connection,
+        conn: &mut crate::infrastructure::redis::pool_connection::PoolConnection,
         err: redis::RedisError,
     ) -> Result<TransactionResponse, CacheError> {
         // Check if this is a WATCH abort (nil response means EXEC returned nil)
         let err_str = err.to_string();
         if err_str.contains("nil") || err_str.contains("EXECABORT") {
             // Clear WATCH state before returning connection to pool
-            let _ = redis::cmd("UNWATCH").query_async::<()>(&mut *conn).await;
+            let _ = redis::cmd("UNWATCH").query_async::<()>(conn).await;
             return Err(CacheError::TransactionAborted);
         }
 
@@ -377,7 +377,7 @@ impl TransactionService {
             .key(&request.key)
             .arg(&request.expected_value)
             .arg(&request.new_value)
-            .invoke_async(&mut *conn)
+            .invoke_async(&mut conn)
             .await
             .map_err(Self::map_script_error)?;
 
@@ -421,7 +421,7 @@ impl TransactionService {
             .arg(&request.field)
             .arg(&request.expected_value)
             .arg(&request.new_value)
-            .invoke_async(&mut *conn)
+            .invoke_async(&mut conn)
             .await
             .map_err(Self::map_script_error)?;
 

@@ -7,9 +7,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::application::services::{
-    AdminService, BitMapService, BloomService, FunctionService, GeoService, HashService,
-    JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService,
-    SetService, SortedSetService, StreamService, StringService, TimeSeriesService,
+    AdminService, BitMapService, BloomService, ClusterService, FunctionService, GeoService,
+    HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService,
+    SearchService, SetService, SortedSetService, StreamService, StringService, TimeSeriesService,
 };
 use crate::domain::entities::{
     AclDryrunResult,
@@ -160,7 +160,8 @@ use crate::domain::entities::{
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
-    BlockingPopResult, BloomRepository, ExpireCondition, FunctionFlushMode, FunctionRepository,
+    BlockingPopResult, BloomRepository, ClusterInfo, ClusterNode, ClusterRepository,
+    ClusterSlotRange, ExpireCondition, FunctionFlushMode, FunctionRepository,
     FunctionRestorePolicy, HSetExCondition, HashExpiration, HashRepository, InsertPosition,
     JsonRepository, KeyRepository, LMPopResult, LPosOptions, LcsMatch, LcsMatchResult, LcsOptions,
     LcsResult, LexRange, ListDirection, ListRepository, NumSubResult, ProbabilisticRepository,
@@ -2467,6 +2468,7 @@ pub fn test_state_with_all_repos_and_config(
     let timeseries_service = Arc::new(TimeSeriesService::new_with_repository(Arc::new(
         MockTimeSeriesRepository::new(),
     )));
+    let cluster_service = Arc::new(ClusterService::new(Arc::new(MockClusterRepository)));
 
     AppState::new_with_services(
         pool,
@@ -2492,6 +2494,8 @@ pub fn test_state_with_all_repos_and_config(
         scripting_service,
         function_service,
         timeseries_service,
+        cluster_service,
+        None,
         None,
     )
 }
@@ -5362,5 +5366,32 @@ impl PubSubRepository for MockPubSubRepository {
         channels: &[String],
     ) -> Result<Vec<NumSubResult>, CacheError> {
         self.pubsub_numsub(channels).await
+    }
+}
+
+// ==================== Mock Cluster Repository ====================
+
+pub struct MockClusterRepository;
+
+#[async_trait]
+impl ClusterRepository for MockClusterRepository {
+    async fn cluster_info(&self) -> Result<ClusterInfo, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_nodes(&self) -> Result<Vec<ClusterNode>, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_slots(&self) -> Result<Vec<ClusterSlotRange>, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_shards(&self) -> Result<redis::Value, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_keyslot(&self, _key: &str) -> Result<u16, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
     }
 }

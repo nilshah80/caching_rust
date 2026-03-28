@@ -121,13 +121,13 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg(field).arg(value);
         }
 
-        let result: String = cmd.query_async(&mut *conn).await?;
+        let result: String = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
     async fn xlen(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("XLEN").arg(key).query_async(&mut *conn).await?;
+        let result: i64 = redis::cmd("XLEN").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -146,7 +146,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let result: Vec<(String, Vec<(String, String)>)> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<(String, Vec<(String, String)>)> = cmd.query_async(&mut conn).await?;
         Ok(result
             .into_iter()
             .map(|(id, fields)| Self::parse_entry(id, fields))
@@ -168,7 +168,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let result: Vec<(String, Vec<(String, String)>)> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<(String, Vec<(String, String)>)> = cmd.query_async(&mut conn).await?;
         Ok(result
             .into_iter()
             .map(|(id, fields)| Self::parse_entry(id, fields))
@@ -182,7 +182,7 @@ impl StreamRepository for RedisStreamRepository {
         for id in ids {
             cmd.arg(id);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -208,7 +208,7 @@ impl StreamRepository for RedisStreamRepository {
             }
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -221,7 +221,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("FULL");
         }
 
-        let result: Value = cmd.query_async(&mut *conn).await?;
+        let result: Value = cmd.query_async(&mut conn).await?;
 
         // Parse the XINFO STREAM response
         let info = Self::parse_xinfo_stream(result)?;
@@ -258,7 +258,7 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut *conn).await?;
+            cmd.query_async(&mut conn).await?;
 
         Ok(result.map(Self::parse_read_results))
     }
@@ -290,7 +290,7 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut *conn).await?;
+            cmd.query_async(&mut conn).await?;
 
         Ok(result.map(Self::parse_read_results))
     }
@@ -316,7 +316,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("ENTRIESREAD").arg(entries_read);
         }
 
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -326,7 +326,7 @@ impl StreamRepository for RedisStreamRepository {
             .arg("DESTROY")
             .arg(key)
             .arg(group)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result == 1)
     }
@@ -346,7 +346,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("ENTRIESREAD").arg(er);
         }
 
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -362,7 +362,7 @@ impl StreamRepository for RedisStreamRepository {
             .arg(key)
             .arg(group)
             .arg(consumer)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result == 1)
     }
@@ -379,7 +379,7 @@ impl StreamRepository for RedisStreamRepository {
             .arg(key)
             .arg(group)
             .arg(consumer)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -389,7 +389,7 @@ impl StreamRepository for RedisStreamRepository {
         let result: Value = redis::cmd("XINFO")
             .arg("GROUPS")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Self::parse_xinfo_groups(result)
@@ -405,7 +405,7 @@ impl StreamRepository for RedisStreamRepository {
             .arg("CONSUMERS")
             .arg(key)
             .arg(group)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Self::parse_xinfo_consumers(result)
@@ -448,7 +448,7 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut *conn).await?;
+            cmd.query_async(&mut conn).await?;
 
         Ok(result.map(Self::parse_read_results))
     }
@@ -488,7 +488,7 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut *conn).await?;
+            cmd.query_async(&mut conn).await?;
 
         Ok(result.map(Self::parse_read_results))
     }
@@ -500,7 +500,7 @@ impl StreamRepository for RedisStreamRepository {
         for id in ids {
             cmd.arg(id);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -511,7 +511,7 @@ impl StreamRepository for RedisStreamRepository {
         let result: Value = redis::cmd("XPENDING")
             .arg(key)
             .arg(group)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Self::parse_pending_summary(result)
@@ -542,7 +542,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg(consumer);
         }
 
-        let result: Vec<(String, String, i64, i64)> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<(String, String, i64, i64)> = cmd.query_async(&mut conn).await?;
 
         Ok(result
             .into_iter()
@@ -596,7 +596,7 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         if options.just_id {
-            let ids: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let ids: Vec<String> = cmd.query_async(&mut conn).await?;
             let entries = ids
                 .into_iter()
                 .map(|id| StreamEntry {
@@ -606,7 +606,7 @@ impl StreamRepository for RedisStreamRepository {
                 .collect();
             Ok(ClaimResult { entries })
         } else {
-            let result: Vec<(String, Vec<(String, String)>)> = cmd.query_async(&mut *conn).await?;
+            let result: Vec<(String, Vec<(String, String)>)> = cmd.query_async(&mut conn).await?;
             let entries = result
                 .into_iter()
                 .map(|(id, fields)| Self::parse_entry(id, fields))
@@ -639,7 +639,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("JUSTID");
         }
 
-        let result: Value = cmd.query_async(&mut *conn).await?;
+        let result: Value = cmd.query_async(&mut conn).await?;
         Self::parse_autoclaim_result(result, options.just_id)
     }
 
@@ -663,7 +663,7 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("MAXDELETEDID").arg(max_del);
         }
 
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 }

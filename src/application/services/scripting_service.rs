@@ -147,7 +147,7 @@ impl ScriptingService {
         }
 
         let result: redis::Value = cmd
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(Self::map_redis_error)?;
 
@@ -199,7 +199,7 @@ impl ScriptingService {
         }
 
         let result: redis::Value = cmd
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(Self::map_redis_error)?;
 
@@ -229,7 +229,7 @@ impl ScriptingService {
         let sha: String = redis::cmd("SCRIPT")
             .arg("LOAD")
             .arg(&request.script)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(Self::map_redis_error)?;
 
@@ -269,7 +269,7 @@ impl ScriptingService {
         }
 
         let results: Vec<i64> = cmd
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(Self::map_redis_error)?;
 
@@ -313,7 +313,7 @@ impl ScriptingService {
             };
         }
 
-        cmd.query_async::<()>(&mut *conn)
+        cmd.query_async::<()>(&mut conn)
             .await
             .map_err(Self::map_redis_error)?;
 
@@ -335,7 +335,7 @@ impl ScriptingService {
 
         redis::cmd("SCRIPT")
             .arg("KILL")
-            .query_async::<()>(&mut *conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(Self::map_redis_error)?;
 
@@ -367,7 +367,7 @@ impl ScriptingService {
         redis::cmd("SCRIPT")
             .arg("DEBUG")
             .arg(mode_arg)
-            .query_async::<()>(&mut *conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(Self::map_redis_error)?;
 

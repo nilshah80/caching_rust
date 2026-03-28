@@ -13,6 +13,7 @@ use redis::{Client, RedisResult};
 
 use crate::domain::errors::CacheError;
 use crate::infrastructure::config::PubSubConfig;
+use crate::infrastructure::redis::connection::InstrumentedPool;
 
 /// Statistics for Pub/Sub connections
 #[derive(Debug, Default)]
@@ -38,17 +39,37 @@ impl PubSubStats {
     }
 }
 
+/// Source of the Redis URL for creating new pub/sub connections.
+enum UrlSource {
+    /// Read from the pool's resolved URL (follows sentinel failover)
+    Pool(Arc<InstrumentedPool>),
+    /// Fixed URL (standalone mode or tests)
+    Static(String),
+}
+
+impl UrlSource {
+    fn url(&self) -> String {
+        match self {
+            Self::Pool(pool) => pool.resolved_url(),
+            Self::Static(url) => url.clone(),
+        }
+    }
+}
+
 /// Manager for Pub/Sub dedicated connections
 ///
 /// This manager creates dedicated Redis connections for subscriptions,
 /// separate from the command pool. This prevents subscription operations
 /// from blocking or exhausting the main connection pool.
 ///
+/// In sentinel mode, each new subscription reads the current master URL
+/// from the pool, so failover is picked up automatically for new connections.
+///
 /// `connection_timeout_ms` is enforced when creating new subscription connections.
 /// Idle cleanup is handled by WebSocket disconnection which drops the [`PubSubConnection`].
 pub struct PubSubManager {
-    /// Redis client for creating new connections
-    client: Client,
+    /// Where to read the Redis URL from
+    url_source: UrlSource,
     /// Configuration
     config: PubSubConfig,
     /// Connection statistics
@@ -56,19 +77,28 @@ pub struct PubSubManager {
 }
 
 impl PubSubManager {
-    /// Create a new PubSubManager
+    /// Create a new PubSubManager backed by the given pool.
+    /// The pool's `resolved_url()` is read on each new subscription,
+    /// so sentinel failover propagates to new pub/sub connections.
+    pub fn new_with_pool(pool: Arc<InstrumentedPool>, config: PubSubConfig) -> Self {
+        let stats = Arc::new(PubSubStats::new(config.max_subscriptions));
+        Self {
+            url_source: UrlSource::Pool(pool),
+            config,
+            stats,
+        }
+    }
+
+    /// Create a new PubSubManager from a fixed URL string (tests or standalone).
     pub fn new(redis_url: &str, config: PubSubConfig) -> Result<Self, CacheError> {
-        let client = Client::open(redis_url).map_err(|e| {
-            CacheError::ConnectionFailed(format!(
-                "Failed to create Redis client for Pub/Sub: {}",
-                e
-            ))
+        // Verify the URL is valid
+        Client::open(redis_url).map_err(|e| {
+            CacheError::ConnectionFailed(format!("Failed to create Redis client for Pub/Sub: {e}",))
         })?;
 
         let stats = Arc::new(PubSubStats::new(config.max_subscriptions));
-
         Ok(Self {
-            client,
+            url_source: UrlSource::Static(redis_url.to_string()),
             config,
             stats,
         })
@@ -118,9 +148,19 @@ impl PubSubManager {
             return Err(CacheError::SubscriptionLimitReached);
         }
 
-        // Create a new dedicated async pubsub connection with connection timeout
+        // Create a fresh client from the current resolved URL.
+        // In sentinel mode this picks up the new master after failover.
+        let current_url = self.url_source.url();
+        let client = Client::open(current_url.as_str()).map_err(|e| {
+            self.stats
+                .active_subscriptions
+                .fetch_sub(1, Ordering::SeqCst);
+            self.stats.errors.fetch_add(1, Ordering::Relaxed);
+            CacheError::ConnectionFailed(format!("Failed to create Pub/Sub client: {e}"))
+        })?;
+
         let connect_timeout = Duration::from_millis(self.config.connection_timeout_ms);
-        let pubsub = tokio::time::timeout(connect_timeout, self.client.get_async_pubsub())
+        let pubsub = tokio::time::timeout(connect_timeout, client.get_async_pubsub())
             .await
             .map_err(|_| {
                 self.stats

@@ -132,7 +132,7 @@ impl GeoRepository for RedisGeoRepository {
                 .arg(&member.member);
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(GeoAddResult {
             added: result,
             changed: if options.ch { Some(result) } else { None },
@@ -152,7 +152,7 @@ impl GeoRepository for RedisGeoRepository {
             cmd.arg(member);
         }
 
-        let result: Vec<Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Value> = cmd.query_async(&mut conn).await?;
 
         let positions: Vec<Option<GeoPosition>> = result
             .into_iter()
@@ -185,7 +185,7 @@ impl GeoRepository for RedisGeoRepository {
             .arg(member1)
             .arg(member2)
             .arg(unit.as_str())
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(Self::parse_f64(&result))
@@ -204,7 +204,7 @@ impl GeoRepository for RedisGeoRepository {
             cmd.arg(member);
         }
 
-        let result: Vec<Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Value> = cmd.query_async(&mut conn).await?;
 
         let hashes: Vec<Option<String>> = result
             .into_iter()
@@ -279,7 +279,7 @@ impl GeoRepository for RedisGeoRepository {
             cmd.arg("WITHHASH");
         }
 
-        let result: Vec<Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Value> = cmd.query_async(&mut conn).await?;
 
         let results: Vec<GeoSearchResult> = result
             .into_iter()
@@ -354,7 +354,7 @@ impl GeoRepository for RedisGeoRepository {
             cmd.arg("STOREDIST");
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
 
         Ok(GeoSearchStoreResult { stored: result })
     }
@@ -402,7 +402,7 @@ impl GeoRepository for RedisGeoRepository {
             }
         }
 
-        let result: Vec<Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Value> = cmd.query_async(&mut conn).await?;
 
         let results: Vec<GeoSearchResult> = result
             .into_iter()
@@ -458,7 +458,7 @@ impl GeoRepository for RedisGeoRepository {
             }
         }
 
-        let result: Vec<Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Value> = cmd.query_async(&mut conn).await?;
 
         let results: Vec<GeoSearchResult> = result
             .into_iter()

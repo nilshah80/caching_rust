@@ -31,7 +31,7 @@ impl SetRepository for RedisSetRepository {
         for member in members {
             cmd.arg(member);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -42,7 +42,7 @@ impl SetRepository for RedisSetRepository {
         for member in members {
             cmd.arg(member);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -50,7 +50,7 @@ impl SetRepository for RedisSetRepository {
         let mut conn = self.pool.get().await?;
         let result: Vec<String> = redis::cmd("SMEMBERS")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -60,7 +60,7 @@ impl SetRepository for RedisSetRepository {
         let result: i64 = redis::cmd("SISMEMBER")
             .arg(key)
             .arg(member)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result == 1)
     }
@@ -72,13 +72,13 @@ impl SetRepository for RedisSetRepository {
         for member in members {
             cmd.arg(member);
         }
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
         Ok(result.into_iter().map(|v| v == 1).collect())
     }
 
     async fn scard(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("SCARD").arg(key).query_async(&mut *conn).await?;
+        let result: i64 = redis::cmd("SCARD").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -89,11 +89,11 @@ impl SetRepository for RedisSetRepository {
 
         if let Some(c) = count {
             cmd.arg(c);
-            let result: Vec<String> = cmd.query_async(&mut *conn).await.unwrap_or_default();
+            let result: Vec<String> = cmd.query_async(&mut conn).await.unwrap_or_default();
             Ok(result)
         } else {
             // Without count, SRANDMEMBER returns a single value or nil
-            let result: Option<String> = cmd.query_async(&mut *conn).await?;
+            let result: Option<String> = cmd.query_async(&mut conn).await?;
             Ok(result.into_iter().collect())
         }
     }
@@ -105,11 +105,11 @@ impl SetRepository for RedisSetRepository {
 
         if let Some(c) = count {
             cmd.arg(c);
-            let result: Vec<String> = cmd.query_async(&mut *conn).await.unwrap_or_default();
+            let result: Vec<String> = cmd.query_async(&mut conn).await.unwrap_or_default();
             Ok(result)
         } else {
             // Without count, SPOP returns a single value or nil
-            let result: Option<String> = cmd.query_async(&mut *conn).await?;
+            let result: Option<String> = cmd.query_async(&mut conn).await?;
             Ok(result.into_iter().collect())
         }
     }
@@ -125,7 +125,7 @@ impl SetRepository for RedisSetRepository {
             .arg(source)
             .arg(destination)
             .arg(member)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result == 1)
     }
@@ -136,7 +136,7 @@ impl SetRepository for RedisSetRepository {
         for key in keys {
             cmd.arg(key);
         }
-        let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -147,7 +147,7 @@ impl SetRepository for RedisSetRepository {
         for key in keys {
             cmd.arg(key);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -161,7 +161,7 @@ impl SetRepository for RedisSetRepository {
         if let Some(l) = limit {
             cmd.arg("LIMIT").arg(l);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -171,7 +171,7 @@ impl SetRepository for RedisSetRepository {
         for key in keys {
             cmd.arg(key);
         }
-        let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -182,7 +182,7 @@ impl SetRepository for RedisSetRepository {
         for key in keys {
             cmd.arg(key);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -192,7 +192,7 @@ impl SetRepository for RedisSetRepository {
         for key in keys {
             cmd.arg(key);
         }
-        let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -203,7 +203,7 @@ impl SetRepository for RedisSetRepository {
         for key in keys {
             cmd.arg(key);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -225,7 +225,7 @@ impl SetRepository for RedisSetRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let (next_cursor, members): (u64, Vec<String>) = cmd.query_async(&mut *conn).await?;
+        let (next_cursor, members): (u64, Vec<String>) = cmd.query_async(&mut conn).await?;
         Ok(SetScanResult {
             cursor: next_cursor,
             members,

@@ -82,6 +82,35 @@ pub struct RedisConfig {
     /// Skip TLS certificate verification (not recommended for production)
     #[serde(default)]
     pub tls_skip_verify: bool,
+
+    /// Enable Redis Cluster mode (mutually exclusive with sentinel)
+    #[serde(default)]
+    pub cluster_enabled: bool,
+
+    /// Comma-separated cluster seed node URLs
+    /// Example: "redis://node1:7001,redis://node2:7002,redis://node3:7003"
+    #[serde(default)]
+    pub cluster_nodes: String,
+
+    /// Read from cluster replicas (default: false)
+    #[serde(default)]
+    pub cluster_read_from_replicas: bool,
+
+    /// Enable Redis Sentinel mode (mutually exclusive with cluster)
+    #[serde(default)]
+    pub sentinel_enabled: bool,
+
+    /// Comma-separated sentinel node URLs
+    /// Example: "redis://sentinel1:26379,redis://sentinel2:26379"
+    #[serde(default)]
+    pub sentinel_nodes: String,
+
+    /// Sentinel master group name (default: "mymaster")
+    #[serde(default = "default_sentinel_master_name")]
+    pub sentinel_master_name: String,
+
+    /// Sentinel password (separate from Redis password)
+    pub sentinel_password: Option<String>,
 }
 
 /// Connection pool configuration
@@ -204,6 +233,10 @@ fn default_max_value_size() -> usize {
     512 * 1024 // 512KB
 }
 
+fn default_sentinel_master_name() -> String {
+    "mymaster".to_string()
+}
+
 fn default_cors_origins() -> String {
     "*".to_string()
 }
@@ -303,7 +336,34 @@ impl Default for RedisConfig {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            cluster_enabled: false,
+            cluster_nodes: String::new(),
+            cluster_read_from_replicas: false,
+            sentinel_enabled: false,
+            sentinel_nodes: String::new(),
+            sentinel_master_name: default_sentinel_master_name(),
+            sentinel_password: None,
         }
+    }
+}
+
+impl RedisConfig {
+    /// Parse cluster_nodes string into a Vec of URLs.
+    pub fn cluster_node_urls(&self) -> Vec<String> {
+        self.cluster_nodes
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    /// Parse sentinel_nodes string into a Vec of URLs.
+    pub fn sentinel_node_urls(&self) -> Vec<String> {
+        self.sentinel_nodes
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
     }
 }
 
@@ -385,6 +445,12 @@ impl Settings {
             .set_default("redis.database", 0)?
             .set_default("redis.tls_enabled", false)?
             .set_default("redis.tls_skip_verify", false)?
+            .set_default("redis.cluster_enabled", false)?
+            .set_default("redis.cluster_nodes", "")?
+            .set_default("redis.cluster_read_from_replicas", false)?
+            .set_default("redis.sentinel_enabled", false)?
+            .set_default("redis.sentinel_nodes", "")?
+            .set_default("redis.sentinel_master_name", "mymaster")?
             .set_default("pool.min_size", 2)?
             .set_default("pool.max_size", 10)?
             .set_default("pool.connect_timeout_ms", 5000)?
@@ -421,6 +487,30 @@ impl Settings {
             anyhow::ensure!(
                 self.rate_limit.burst_size > 0,
                 "rate_limit.burst_size must be greater than 0 when rate limiting is enabled"
+            );
+        }
+
+        // Cluster and sentinel are mutually exclusive
+        anyhow::ensure!(
+            !(self.redis.cluster_enabled && self.redis.sentinel_enabled),
+            "cluster and sentinel modes are mutually exclusive"
+        );
+
+        if self.redis.cluster_enabled {
+            anyhow::ensure!(
+                !self.redis.cluster_node_urls().is_empty(),
+                "redis.cluster_nodes must be non-empty when cluster is enabled"
+            );
+        }
+
+        if self.redis.sentinel_enabled {
+            anyhow::ensure!(
+                !self.redis.sentinel_node_urls().is_empty(),
+                "redis.sentinel_nodes must be non-empty when sentinel is enabled"
+            );
+            anyhow::ensure!(
+                !self.redis.sentinel_master_name.is_empty(),
+                "redis.sentinel_master_name must be non-empty when sentinel is enabled"
             );
         }
 
@@ -530,6 +620,105 @@ mod tests {
         assert_eq!(settings.redis.url, "redis://localhost:6379");
         assert_eq!(settings.admin.api_key, "changeme-admin-key");
         assert_eq!(settings.log.level, "info");
+    }
+
+    #[test]
+    fn test_validate_rejects_cluster_and_sentinel_both_enabled() {
+        let mut settings = Settings::default();
+        settings.redis.cluster_enabled = true;
+        settings.redis.cluster_nodes = "redis://n1:7001".to_string();
+        settings.redis.sentinel_enabled = true;
+        settings.redis.sentinel_nodes = "redis://s1:26379".to_string();
+
+        let err = settings.validate().expect_err("validation should fail");
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn test_validate_rejects_cluster_with_empty_nodes() {
+        let mut settings = Settings::default();
+        settings.redis.cluster_enabled = true;
+        settings.redis.cluster_nodes = String::new();
+
+        let err = settings.validate().expect_err("validation should fail");
+        assert!(err.to_string().contains("cluster_nodes must be non-empty"));
+    }
+
+    #[test]
+    fn test_validate_rejects_sentinel_with_empty_nodes() {
+        let mut settings = Settings::default();
+        settings.redis.sentinel_enabled = true;
+        settings.redis.sentinel_nodes = String::new();
+
+        let err = settings.validate().expect_err("validation should fail");
+        assert!(err.to_string().contains("sentinel_nodes must be non-empty"));
+    }
+
+    #[test]
+    fn test_validate_rejects_sentinel_with_empty_master_name() {
+        let mut settings = Settings::default();
+        settings.redis.sentinel_enabled = true;
+        settings.redis.sentinel_nodes = "redis://s1:26379".to_string();
+        settings.redis.sentinel_master_name = String::new();
+
+        let err = settings.validate().expect_err("validation should fail");
+        assert!(
+            err.to_string()
+                .contains("sentinel_master_name must be non-empty")
+        );
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_cluster_config() {
+        let mut settings = Settings::default();
+        settings.redis.cluster_enabled = true;
+        settings.redis.cluster_nodes =
+            "redis://n1:7001,redis://n2:7002,redis://n3:7003".to_string();
+
+        settings.validate().expect("validation should pass");
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_sentinel_config() {
+        let mut settings = Settings::default();
+        settings.redis.sentinel_enabled = true;
+        settings.redis.sentinel_nodes = "redis://s1:26379,redis://s2:26380".to_string();
+        settings.redis.sentinel_master_name = "mymaster".to_string();
+
+        settings.validate().expect("validation should pass");
+    }
+
+    #[test]
+    fn test_cluster_node_urls_parsing() {
+        let config = RedisConfig {
+            cluster_nodes: "redis://n1:7001, redis://n2:7002 , redis://n3:7003".to_string(),
+            ..RedisConfig::default()
+        };
+        let urls = config.cluster_node_urls();
+        assert_eq!(urls.len(), 3);
+        assert_eq!(urls[0], "redis://n1:7001");
+        assert_eq!(urls[1], "redis://n2:7002");
+        assert_eq!(urls[2], "redis://n3:7003");
+    }
+
+    #[test]
+    fn test_sentinel_node_urls_parsing() {
+        let config = RedisConfig {
+            sentinel_nodes: "redis://s1:26379,redis://s2:26380".to_string(),
+            ..RedisConfig::default()
+        };
+        let urls = config.sentinel_node_urls();
+        assert_eq!(urls.len(), 2);
+    }
+
+    #[test]
+    fn test_default_redis_config_has_cluster_sentinel_disabled() {
+        let config = RedisConfig::default();
+        assert!(!config.cluster_enabled);
+        assert!(!config.sentinel_enabled);
+        assert!(config.cluster_nodes.is_empty());
+        assert!(config.sentinel_nodes.is_empty());
+        assert_eq!(config.sentinel_master_name, "mymaster");
     }
 
     #[test]

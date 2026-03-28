@@ -87,7 +87,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg(member.score).arg(&member.member);
         }
 
-        let count: i64 = cmd.query_async(&mut *conn).await?;
+        let count: i64 = cmd.query_async(&mut conn).await?;
         Ok(ZAddResult {
             count,
             new_score: None,
@@ -122,7 +122,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         cmd.arg("INCR").arg(score).arg(member);
 
-        let result: Option<f64> = cmd.query_async(&mut *conn).await?;
+        let result: Option<f64> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -133,7 +133,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         for member in members {
             cmd.arg(member);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -142,7 +142,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         let result: Option<f64> = redis::cmd("ZSCORE")
             .arg(key)
             .arg(member)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -154,7 +154,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         for member in members {
             cmd.arg(member);
         }
-        let result: Vec<Option<f64>> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Option<f64>> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -164,14 +164,14 @@ impl SortedSetRepository for RedisSortedSetRepository {
             .arg(key)
             .arg(increment)
             .arg(member)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
 
     async fn zcard(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("ZCARD").arg(key).query_async(&mut *conn).await?;
+        let result: i64 = redis::cmd("ZCARD").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -184,7 +184,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             .arg(key)
             .arg(&min)
             .arg(&max)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -195,7 +195,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             .arg(key)
             .arg(&range.min)
             .arg(&range.max)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -205,7 +205,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         let result: Option<i64> = redis::cmd("ZRANK")
             .arg(key)
             .arg(member)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -215,7 +215,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         let result: Option<i64> = redis::cmd("ZREVRANK")
             .arg(key)
             .arg(member)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -239,10 +239,10 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         if opts.with_scores {
             cmd.arg("WITHSCORES");
-            let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let result: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(Self::parse_members_with_scores(result))
         } else {
-            let members: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let members: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(members
                 .into_iter()
                 .map(|m| ScoredMember::new(m, 0.0))
@@ -284,10 +284,10 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         if opts.with_scores {
             cmd.arg("WITHSCORES");
-            let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let result: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(Self::parse_members_with_scores(result))
         } else {
-            let members: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let members: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(members
                 .into_iter()
                 .map(|m| ScoredMember::new(m, 0.0))
@@ -324,7 +324,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg("LIMIT").arg(offset).arg(count);
         }
 
-        let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -350,7 +350,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg("LIMIT").arg(offset).arg(count);
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -360,7 +360,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             .arg(key)
             .arg(start)
             .arg(stop)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -374,7 +374,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             .arg(key)
             .arg(&min)
             .arg(&max)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -385,7 +385,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             .arg(key)
             .arg(&range.min)
             .arg(&range.max)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -403,7 +403,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg(c);
         }
 
-        let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(Self::parse_members_with_scores(result))
     }
 
@@ -420,7 +420,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg(c);
         }
 
-        let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(Self::parse_members_with_scores(result))
     }
 
@@ -436,7 +436,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         }
         cmd.arg(timeout);
 
-        let result: Option<(String, String, f64)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, String, f64)> = cmd.query_async(&mut conn).await?;
 
         Ok(result.map(|(key, member, score)| ZPopResult {
             key,
@@ -456,7 +456,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         }
         cmd.arg(timeout);
 
-        let result: Option<(String, String, f64)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, String, f64)> = cmd.query_async(&mut conn).await?;
 
         Ok(result.map(|(key, member, score)| ZPopResult {
             key,
@@ -483,7 +483,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
         }
 
         // ZMPOP returns: nil or [key, [[member, score], ...]]
-        let result: Option<(String, Vec<(String, f64)>)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, Vec<(String, f64)>)> = cmd.query_async(&mut conn).await?;
 
         Ok(result.map(|(key, items)| ZPopResult {
             key,
@@ -513,7 +513,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let result: Option<(String, Vec<(String, f64)>)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, Vec<(String, f64)>)> = cmd.query_async(&mut conn).await?;
 
         Ok(result.map(|(key, items)| ZPopResult {
             key,
@@ -538,10 +538,10 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg(c);
             if with_scores {
                 cmd.arg("WITHSCORES");
-                let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+                let result: Vec<String> = cmd.query_async(&mut conn).await?;
                 Ok(Self::parse_members_with_scores(result))
             } else {
-                let members: Vec<String> = cmd.query_async(&mut *conn).await?;
+                let members: Vec<String> = cmd.query_async(&mut conn).await?;
                 Ok(members
                     .into_iter()
                     .map(|m| ScoredMember::new(m, 0.0))
@@ -549,7 +549,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             }
         } else {
             // Without count, returns single member
-            let member: Option<String> = cmd.query_async(&mut *conn).await?;
+            let member: Option<String> = cmd.query_async(&mut conn).await?;
             Ok(member
                 .into_iter()
                 .map(|m| ScoredMember::new(m, 0.0))
@@ -582,10 +582,10 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         if opts.with_scores {
             cmd.arg("WITHSCORES");
-            let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let result: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(Self::parse_members_with_scores(result))
         } else {
-            let members: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let members: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(members
                 .into_iter()
                 .map(|m| ScoredMember::new(m, 0.0))
@@ -617,7 +617,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         cmd.arg("AGGREGATE").arg(opts.aggregate.as_str());
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -646,10 +646,10 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         if opts.with_scores {
             cmd.arg("WITHSCORES");
-            let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let result: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(Self::parse_members_with_scores(result))
         } else {
-            let members: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let members: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(members
                 .into_iter()
                 .map(|m| ScoredMember::new(m, 0.0))
@@ -681,7 +681,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         cmd.arg("AGGREGATE").arg(opts.aggregate.as_str());
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -697,7 +697,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg("LIMIT").arg(l);
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -715,10 +715,10 @@ impl SortedSetRepository for RedisSortedSetRepository {
 
         if with_scores {
             cmd.arg("WITHSCORES");
-            let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let result: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(Self::parse_members_with_scores(result))
         } else {
-            let members: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let members: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(members
                 .into_iter()
                 .map(|m| ScoredMember::new(m, 0.0))
@@ -734,7 +734,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg(key);
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -756,7 +756,7 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let (next_cursor, data): (u64, Vec<String>) = cmd.query_async(&mut *conn).await?;
+        let (next_cursor, data): (u64, Vec<String>) = cmd.query_async(&mut conn).await?;
         let members = Self::parse_members_with_scores(data);
 
         Ok(ZScanResult {

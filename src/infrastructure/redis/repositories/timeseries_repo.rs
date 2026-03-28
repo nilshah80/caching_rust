@@ -84,7 +84,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         let mut cmd = redis::cmd("TS.CREATE");
         cmd.arg(key);
         Self::apply_create_options(&mut cmd, &options);
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -97,7 +97,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         let mut cmd = redis::cmd("TS.ALTER");
         cmd.arg(key);
         Self::apply_create_options(&mut cmd, &options);
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -107,7 +107,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
             .arg(key)
             .arg(sample.timestamp)
             .arg(sample.value)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(timestamp)
     }
@@ -118,7 +118,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         for (key, sample) in items {
             cmd.arg(key).arg(sample.timestamp).arg(sample.value);
         }
-        let timestamps: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let timestamps: Vec<i64> = cmd.query_async(&mut conn).await?;
         Ok(timestamps)
     }
 
@@ -134,7 +134,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         if let Some(timestamp) = timestamp {
             cmd.arg("TIMESTAMP").arg(timestamp);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -150,7 +150,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         if let Some(timestamp) = timestamp {
             cmd.arg("TIMESTAMP").arg(timestamp);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -160,17 +160,14 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
             .arg(key)
             .arg(from)
             .arg(to)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(deleted)
     }
 
     async fn ts_get(&self, key: &str) -> Result<Option<TimeSeriesSample>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let value: redis::Value = redis::cmd("TS.GET")
-            .arg(key)
-            .query_async(&mut *conn)
-            .await?;
+        let value: redis::Value = redis::cmd("TS.GET").arg(key).query_async(&mut conn).await?;
         match value {
             redis::Value::Nil => Ok(None),
             redis::Value::Array(items) if items.len() == 2 => Ok(Some(TimeSeriesSample {
@@ -190,7 +187,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         for filter in filters {
             cmd.arg(filter);
         }
-        let value: redis::Value = cmd.query_async(&mut *conn).await?;
+        let value: redis::Value = cmd.query_async(&mut conn).await?;
         parse_mget(value)
     }
 
@@ -205,7 +202,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         let mut cmd = redis::cmd("TS.RANGE");
         cmd.arg(key).arg(from).arg(to);
         Self::apply_range_options(&mut cmd, &options);
-        let value: redis::Value = cmd.query_async(&mut *conn).await?;
+        let value: redis::Value = cmd.query_async(&mut conn).await?;
         parse_sample_list(value)
     }
 
@@ -220,7 +217,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         let mut cmd = redis::cmd("TS.REVRANGE");
         cmd.arg(key).arg(from).arg(to);
         Self::apply_range_options(&mut cmd, &options);
-        let value: redis::Value = cmd.query_async(&mut *conn).await?;
+        let value: redis::Value = cmd.query_async(&mut conn).await?;
         parse_sample_list(value)
     }
 
@@ -239,7 +236,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         for filter in filters {
             cmd.arg(filter);
         }
-        let value: redis::Value = cmd.query_async(&mut *conn).await?;
+        let value: redis::Value = cmd.query_async(&mut conn).await?;
         parse_mrange(value)
     }
 
@@ -258,7 +255,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         for filter in filters {
             cmd.arg(filter);
         }
-        let value: redis::Value = cmd.query_async(&mut *conn).await?;
+        let value: redis::Value = cmd.query_async(&mut conn).await?;
         parse_mrange(value)
     }
 
@@ -268,7 +265,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         for filter in filters {
             cmd.arg(filter);
         }
-        let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -276,7 +273,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         let mut conn = self.pool.get().await?;
         let value: redis::Value = redis::cmd("TS.INFO")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(redis_value_to_json(value))
     }
@@ -309,7 +306,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
                 TsAggregation::Twa => "twa",
             })
             .arg(bucket_duration_ms)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(())
     }
@@ -319,7 +316,7 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         let _: () = redis::cmd("TS.DELETERULE")
             .arg(source)
             .arg(dest)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(())
     }

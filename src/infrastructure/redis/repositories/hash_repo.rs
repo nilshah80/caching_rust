@@ -27,7 +27,7 @@ impl HashRepository for RedisHashRepository {
         let result: Option<String> = redis::cmd("HGET")
             .arg(key)
             .arg(field)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -39,7 +39,7 @@ impl HashRepository for RedisHashRepository {
         for (field, value) in pairs {
             cmd.arg(field).arg(value);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -49,7 +49,7 @@ impl HashRepository for RedisHashRepository {
             .arg(key)
             .arg(field)
             .arg(value)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -58,7 +58,7 @@ impl HashRepository for RedisHashRepository {
         let mut conn = self.pool.get().await?;
         let result: HashMap<String, String> = redis::cmd("HGETALL")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -70,7 +70,7 @@ impl HashRepository for RedisHashRepository {
         for field in fields {
             cmd.arg(field);
         }
-        let result: Vec<Option<String>> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Option<String>> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -81,7 +81,7 @@ impl HashRepository for RedisHashRepository {
         for (field, value) in pairs {
             cmd.arg(field).arg(value);
         }
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -92,7 +92,7 @@ impl HashRepository for RedisHashRepository {
         for field in fields {
             cmd.arg(field);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -101,26 +101,26 @@ impl HashRepository for RedisHashRepository {
         let result: bool = redis::cmd("HEXISTS")
             .arg(key)
             .arg(field)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
 
     async fn hkeys(&self, key: &str) -> Result<Vec<String>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: Vec<String> = redis::cmd("HKEYS").arg(key).query_async(&mut *conn).await?;
+        let result: Vec<String> = redis::cmd("HKEYS").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 
     async fn hvals(&self, key: &str) -> Result<Vec<String>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: Vec<String> = redis::cmd("HVALS").arg(key).query_async(&mut *conn).await?;
+        let result: Vec<String> = redis::cmd("HVALS").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 
     async fn hlen(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("HLEN").arg(key).query_async(&mut *conn).await?;
+        let result: i64 = redis::cmd("HLEN").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -130,7 +130,7 @@ impl HashRepository for RedisHashRepository {
             .arg(key)
             .arg(field)
             .arg(delta)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -141,7 +141,7 @@ impl HashRepository for RedisHashRepository {
             .arg(key)
             .arg(field)
             .arg(delta)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -151,7 +151,7 @@ impl HashRepository for RedisHashRepository {
         let result: i64 = redis::cmd("HSTRLEN")
             .arg(key)
             .arg(field)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -170,10 +170,10 @@ impl HashRepository for RedisHashRepository {
             if with_values {
                 cmd.arg("WITHVALUES");
             }
-            let result: Vec<String> = cmd.query_async(&mut *conn).await?;
+            let result: Vec<String> = cmd.query_async(&mut conn).await?;
             Ok(result)
         } else {
-            let result: Option<String> = cmd.query_async(&mut *conn).await?;
+            let result: Option<String> = cmd.query_async(&mut conn).await?;
             Ok(result.into_iter().collect())
         }
     }
@@ -194,7 +194,7 @@ impl HashRepository for RedisHashRepository {
         if let Some(c) = count {
             cmd.arg("COUNT").arg(c);
         }
-        let result: (u64, Vec<String>) = cmd.query_async(&mut *conn).await?;
+        let result: (u64, Vec<String>) = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -278,7 +278,7 @@ impl HashRepository for RedisHashRepository {
         for f in fields {
             cmd.arg(f);
         }
-        let result: Vec<redis::Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<redis::Value> = cmd.query_async(&mut conn).await?;
         Ok(Self::convert_values(result))
     }
 
@@ -306,7 +306,7 @@ impl HashRepository for RedisHashRepository {
         for (f, v) in field_values {
             cmd.arg(f).arg(v);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -322,7 +322,7 @@ impl HashRepository for RedisHashRepository {
         for f in fields {
             cmd.arg(f);
         }
-        let result: Vec<redis::Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<redis::Value> = cmd.query_async(&mut conn).await?;
         Ok(Self::convert_values(result))
     }
 }
@@ -384,7 +384,7 @@ impl RedisHashRepository {
         for field in fields {
             cmd.arg(field);
         }
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -401,7 +401,7 @@ impl RedisHashRepository {
         for field in fields {
             cmd.arg(field);
         }
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 }

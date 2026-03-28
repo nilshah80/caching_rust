@@ -2763,11 +2763,18 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 
 ---
 
-## Phase 7: Cluster & Sentinel Support (Optional)
+## Phase 7: Cluster & Sentinel Support (In Progress)
 
 ### 7.1 Cluster Operations
-- [ ] **Task 7.1.1**: Implement Cluster connection support (gated by `capabilities.features.cluster`)
-- [ ] **Task 7.1.2**: Implement Cluster info operations
+- [x] **Task 7.1.1**: Implement Cluster runtime connection support
+  - `main.rs` branches on `REDIS__CLUSTER_ENABLED` to create `ClusterPool` at startup
+  - `ClusterPool` creates per-request `ClusterConnection` from `ClusterClient` (no shared mutex)
+  - `PoolConnection` enum wraps both `StandaloneConnection` and `ClusterConnection`, implements `ConnectionLike`
+  - `InstrumentedPool.get()` returns `PoolConnection::Cluster` when cluster pool is set, `PoolConnection::Standalone` otherwise
+  - `InstrumentedPool.get_standalone()` always returns standalone connections for admin/health
+  - All 19 services + repositories use `PoolConnection` transparently — no service code changes needed
+  - Health endpoint reports `mode: "cluster"` and uses `get_standalone()` for readiness check
+- [x] **Task 7.1.2**: Implement Cluster info operations
   | Command | Method | Priority |
   |---------|--------|----------|
   | CLUSTER INFO | `cluster_info` | Medium |
@@ -2776,12 +2783,51 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   | CLUSTER KEYSLOT | `cluster_keyslot` | Medium |
   | CLUSTER SHARDS | `cluster_shards` | Low |
 
-- [ ] **Task 7.1.3**: Create Cluster API routes
+- [x] **Task 7.1.3**: Create Cluster API routes
+  - `GET /api/v1/cluster/info` — cluster state, slots, epoch
+  - `GET /api/v1/cluster/nodes` — full node list with roles/slots
+  - `GET /api/v1/cluster/slots` — slot-to-node mapping
+  - `GET /api/v1/cluster/shards` — Redis 7.0+ shard topology
+  - `GET /api/v1/cluster/keyslot/{key}` — hash slot for a key
+  - All admin-protected, gated by `capabilities.features.cluster`
+  - **Note**: Currently executes CLUSTER commands through the standalone pool, not the cluster client
 
 ### 7.2 Sentinel Support
-- [ ] **Task 7.2.1**: Implement Sentinel connection support
-- [ ] **Task 7.2.2**: Implement Sentinel failover handling
-- [ ] **Task 7.2.3**: Create Sentinel configuration options
+- [x] **Task 7.2.1**: Implement Sentinel connection support
+  - `InstrumentedPool::new()` branches on `sentinel_enabled` to resolve master via `SENTINEL get-master-addr-by-name`
+  - Iterates all sentinel nodes until one responds (fault tolerant)
+  - Creates standard `deadpool-redis` pool pointing at the resolved master
+  - All existing services work unchanged — only the URL resolution changes
+- [x] **Task 7.2.2**: Implement Sentinel failover handling
+  - Background watcher (`sentinel_watcher.rs`) polls sentinel every 10 seconds
+  - If master address changes, creates a new `deadpool-redis::Pool` and swaps it into `InstrumentedPool` atomically via `swap_pool()`
+  - `InstrumentedPool` internals wrapped in `RwLock` for lock-free reads on the hot path; write lock only during the brief pool swap
+  - Old pool connections drain naturally as they're returned
+  - Resolved URL updated atomically so `resolved_url()` always reflects the current master
+  - Health endpoint reports `mode: "sentinel"` and connected status
+  - PubSubManager reads `resolved_url()` from the pool on each new subscription via `UrlSource::Pool`, so new pub/sub connections after failover use the correct master
+  - **Limitation**: Existing long-lived pub/sub connections (active WebSocket subscriptions) remain on the old master until they error and the client reconnects
+- [x] **Task 7.2.3**: Create Sentinel configuration options
+  - `REDIS__SENTINEL_NODES` — comma-separated sentinel URLs
+  - `REDIS__SENTINEL_MASTER_NAME` — master group name (default: "mymaster")
+  - `REDIS__SENTINEL_PASSWORD` — optional separate sentinel auth
+  - Validation: cluster and sentinel are mutually exclusive
+
+### What shipped
+- Cluster/sentinel config schema, parsing, and validation (mutually exclusive check)
+- Cluster repository trait, service, and admin API routes (5 endpoints)
+- CLUSTER INFO/NODES/SLOTS/SHARDS/KEYSLOT response parsing with tests
+- `main.rs` branches on cluster/sentinel mode at startup
+- `ClusterPool` with per-request connections (no shared mutex)
+- Sentinel master resolution via `SENTINEL get-master-addr-by-name` with multi-sentinel failover
+- Health endpoint reports connection mode (`standalone`/`cluster`/`sentinel`)
+- Docker-compose files for cluster and sentinel test infrastructure
+- Sentinel config fixture (`tests/fixtures/sentinel.conf`)
+- Design doc at [docs/cluster-sentinel.md](docs/cluster-sentinel.md)
+
+### Known limitations
+- **Sentinel pub/sub**: Existing long-lived WebSocket subscriptions remain on the old master after failover until they error and the client reconnects. New subscriptions use the updated master automatically.
+- **Cross-slot operations in cluster mode**: Multi-key commands (MSET, MGET, SUNION, etc.) will fail with CROSSSLOT error if keys hash to different slots. This is a Redis Cluster constraint, not a service bug.
 
 ---
 

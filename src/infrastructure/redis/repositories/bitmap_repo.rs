@@ -34,7 +34,7 @@ impl BitMapRepository for RedisBitMapRepository {
             .arg(key)
             .arg(offset)
             .arg(bit_value)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -44,7 +44,7 @@ impl BitMapRepository for RedisBitMapRepository {
         let result: i64 = redis::cmd("GETBIT")
             .arg(key)
             .arg(offset)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -67,7 +67,7 @@ impl BitMapRepository for RedisBitMapRepository {
             }
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -94,7 +94,7 @@ impl BitMapRepository for RedisBitMapRepository {
             }
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -112,7 +112,7 @@ impl BitMapRepository for RedisBitMapRepository {
             cmd.arg(key);
         }
 
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -156,7 +156,7 @@ impl BitMapRepository for RedisBitMapRepository {
             }
         }
 
-        let result: Vec<Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Value> = cmd.query_async(&mut conn).await?;
         let values: Vec<Option<i64>> = result
             .into_iter()
             .map(|v| match v {
@@ -185,7 +185,7 @@ impl BitMapRepository for RedisBitMapRepository {
             }
         }
 
-        let result: Vec<Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<Value> = cmd.query_async(&mut conn).await?;
         let values: Vec<Option<i64>> = result
             .into_iter()
             .map(|v| match v {

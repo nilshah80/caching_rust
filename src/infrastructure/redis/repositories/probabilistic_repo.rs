@@ -147,7 +147,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
             .arg(key)
             .arg(width)
             .arg(depth)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -171,7 +171,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
             .arg(key)
             .arg(error)
             .arg(probability)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -197,7 +197,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -222,7 +222,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -259,7 +259,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -276,7 +276,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
 
         let result: Value = cmd("CMS.INFO")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -309,7 +309,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -331,7 +331,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -360,7 +360,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -389,7 +389,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -418,7 +418,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -443,7 +443,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: Value = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -486,7 +486,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
 
         let result: Value = cmd("TOPK.INFO")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -505,7 +505,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let result: i64 = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -524,7 +524,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let count: u64 = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 
@@ -545,7 +545,7 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         }
 
         let _: () = command
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(CacheError::from)?;
 

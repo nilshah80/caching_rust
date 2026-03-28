@@ -94,6 +94,44 @@ jobs:
             sleep 10
           done
 
+  cluster-test:
+    name: Cluster Integration
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run cluster E2E (all in Docker)
+        run: |
+          docker compose -f docker-compose.cluster-test.yml up \
+            --build --abort-on-container-exit --exit-code-from test-runner
+        timeout-minutes: 15
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.cluster-test.yml down -v
+
+  sentinel-test:
+    name: Sentinel Integration
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run sentinel E2E (all in Docker)
+        run: |
+          docker compose -f docker-compose.sentinel-test.yml up \
+            --build --abort-on-container-exit --exit-code-from test-runner
+        timeout-minutes: 15
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.sentinel-test.yml down -v
+
   build-and-push-image:
     name: Push Docker image
     needs: test
@@ -134,7 +172,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

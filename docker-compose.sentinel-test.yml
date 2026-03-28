@@ -1,0 +1,105 @@
+services:
+  redis-master:
+    image: redis:8.0-M04
+    container_name: redis-sentinel-master
+    command: redis-server --port 6380 --bind 0.0.0.0 --protected-mode no
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  redis-replica:
+    image: redis:8.0-M04
+    container_name: redis-sentinel-replica
+    command: redis-server --port 6381 --bind 0.0.0.0 --protected-mode no --replicaof redis-master 6380
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6381", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  sentinel-1:
+    image: redis:8.0-M04
+    container_name: redis-sentinel-1
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    volumes: ["./tests/fixtures/sentinel-entrypoint.sh:/entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p 26379 sentinel get-master-addr-by-name mymaster | head -1 | grep -q ."]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  sentinel-2:
+    image: redis:8.0-M04
+    container_name: redis-sentinel-2
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    volumes: ["./tests/fixtures/sentinel-entrypoint.sh:/entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+
+  sentinel-3:
+    image: redis:8.0-M04
+    container_name: redis-sentinel-3
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    volumes: ["./tests/fixtures/sentinel-entrypoint.sh:/entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+
+  # Caching service running in sentinel mode inside the Docker network
+  caching-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caching-sentinel-svc
+    environment:
+      - SERVER__HOST=0.0.0.0
+      - SERVER__PORT=8080
+      - REDIS__URL=redis://redis-master:6380
+      - REDIS__SENTINEL_ENABLED=true
+      - REDIS__SENTINEL_NODES=redis://sentinel-1:26379,redis://sentinel-2:26379,redis://sentinel-3:26379
+      - REDIS__SENTINEL_MASTER_NAME=mymaster
+      - ADMIN__API_KEY=dev-admin-key
+      - LOG__LEVEL=debug
+      - LOG__FORMAT=pretty
+      - RATE_LIMIT__ENABLED=false
+    depends_on:
+      sentinel-1:
+        condition: service_healthy
+    # No healthcheck — distroless has no shell/curl. Test runner polls instead.
+
+  # Test runner — waits for service then executes sentinel_test.sh
+  test-runner:
+    image: curlimages/curl:latest
+    container_name: sentinel-test-runner
+    depends_on:
+      - caching-service
+    volumes:
+      - ./tests/e2e/sentinel_test.sh:/test.sh:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "Waiting for service..."
+        for i in $$(seq 1 30); do
+          if curl -sf http://caching-sentinel-svc:8080/health > /dev/null 2>&1; then
+            echo "Service ready"
+            break
+          fi
+          sleep 2
+        done
+        sh /test.sh http://caching-sentinel-svc:8080

@@ -3,7 +3,9 @@
 use redis_caching_service::api::http::server;
 use redis_caching_service::infrastructure::config::Settings;
 use redis_caching_service::infrastructure::logging;
+use redis_caching_service::infrastructure::redis::cluster_connection::ClusterPool;
 use redis_caching_service::infrastructure::redis::connection::InstrumentedPool;
+use redis_caching_service::infrastructure::redis::sentinel_watcher;
 use redis_caching_service::shared::app_state::AppState;
 
 use std::sync::Arc;
@@ -17,17 +19,44 @@ async fn main() -> anyhow::Result<()> {
     // Initialize logging
     logging::init(&settings)?;
 
+    let mode = if settings.redis.cluster_enabled {
+        "cluster"
+    } else if settings.redis.sentinel_enabled {
+        "sentinel"
+    } else {
+        "standalone"
+    };
+
     info!(
         version = env!("CARGO_PKG_VERSION"),
-        "Starting Redis Caching Service"
+        mode, "Starting Redis Caching Service"
     );
 
-    // Create Redis connection pool
-    let pool = InstrumentedPool::new(&settings.redis, &settings.pool).await?;
+    // Create Redis connection pool (sentinel mode resolves master automatically)
+    // For cluster mode, we also create a standalone pool for admin/health commands
+    let mut pool = InstrumentedPool::new(&settings.redis, &settings.pool).await?;
+
+    // In cluster mode, create and wire a ClusterPool into InstrumentedPool.
+    // This makes pool.get() return cluster-routed connections for data commands,
+    // while get_standalone() still returns direct connections for admin/health.
+    let cluster_pool = if settings.redis.cluster_enabled {
+        let cp = ClusterPool::new(&settings.redis)
+            .map_err(|e| anyhow::anyhow!("Failed to create cluster pool: {e}"))?;
+        info!("Testing cluster connection...");
+        cp.get()
+            .await
+            .map_err(|e| anyhow::anyhow!("Cluster connection failed: {e}"))?;
+        info!("Cluster connection established");
+        let cp_for_state = Arc::new(cp.clone());
+        pool.set_cluster_pool(cp);
+        Some(cp_for_state)
+    } else {
+        None
+    };
 
     // Detect Redis capabilities
     let capabilities = pool.detect_capabilities().await?;
-    info!(?capabilities, "Redis capabilities detected");
+    info!(?capabilities, mode, "Redis capabilities detected");
 
     // Security warnings
     if settings.admin.api_key == "changeme-admin-key" {
@@ -36,11 +65,24 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let pool = Arc::new(pool);
+
+    // Start sentinel failover watcher if in sentinel mode
+    if settings.redis.sentinel_enabled {
+        info!("Starting sentinel failover watcher (polling every 10s)");
+        sentinel_watcher::spawn_sentinel_watcher(
+            pool.clone(),
+            settings.redis.clone(),
+            settings.pool.clone(),
+        );
+    }
+
     // Create application state
-    let state = AppState::new(
-        Arc::new(pool),
+    let state = AppState::new_with_cluster(
+        pool,
         Arc::new(settings.clone()),
         Arc::new(capabilities),
+        cluster_pool,
     );
 
     // Start HTTP server

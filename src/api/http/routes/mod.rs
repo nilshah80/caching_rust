@@ -5,6 +5,7 @@
 mod admin;
 mod bitmaps;
 mod bloom;
+mod cluster;
 mod functions;
 mod geo;
 mod hashes;
@@ -27,6 +28,7 @@ mod transactions;
 pub use admin::admin_routes;
 pub use bitmaps::bitmap_routes;
 pub use bloom::bloom_routes;
+pub use cluster::cluster_routes;
 pub use functions::functions_routes;
 pub use geo::geo_routes;
 pub use hashes::hash_routes;
@@ -123,6 +125,11 @@ pub fn build_router(state: AppState) -> Router {
 
     if capabilities.modules.timeseries {
         router = router.merge(timeseries_routes());
+    }
+
+    // Cluster info endpoints (only when connected to a cluster)
+    if capabilities.features.cluster {
+        router = router.merge(cluster_routes());
     }
 
     router.with_state(state)

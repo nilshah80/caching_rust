@@ -5,6 +5,7 @@
 mod admin_repository;
 mod bitmap_repository;
 mod bloom_repository;
+mod cluster_repository;
 mod function_repository;
 mod geo_repository;
 mod hash_repository;
@@ -26,6 +27,9 @@ pub use bitmap_repository::{
     BitfieldResult,
 };
 pub use bloom_repository::BloomRepository;
+pub use cluster_repository::{
+    ClusterEndpoint, ClusterInfo, ClusterNode, ClusterRepository, ClusterSlotRange,
+};
 pub use function_repository::{FunctionFlushMode, FunctionRepository, FunctionRestorePolicy};
 pub use geo_repository::{
     GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,

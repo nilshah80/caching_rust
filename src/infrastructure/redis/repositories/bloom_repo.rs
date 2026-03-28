@@ -172,7 +172,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg("NONSCALING");
         }
 
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
 
         Ok(BloomReserveResult {
             key: key.to_string(),
@@ -186,7 +186,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("BF.ADD")
             .arg(key)
             .arg(item)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(BloomAddResult {
@@ -204,7 +204,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
 
         Ok(BloomAddResult {
             key: key.to_string(),
@@ -218,7 +218,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("BF.EXISTS")
             .arg(key)
             .arg(item)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(BloomExistsResult {
@@ -240,7 +240,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
 
         Ok(BloomExistsResult {
             key: key.to_string(),
@@ -284,7 +284,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
 
         Ok(BloomInsertResult {
             key: key.to_string(),
@@ -297,7 +297,7 @@ impl BloomRepository for RedisBloomRepository {
 
         let result: Value = redis::cmd("BF.INFO")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Self::parse_bloom_info(result)
@@ -308,7 +308,7 @@ impl BloomRepository for RedisBloomRepository {
 
         let result: i64 = redis::cmd("BF.CARD")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(BloomCardResult {
@@ -327,7 +327,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: Value = redis::cmd("BF.SCANDUMP")
             .arg(key)
             .arg(iterator)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         match result {
@@ -361,7 +361,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(iterator)
             .arg(data)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(BloomLoadChunkResult {
@@ -394,7 +394,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg("EXPANSION").arg(expansion);
         }
 
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
 
         Ok(CuckooReserveResult {
             key: key.to_string(),
@@ -408,7 +408,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("CF.ADD")
             .arg(key)
             .arg(item)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(CuckooAddResult {
@@ -423,7 +423,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("CF.ADDNX")
             .arg(key)
             .arg(item)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(CuckooAddResult {
@@ -456,7 +456,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
 
         Ok(CuckooInsertResult {
             key: key.to_string(),
@@ -488,7 +488,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
 
         Ok(CuckooInsertResult {
             key: key.to_string(),
@@ -502,7 +502,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("CF.EXISTS")
             .arg(key)
             .arg(item)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(CuckooExistsResult {
@@ -524,7 +524,7 @@ impl BloomRepository for RedisBloomRepository {
             cmd.arg(item);
         }
 
-        let result: Vec<i64> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<i64> = cmd.query_async(&mut conn).await?;
 
         Ok(CuckooExistsResult {
             key: key.to_string(),
@@ -538,7 +538,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("CF.DEL")
             .arg(key)
             .arg(item)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(CuckooDelResult {
@@ -553,7 +553,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: i64 = redis::cmd("CF.COUNT")
             .arg(key)
             .arg(item)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(CuckooCountResult {
@@ -567,7 +567,7 @@ impl BloomRepository for RedisBloomRepository {
 
         let result: Value = redis::cmd("CF.INFO")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Self::parse_cuckoo_info(result)
@@ -583,7 +583,7 @@ impl BloomRepository for RedisBloomRepository {
         let result: Value = redis::cmd("CF.SCANDUMP")
             .arg(key)
             .arg(iterator)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         match result {
@@ -617,7 +617,7 @@ impl BloomRepository for RedisBloomRepository {
             .arg(key)
             .arg(iterator)
             .arg(data)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(CuckooLoadChunkResult {

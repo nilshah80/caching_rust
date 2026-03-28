@@ -6,13 +6,14 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::application::services::{
-    AdminService, BitMapService, BloomService, FunctionService, GeoService, HashService,
-    JsonService, KeyService, ListService, ProbabilisticService, PubSubService, ScriptingService,
-    SearchService, SetService, SortedSetService, StreamService, StringService, TimeSeriesService,
-    TransactionService,
+    AdminService, BitMapService, BloomService, ClusterService, FunctionService, GeoService,
+    HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService,
+    ScriptingService, SearchService, SetService, SortedSetService, StreamService, StringService,
+    TimeSeriesService, TransactionService,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
+use crate::infrastructure::redis::cluster_connection::ClusterPool;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::pubsub_manager::PubSubManager;
 use metrics_exporter_prometheus::PrometheusHandle;
@@ -90,6 +91,12 @@ pub struct AppState {
     /// RedisTimeSeries operations service
     pub timeseries_service: Arc<TimeSeriesService>,
 
+    /// Cluster operations service
+    pub cluster_service: Arc<ClusterService>,
+
+    /// Cluster connection pool (only set in cluster mode)
+    pub cluster_pool: Option<Arc<ClusterPool>>,
+
     /// Prometheus metrics handle for rendering /metrics endpoint
     pub metrics_handle: Option<Arc<PrometheusHandle>>,
 }
@@ -121,17 +128,21 @@ impl AppState {
         let probabilistic_service = Arc::new(ProbabilisticService::new(pool.clone()));
         let geo_service = Arc::new(GeoService::new(pool.clone()));
 
-        // Create PubSubManager for dedicated subscription connections
-        #[allow(clippy::expect_used)]
-        let pubsub_manager = Arc::new(
-            PubSubManager::new(&config.redis.url, config.pubsub.clone())
-                .expect("Failed to create PubSubManager"),
-        );
+        // Create PubSubManager backed by the pool so it reads resolved_url()
+        // on each new subscription — sentinel failover propagates automatically.
+        let pubsub_manager = Arc::new(PubSubManager::new_with_pool(
+            pool.clone(),
+            config.pubsub.clone(),
+        ));
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(TransactionService::new(pool.clone()));
         let scripting_service = Arc::new(ScriptingService::new(pool.clone()));
         let function_service = Arc::new(FunctionService::new(pool.clone()));
         let timeseries_service = Arc::new(TimeSeriesService::new(pool.clone()));
+        let cluster_repo = Arc::new(
+            crate::infrastructure::redis::repositories::RedisClusterRepository::new(pool.clone()),
+        );
+        let cluster_service = Arc::new(ClusterService::new(cluster_repo));
 
         // Install Prometheus recorder (None if already installed, e.g. in tests)
         let metrics_handle = crate::infrastructure::metrics::install_prometheus_recorder()
@@ -162,8 +173,23 @@ impl AppState {
             scripting_service,
             function_service,
             timeseries_service,
+            cluster_service,
+            None,
             metrics_handle,
         )
+    }
+
+    /// Create new application state with an optional cluster pool.
+    /// Used by `main.rs` when booting in cluster mode.
+    pub fn new_with_cluster(
+        pool: Arc<InstrumentedPool>,
+        config: Arc<Settings>,
+        capabilities: Arc<RedisCapabilities>,
+        cluster_pool: Option<Arc<ClusterPool>>,
+    ) -> Self {
+        let mut state = Self::new(pool, config, capabilities);
+        state.cluster_pool = cluster_pool;
+        state
     }
 
     /// Create new application state with custom services (useful for testing)
@@ -192,6 +218,8 @@ impl AppState {
         scripting_service: Arc<ScriptingService>,
         function_service: Arc<FunctionService>,
         timeseries_service: Arc<TimeSeriesService>,
+        cluster_service: Arc<ClusterService>,
+        cluster_pool: Option<Arc<ClusterPool>>,
         metrics_handle: Option<Arc<PrometheusHandle>>,
     ) -> Self {
         Self {
@@ -218,6 +246,8 @@ impl AppState {
             scripting_service,
             function_service,
             timeseries_service,
+            cluster_service,
+            cluster_pool,
             metrics_handle,
         }
     }
@@ -227,10 +257,10 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::test_support::{
-        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockFunctionRepository,
-        MockGeoRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
-        MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
-        MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockClusterRepository,
+        MockFunctionRepository, MockGeoRepository, MockHashRepository, MockJsonRepository,
+        MockKeyRepository, MockListRepository, MockProbabilisticRepository, MockSearchRepository,
+        MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository,
         MockTimeSeriesRepository,
     };
 
@@ -295,6 +325,7 @@ mod tests {
         let timeseries_service = Arc::new(TimeSeriesService::new_with_repository(Arc::new(
             MockTimeSeriesRepository::new(),
         )));
+        let cluster_service = Arc::new(ClusterService::new(Arc::new(MockClusterRepository)));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -320,6 +351,8 @@ mod tests {
             scripting_service.clone(),
             function_service,
             timeseries_service,
+            cluster_service,
+            None,
             None,
         );
 

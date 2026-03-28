@@ -1,0 +1,111 @@
+services:
+  redis-node-1:
+    image: redis:8.0-M04
+    container_name: redis-cluster-1
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file /tmp/nodes.conf
+      --cluster-node-timeout 5000
+      --port 7001
+      --bind 0.0.0.0
+      --protected-mode no
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7001", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  redis-node-2:
+    image: redis:8.0-M04
+    container_name: redis-cluster-2
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file /tmp/nodes.conf
+      --cluster-node-timeout 5000
+      --port 7002
+      --bind 0.0.0.0
+      --protected-mode no
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7002", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  redis-node-3:
+    image: redis:8.0-M04
+    container_name: redis-cluster-3
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file /tmp/nodes.conf
+      --cluster-node-timeout 5000
+      --port 7003
+      --bind 0.0.0.0
+      --protected-mode no
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7003", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  cluster-init:
+    image: redis:8.0-M04
+    container_name: redis-cluster-init
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "redis-cli --cluster create redis-node-1:7001 redis-node-2:7002 redis-node-3:7003 --cluster-replicas 0 --cluster-yes && echo 'Cluster initialized' && sleep infinity"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h redis-node-1 -p 7001 cluster info | grep cluster_state:ok"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  # Caching service running in cluster mode inside the Docker network
+  caching-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caching-cluster-svc
+    environment:
+      - SERVER__HOST=0.0.0.0
+      - SERVER__PORT=8080
+      - REDIS__URL=redis://redis-node-1:7001
+      - REDIS__CLUSTER_ENABLED=true
+      - REDIS__CLUSTER_NODES=redis://redis-node-1:7001,redis://redis-node-2:7002,redis://redis-node-3:7003
+      - ADMIN__API_KEY=dev-admin-key
+      - LOG__LEVEL=debug
+      - LOG__FORMAT=pretty
+      - RATE_LIMIT__ENABLED=false
+    depends_on:
+      cluster-init:
+        condition: service_healthy
+    # No healthcheck — distroless has no shell/curl. Test runner polls instead.
+
+  # Test runner — waits for service then executes cluster_test.sh
+  test-runner:
+    image: curlimages/curl:latest
+    container_name: cluster-test-runner
+    depends_on:
+      - caching-service
+    volumes:
+      - ./tests/e2e/cluster_test.sh:/test.sh:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "Waiting for service..."
+        for i in $$(seq 1 30); do
+          if curl -sf http://caching-cluster-svc:8080/health > /dev/null 2>&1; then
+            echo "Service ready"
+            break
+          fi
+          sleep 2
+        done
+        sh /test.sh http://caching-cluster-svc:8080 dev-admin-key

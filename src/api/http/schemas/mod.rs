@@ -4,6 +4,7 @@
 
 pub mod bitmaps;
 pub mod bloom;
+pub mod cluster;
 pub mod common;
 pub mod functions;
 pub mod geo;
@@ -24,6 +25,7 @@ pub mod transactions;
 
 pub use bitmaps::*;
 pub use bloom::*;
+pub use cluster::*;
 pub use common::*;
 pub use functions::*;
 pub use geo::*;

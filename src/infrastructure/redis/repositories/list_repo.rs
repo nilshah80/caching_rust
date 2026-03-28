@@ -34,7 +34,7 @@ impl ListRepository for RedisListRepository {
         for value in values {
             cmd.arg(value);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -45,7 +45,7 @@ impl ListRepository for RedisListRepository {
         for value in values {
             cmd.arg(value);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -56,7 +56,7 @@ impl ListRepository for RedisListRepository {
         for value in values {
             cmd.arg(value);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -67,7 +67,7 @@ impl ListRepository for RedisListRepository {
         for value in values {
             cmd.arg(value);
         }
-        let result: i64 = cmd.query_async(&mut *conn).await?;
+        let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -78,11 +78,11 @@ impl ListRepository for RedisListRepository {
 
         if let Some(c) = count {
             cmd.arg(c);
-            let result: Vec<String> = cmd.query_async(&mut *conn).await.unwrap_or_default();
+            let result: Vec<String> = cmd.query_async(&mut conn).await.unwrap_or_default();
             Ok(result)
         } else {
             // Without count, LPOP returns a single value or nil
-            let result: Option<String> = cmd.query_async(&mut *conn).await?;
+            let result: Option<String> = cmd.query_async(&mut conn).await?;
             Ok(result.into_iter().collect())
         }
     }
@@ -94,11 +94,11 @@ impl ListRepository for RedisListRepository {
 
         if let Some(c) = count {
             cmd.arg(c);
-            let result: Vec<String> = cmd.query_async(&mut *conn).await.unwrap_or_default();
+            let result: Vec<String> = cmd.query_async(&mut conn).await.unwrap_or_default();
             Ok(result)
         } else {
             // Without count, RPOP returns a single value or nil
-            let result: Option<String> = cmd.query_async(&mut *conn).await?;
+            let result: Option<String> = cmd.query_async(&mut conn).await?;
             Ok(result.into_iter().collect())
         }
     }
@@ -109,14 +109,14 @@ impl ListRepository for RedisListRepository {
             .arg(key)
             .arg(start)
             .arg(stop)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
 
     async fn llen(&self, key: &str) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: i64 = redis::cmd("LLEN").arg(key).query_async(&mut *conn).await?;
+        let result: i64 = redis::cmd("LLEN").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 
@@ -125,7 +125,7 @@ impl ListRepository for RedisListRepository {
         let result: Option<String> = redis::cmd("LINDEX")
             .arg(key)
             .arg(index)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -136,7 +136,7 @@ impl ListRepository for RedisListRepository {
             .arg(key)
             .arg(index)
             .arg(value)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(())
     }
@@ -154,7 +154,7 @@ impl ListRepository for RedisListRepository {
             .arg(position.as_str())
             .arg(pivot)
             .arg(value)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -165,7 +165,7 @@ impl ListRepository for RedisListRepository {
             .arg(key)
             .arg(count)
             .arg(value)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -176,7 +176,7 @@ impl ListRepository for RedisListRepository {
             .arg(key)
             .arg(start)
             .arg(stop)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(())
     }
@@ -203,10 +203,10 @@ impl ListRepository for RedisListRepository {
 
         // If COUNT is specified, LPOS returns an array; otherwise it returns a single value or nil
         if options.count.is_some() {
-            let result: Vec<i64> = cmd.query_async(&mut *conn).await.unwrap_or_default();
+            let result: Vec<i64> = cmd.query_async(&mut conn).await.unwrap_or_default();
             Ok(result)
         } else {
-            let result: Option<i64> = cmd.query_async(&mut *conn).await?;
+            let result: Option<i64> = cmd.query_async(&mut conn).await?;
             Ok(result.into_iter().collect())
         }
     }
@@ -224,7 +224,7 @@ impl ListRepository for RedisListRepository {
             .arg(destination)
             .arg(src_dir.as_str())
             .arg(dst_dir.as_str())
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -238,7 +238,7 @@ impl ListRepository for RedisListRepository {
         let result: Option<String> = redis::cmd("RPOPLPUSH")
             .arg(source)
             .arg(destination)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -255,7 +255,7 @@ impl ListRepository for RedisListRepository {
         }
         cmd.arg(timeout.as_secs());
 
-        let result: Option<(String, String)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, String)> = cmd.query_async(&mut conn).await?;
         Ok(result.map(|(key, value)| BlockingPopResult { key, value }))
     }
 
@@ -271,7 +271,7 @@ impl ListRepository for RedisListRepository {
         }
         cmd.arg(timeout.as_secs());
 
-        let result: Option<(String, String)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, String)> = cmd.query_async(&mut conn).await?;
         Ok(result.map(|(key, value)| BlockingPopResult { key, value }))
     }
 
@@ -290,7 +290,7 @@ impl ListRepository for RedisListRepository {
             .arg(src_dir.as_str())
             .arg(dst_dir.as_str())
             .arg(timeout.as_secs())
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -306,7 +306,7 @@ impl ListRepository for RedisListRepository {
             .arg(source)
             .arg(destination)
             .arg(timeout.as_secs())
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(result)
     }
@@ -328,7 +328,7 @@ impl ListRepository for RedisListRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let result: Option<(String, Vec<String>)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, Vec<String>)> = cmd.query_async(&mut conn).await?;
         Ok(result.map(|(key, elements)| LMPopResult { key, elements }))
     }
 
@@ -351,7 +351,7 @@ impl ListRepository for RedisListRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let result: Option<(String, Vec<String>)> = cmd.query_async(&mut *conn).await?;
+        let result: Option<(String, Vec<String>)> = cmd.query_async(&mut conn).await?;
         Ok(result.map(|(key, elements)| LMPopResult { key, elements }))
     }
 }

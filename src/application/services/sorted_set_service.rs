@@ -836,7 +836,7 @@ mod integration_tests {
         let result: Option<(String, String, f64)> = redis::cmd("BZPOPMIN")
             .arg("nonexistent_key")
             .arg(1u32) // integer timeout for Redis 5.0 compatibility
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .unwrap();
         let elapsed = start.elapsed();
@@ -878,7 +878,7 @@ mod integration_tests {
         let result: Option<(String, String, f64)> = redis::cmd("BZPOPMIN")
             .arg("myzset")
             .arg(1u32) // integer timeout for Redis 5.0 compatibility
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .unwrap();
 

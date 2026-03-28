@@ -28,7 +28,7 @@ impl FunctionRepository for RedisFunctionRepository {
             cmd.arg("REPLACE");
         }
         cmd.arg(code);
-        let library_name: String = cmd.query_async(&mut *conn).await?;
+        let library_name: String = cmd.query_async(&mut conn).await?;
         Ok(library_name)
     }
 
@@ -37,7 +37,7 @@ impl FunctionRepository for RedisFunctionRepository {
         let _: () = redis::cmd("FUNCTION")
             .arg("DELETE")
             .arg(name)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(())
     }
@@ -52,7 +52,7 @@ impl FunctionRepository for RedisFunctionRepository {
                 FunctionFlushMode::Sync => "SYNC",
             });
         }
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -60,7 +60,7 @@ impl FunctionRepository for RedisFunctionRepository {
         let mut conn = self.pool.get().await?;
         let payload: Vec<u8> = redis::cmd("FUNCTION")
             .arg("DUMP")
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(payload)
     }
@@ -80,7 +80,7 @@ impl FunctionRepository for RedisFunctionRepository {
                 FunctionRestorePolicy::Replace => "REPLACE",
             });
         }
-        let _: () = cmd.query_async(&mut *conn).await?;
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -91,7 +91,7 @@ impl FunctionRepository for RedisFunctionRepository {
         if with_code {
             cmd.arg("WITHCODE");
         }
-        let value: redis::Value = cmd.query_async(&mut *conn).await?;
+        let value: redis::Value = cmd.query_async(&mut conn).await?;
         Ok(redis_value_to_json(value))
     }
 
@@ -99,7 +99,7 @@ impl FunctionRepository for RedisFunctionRepository {
         let mut conn = self.pool.get().await?;
         let value: redis::Value = redis::cmd("FUNCTION")
             .arg("STATS")
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(redis_value_to_json(value))
     }
@@ -108,7 +108,7 @@ impl FunctionRepository for RedisFunctionRepository {
         let mut conn = self.pool.get().await?;
         let _: () = redis::cmd("FUNCTION")
             .arg("KILL")
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
         Ok(())
     }
@@ -129,7 +129,7 @@ impl FunctionRepository for RedisFunctionRepository {
         for arg in args {
             cmd.arg(json_to_redis_arg(arg));
         }
-        let value: redis::Value = cmd.query_async(&mut *conn).await?;
+        let value: redis::Value = cmd.query_async(&mut conn).await?;
         Ok(redis_value_to_json(value))
     }
 }

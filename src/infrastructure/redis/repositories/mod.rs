@@ -5,6 +5,7 @@
 mod admin_repo;
 mod bitmap_repo;
 mod bloom_repo;
+pub mod cluster_repo;
 mod function_repo;
 mod geo_repo;
 mod hash_repo;
@@ -23,6 +24,7 @@ mod timeseries_repo;
 pub use admin_repo::RedisAdminRepository;
 pub use bitmap_repo::RedisBitMapRepository;
 pub use bloom_repo::RedisBloomRepository;
+pub use cluster_repo::RedisClusterRepository;
 pub use function_repo::RedisFunctionRepository;
 pub use geo_repo::RedisGeoRepository;
 pub use hash_repo::RedisHashRepository;

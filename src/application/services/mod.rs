@@ -5,6 +5,7 @@
 mod admin_service;
 mod bitmap_service;
 mod bloom_service;
+mod cluster_service;
 mod function_service;
 mod geo_service;
 mod hash_service;
@@ -25,6 +26,7 @@ mod transaction_service;
 pub use admin_service::AdminService;
 pub use bitmap_service::BitMapService;
 pub use bloom_service::BloomService;
+pub use cluster_service::ClusterService;
 pub use function_service::FunctionService;
 pub use geo_service::GeoService;
 pub use hash_service::HashService;

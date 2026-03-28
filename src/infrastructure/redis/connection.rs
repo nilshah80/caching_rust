@@ -22,6 +22,7 @@ use crate::infrastructure::config::{PoolConfig, RedisConfig};
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 #[cfg(not(test))]
 use crate::infrastructure::redis::capabilities::{FeatureCapabilities, ModuleCapabilities};
+use crate::infrastructure::redis::pool_connection::PoolConnection;
 #[cfg(not(test))]
 use chrono::Utc;
 
@@ -73,11 +74,23 @@ pub struct PoolStats {
 }
 
 /// Instrumented Redis connection pool with custom metrics
+/// Pool + URL bundled together so they can be swapped atomically under one lock.
+struct PoolState {
+    pool: Pool,
+    url: String,
+}
+
 pub struct InstrumentedPool {
-    inner: Pool,
+    /// Pool and resolved URL behind a single RwLock so sentinel failover swaps both atomically.
+    /// The read path clones the Pool handle (cheap — internally Arc'd) and drops the lock
+    /// before any async work.
+    state: std::sync::RwLock<PoolState>,
     metrics: Arc<PoolMetrics>,
     max_size: usize,
     allow_get: bool,
+    /// Optional cluster pool. When set, `get()` returns cluster connections
+    /// that route commands based on key hash slot (MOVED/ASK handling).
+    cluster_pool: Option<crate::infrastructure::redis::cluster_connection::ClusterPool>,
 }
 
 impl InstrumentedPool {
@@ -94,11 +107,22 @@ impl InstrumentedPool {
         redis_config: &RedisConfig,
         pool_config: &PoolConfig,
     ) -> Result<Self, CacheError> {
-        // Build connection URL with TLS if enabled
-        let connection_url = Self::build_connection_url(redis_config)?;
+        // Resolve connection URL: sentinel mode discovers the master, standalone uses config directly
+        let connection_url = if redis_config.sentinel_enabled {
+            Self::resolve_sentinel_master(redis_config).await?
+        } else {
+            Self::build_connection_url(redis_config)?
+        };
+
+        let mode = if redis_config.sentinel_enabled {
+            "sentinel"
+        } else {
+            "standalone"
+        };
 
         info!(
             url = %Self::mask_password(&connection_url),
+            mode,
             tls_enabled = redis_config.tls_enabled,
             min_size = pool_config.min_size,
             max_size = pool_config.max_size,
@@ -126,16 +150,115 @@ impl InstrumentedPool {
             .map_err(|e| CacheError::ConnectionFailed(format!("Redis PING failed: {}", e)))?;
 
         info!(
+            mode,
             tls_enabled = redis_config.tls_enabled,
             "Redis connection pool created successfully"
         );
 
         Ok(Self {
-            inner: pool,
+            state: std::sync::RwLock::new(PoolState {
+                pool,
+                url: connection_url,
+            }),
             metrics: Arc::new(PoolMetrics::default()),
             max_size: pool_config.max_size as usize,
             allow_get: true,
+            cluster_pool: None,
         })
+    }
+
+    /// Resolve the master URL from Sentinel nodes.
+    ///
+    /// Queries the sentinel SENTINEL GET-MASTER-ADDR-BY-NAME command
+    /// to discover the current master, then builds a redis:// URL for the pool.
+    #[cfg(not(test))]
+    async fn resolve_sentinel_master(config: &RedisConfig) -> Result<String, CacheError> {
+        let sentinel_urls = config.sentinel_node_urls();
+        let master_name = &config.sentinel_master_name;
+
+        info!(
+            sentinels = ?sentinel_urls,
+            master_name,
+            "Resolving master from Sentinel"
+        );
+
+        // Try each sentinel until one responds.
+        // If sentinel_password is set, authenticate to the sentinel itself.
+        for url in &sentinel_urls {
+            let mut sentinel_info: redis::ConnectionInfo = match url.parse() {
+                Ok(info) => info,
+                Err(_) => continue,
+            };
+
+            // Authenticate to the sentinel node (separate from Redis master password)
+            if let Some(ref sentinel_pw) = config.sentinel_password {
+                sentinel_info.redis.password = Some(sentinel_pw.clone());
+            }
+
+            let client = match redis::Client::open(sentinel_info) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let mut conn = match client.get_multiplexed_async_connection().await {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(sentinel = %url, error = %e, "Sentinel unreachable, trying next");
+                    continue;
+                }
+            };
+
+            let master_addr: Result<Vec<String>, _> = redis::cmd("SENTINEL")
+                .arg("get-master-addr-by-name")
+                .arg(master_name)
+                .query_async(&mut conn)
+                .await;
+
+            match master_addr {
+                Ok(addr) if addr.len() >= 2 => {
+                    // Build the master URL preserving TLS scheme and database from config
+                    let scheme = if config.tls_enabled {
+                        "rediss"
+                    } else {
+                        "redis"
+                    };
+                    let auth = config
+                        .password
+                        .as_ref()
+                        .map_or(String::new(), |pw| format!(":{pw}@"));
+                    let db = if config.database > 0 {
+                        format!("/{}", config.database)
+                    } else {
+                        String::new()
+                    };
+                    let insecure = if config.tls_enabled && config.tls_skip_verify {
+                        "#insecure"
+                    } else {
+                        ""
+                    };
+                    let master_url =
+                        format!("{scheme}://{auth}{}:{}{db}{insecure}", addr[0], addr[1]);
+
+                    info!(
+                        master = %Self::mask_password(&master_url),
+                        sentinel = %url,
+                        "Sentinel resolved master address"
+                    );
+
+                    return Ok(master_url);
+                }
+                Ok(_) => {
+                    warn!(sentinel = %url, "Sentinel returned invalid master address");
+                }
+                Err(e) => {
+                    warn!(sentinel = %url, error = %e, "SENTINEL get-master-addr-by-name failed");
+                }
+            }
+        }
+
+        Err(CacheError::ConnectionFailed(format!(
+            "No sentinel could resolve master '{master_name}'"
+        )))
     }
 
     #[cfg(test)]
@@ -161,10 +284,14 @@ impl InstrumentedPool {
             .expect("failed to build test pool");
 
         Self {
-            inner: pool,
+            state: std::sync::RwLock::new(PoolState {
+                pool,
+                url: "redis://127.0.0.1:0".to_string(),
+            }),
             metrics: Arc::new(PoolMetrics::default()),
             max_size: 1,
             allow_get: false,
+            cluster_pool: None,
         }
     }
 
@@ -179,10 +306,14 @@ impl InstrumentedPool {
             .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?;
 
         Ok(Self {
-            inner: pool,
+            state: std::sync::RwLock::new(PoolState {
+                pool,
+                url: redis_url.to_string(),
+            }),
             metrics: Arc::new(PoolMetrics::default()),
             max_size: 4,
             allow_get: true,
+            cluster_pool: None,
         })
     }
 
@@ -285,12 +416,54 @@ impl InstrumentedPool {
         url.to_string()
     }
 
-    /// Get a connection from the pool with instrumentation
-    pub async fn get(&self) -> Result<Connection, CacheError> {
+    /// Set the cluster pool for cluster-aware command routing.
+    /// When set, `get()` returns cluster connections instead of standalone ones.
+    pub fn set_cluster_pool(
+        &mut self,
+        cluster: crate::infrastructure::redis::cluster_connection::ClusterPool,
+    ) {
+        self.cluster_pool = Some(cluster);
+    }
+
+    /// Get a connection from the pool with instrumentation.
+    /// Returns a `PoolConnection` which may be standalone or cluster-routed.
+    /// In cluster mode, commands are automatically routed to the correct node.
+    pub async fn get(&self) -> Result<PoolConnection, CacheError> {
         if !self.allow_get {
             return Err(CacheError::PoolError(
                 "pool get disabled in tests".to_string(),
             ));
+        }
+
+        // If we have a cluster pool, prefer it for data command routing
+        if let Some(ref cluster) = self.cluster_pool {
+            self.metrics.current_waiting.fetch_add(1, Ordering::Relaxed);
+            self.metrics
+                .total_wait_count
+                .fetch_add(1, Ordering::Relaxed);
+
+            let start = Instant::now();
+            let result = cluster.get().await;
+            let wait_ms = start.elapsed().as_millis() as u64;
+
+            self.metrics
+                .total_wait_duration_ms
+                .fetch_add(wait_ms, Ordering::Relaxed);
+            self.metrics.current_waiting.fetch_sub(1, Ordering::Relaxed);
+
+            return match result {
+                Ok(conn) => {
+                    debug!(wait_ms, "Cluster connection acquired");
+                    Ok(PoolConnection::Cluster(conn))
+                }
+                Err(e) => {
+                    self.metrics
+                        .failed_checkouts
+                        .fetch_add(1, Ordering::Relaxed);
+                    warn!(error = %e, wait_ms, "Failed to get cluster connection");
+                    Err(CacheError::PoolError(e.to_string()))
+                }
+            };
         }
 
         self.metrics.current_waiting.fetch_add(1, Ordering::Relaxed);
@@ -299,7 +472,15 @@ impl InstrumentedPool {
             .fetch_add(1, Ordering::Relaxed);
 
         let start = Instant::now();
-        let result = self.inner.get().await;
+        // Clone the pool handle (cheap — Pool is internally Arc'd) to release the read lock
+        // before the async .get() call. This avoids holding the lock across an await point.
+        let pool = self
+            .state
+            .read()
+            .map_err(|_| CacheError::PoolError("pool lock poisoned".to_string()))?
+            .pool
+            .clone();
+        let result = pool.get().await;
         let wait_ms = start.elapsed().as_millis() as u64;
 
         self.metrics
@@ -310,7 +491,7 @@ impl InstrumentedPool {
         match result {
             Ok(conn) => {
                 debug!(wait_ms, "Connection acquired from pool");
-                Ok(conn)
+                Ok(PoolConnection::Standalone(conn))
             }
             Err(e) => {
                 self.metrics
@@ -322,9 +503,53 @@ impl InstrumentedPool {
         }
     }
 
+    /// Get a standalone connection (bypasses cluster pool).
+    /// Used by health checks and admin commands that must always hit a known node.
+    pub async fn get_standalone(&self) -> Result<Connection, CacheError> {
+        if !self.allow_get {
+            return Err(CacheError::PoolError(
+                "pool get disabled in tests".to_string(),
+            ));
+        }
+
+        let pool = self
+            .state
+            .read()
+            .map_err(|_| CacheError::PoolError("pool lock poisoned".to_string()))?
+            .pool
+            .clone();
+        pool.get()
+            .await
+            .map_err(|e| CacheError::PoolError(e.to_string()))
+    }
+
+    /// Get the resolved Redis URL used for this pool's connections.
+    /// In sentinel mode this is the master address, not the sentinel address.
+    pub fn resolved_url(&self) -> String {
+        self.state.read().map(|s| s.url.clone()).unwrap_or_default()
+    }
+
+    /// Swap the inner pool and resolved URL atomically under a single write lock.
+    /// Used by the sentinel watcher to point the pool at a newly promoted master.
+    pub fn swap_pool(&self, new_pool: Pool, new_url: String) {
+        if let Ok(mut state) = self.state.write() {
+            state.pool = new_pool;
+            state.url = new_url;
+        }
+    }
+
     /// Get pool statistics
     pub fn get_stats(&self) -> PoolStats {
-        let status = self.inner.status();
+        let status = self
+            .state
+            .read()
+            .map(|s| s.pool.status())
+            .unwrap_or(deadpool_redis::Status {
+                max_size: 0,
+                size: 0,
+                available: 0,
+                waiting: 0,
+            });
         let total_wait = self.metrics.total_wait_count.load(Ordering::Relaxed);
         let total_duration = self.metrics.total_wait_duration_ms.load(Ordering::Relaxed);
 
@@ -349,10 +574,10 @@ impl InstrumentedPool {
         }
     }
 
-    /// Detect Redis capabilities
+    /// Detect Redis capabilities (always uses standalone connection for node-local INFO)
     #[cfg(not(test))]
     pub async fn detect_capabilities(&self) -> Result<RedisCapabilities, CacheError> {
-        let mut conn = self.get().await?;
+        let mut conn = self.get_standalone().await?;
 
         // Get Redis version from INFO
         let info: String = redis::cmd("INFO")
@@ -388,15 +613,18 @@ impl InstrumentedPool {
             graph: module_names.iter().any(|n| n.contains("graph")),
         };
 
-        // Check cluster mode
-        let cluster_result: Result<String, _> = redis::cmd("CLUSTER")
+        // Check cluster mode via CLUSTER INFO (returns cluster_state:ok in cluster mode)
+        // or INFO server (contains cluster_enabled:1)
+        let cluster_enabled = if let Ok(cluster_info) = redis::cmd("CLUSTER")
             .arg("INFO")
-            .query_async(&mut conn)
-            .await;
-
-        let cluster_enabled = cluster_result
-            .map(|info| info.contains("cluster_enabled:1"))
-            .unwrap_or(false);
+            .query_async::<String>(&mut conn)
+            .await
+        {
+            cluster_info.contains("cluster_state:ok")
+        } else {
+            // Fallback: check INFO server for cluster_enabled:1
+            info.contains("cluster_enabled:1")
+        };
 
         let feature_capabilities = FeatureCapabilities {
             streams: RedisCapabilities::version_gte(&redis_version, "5.0.0"),
@@ -497,6 +725,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "redis://localhost:6379");
@@ -513,6 +742,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "rediss://localhost:6379");
@@ -529,6 +759,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: true,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "rediss://localhost:6379#insecure");
@@ -545,6 +776,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "redis://:secret123@localhost:6379");
@@ -561,6 +793,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "redis://localhost:6379/5");
@@ -577,6 +810,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "rediss://localhost:6379");
@@ -593,6 +827,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "redis://:old@localhost:6379");
@@ -609,6 +844,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: true,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "rediss://localhost:6379/2#insecure");
@@ -625,6 +861,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "redis://localhost:6379/1");
@@ -641,6 +878,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let url = InstrumentedPool::build_connection_url(&config).unwrap();
         assert_eq!(url, "rediss://localhost:6379");
@@ -673,6 +911,7 @@ mod tests {
             tls_key_path: None,
             tls_ca_path: None,
             tls_skip_verify: false,
+            ..RedisConfig::default()
         };
         let err = InstrumentedPool::build_connection_url(&config).unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));

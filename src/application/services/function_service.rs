@@ -349,7 +349,7 @@ mod tests {
         let _: () = redis::cmd("SET")
             .arg("mykey")
             .arg("value")
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .expect("set");
         let get_value = service

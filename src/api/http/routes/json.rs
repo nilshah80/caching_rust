@@ -832,9 +832,9 @@ mod tests {
 
     use crate::api::http::schemas::json::JsonMSetItemRequest;
     use crate::application::services::{
-        AdminService, BitMapService, BloomService, GeoService, HashService, JsonService,
-        KeyService, ListService, ProbabilisticService, PubSubService, SearchService, SetService,
-        SortedSetService, StreamService, StringService,
+        AdminService, BitMapService, BloomService, ClusterService, GeoService, HashService,
+        JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService,
+        SetService, SortedSetService, StreamService, StringService,
     };
     use crate::domain::entities::{
         JsonArrAppendResult, JsonArrIndexResult, JsonArrInsertResult, JsonArrLenResult,
@@ -848,9 +848,9 @@ mod tests {
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::{
-        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository,
-        MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
-        MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockClusterRepository,
+        MockGeoRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
+        MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
         MockSortedSetRepository, MockStreamRepository, MockStringRepository,
         test_state_with_json_repo,
     };
@@ -1116,6 +1116,7 @@ mod tests {
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(
             config.blocking.max_sse_connections,
         ));
+        let cluster_service = Arc::new(ClusterService::new(Arc::new(MockClusterRepository)));
 
         AppState::new_with_services(
             pool,
@@ -1141,6 +1142,8 @@ mod tests {
             scripting_service,
             function_service,
             timeseries_service,
+            cluster_service,
+            None,
             None,
         )
     }

@@ -16,7 +16,7 @@ axum-extra = { version = "0.10", features = ["typed-header"] }
 tokio = { version = "1.48", features = ["full"] }
 
 # Redis with TLS support (using rustls)
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager", "json", "cluster-async", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls-webpki-roots"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager", "json", "cluster-async", "sentinel", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls-webpki-roots"] }
 deadpool-redis = "0.18"
 
 # Serialization

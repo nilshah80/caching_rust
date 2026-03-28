@@ -34,7 +34,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn get_server_info(&self) -> Result<ServerInfo, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let info: String = redis::cmd("INFO").query_async(&mut conn).await?;
 
@@ -42,7 +42,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn get_server_time(&self) -> Result<ServerTime, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let time: (i64, i64) = redis::cmd("TIME").query_async(&mut conn).await?;
 
@@ -53,7 +53,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn get_db_size(&self) -> Result<i64, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let keys: i64 = redis::cmd("DBSIZE").query_async(&mut conn).await?;
 
@@ -61,7 +61,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn get_last_save(&self) -> Result<i64, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let timestamp: i64 = redis::cmd("LASTSAVE").query_async(&mut conn).await?;
 
@@ -73,7 +73,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn get_memory_stats(&self) -> Result<MemoryStats, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let stats: Vec<redis::Value> = redis::cmd("MEMORY")
             .arg("STATS")
@@ -84,7 +84,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn get_memory_usage(&self, key: &str, samples: u32) -> Result<MemoryUsage, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let bytes: Option<i64> = redis::cmd("MEMORY")
             .arg("USAGE")
@@ -101,7 +101,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn memory_doctor(&self) -> Result<String, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let report: String = redis::cmd("MEMORY")
             .arg("DOCTOR")
@@ -112,7 +112,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn memory_purge(&self) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("MEMORY")
             .arg("PURGE")
@@ -127,7 +127,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn flush_db(&self, options: FlushOptions) -> Result<FlushResult, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mode = if options.async_mode { "ASYNC" } else { "SYNC" };
 
@@ -145,7 +145,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn flush_all(&self, options: FlushOptions) -> Result<FlushResult, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mode = if options.async_mode { "ASYNC" } else { "SYNC" };
 
@@ -163,7 +163,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn copy_key(&self, options: CopyKeyOptions) -> Result<bool, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mut cmd = redis::cmd("COPY");
         cmd.arg(&options.source).arg(&options.destination);
@@ -180,7 +180,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn move_key(&self, options: MoveKeyOptions) -> Result<bool, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: i64 = redis::cmd("MOVE")
             .arg(&options.key)
@@ -192,7 +192,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn swap_db(&self, db1: u8, db2: u8) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("SWAPDB")
             .arg(db1)
@@ -208,7 +208,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn config_get(&self, pattern: &str) -> Result<HashMap<String, String>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: Vec<String> = redis::cmd("CONFIG")
             .arg("GET")
@@ -228,7 +228,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn config_set(&self, parameter: &str, value: &str) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("CONFIG")
             .arg("SET")
@@ -241,7 +241,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn config_rewrite(&self) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("CONFIG")
             .arg("REWRITE")
@@ -252,7 +252,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn config_resetstat(&self) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("CONFIG")
             .arg("RESETSTAT")
@@ -267,7 +267,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn save(&self) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("SAVE").query_async(&mut conn).await?;
 
@@ -275,7 +275,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: String = redis::cmd("BGSAVE").query_async(&mut conn).await?;
 
@@ -286,7 +286,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn bgrewriteaof(&self) -> Result<BgRewriteAofResult, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: String = redis::cmd("BGREWRITEAOF").query_async(&mut conn).await?;
 
@@ -301,7 +301,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn client_list(&self) -> Result<Vec<ClientInfo>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: String = redis::cmd("CLIENT")
             .arg("LIST")
@@ -312,7 +312,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn client_kill(&self, options: ClientKillOptions) -> Result<i64, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mut cmd = redis::cmd("CLIENT");
         cmd.arg("KILL");
@@ -333,7 +333,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn client_pause(&self, options: ClientPauseOptions) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("CLIENT")
             .arg("PAUSE")
@@ -346,7 +346,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn client_unpause(&self) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("CLIENT")
             .arg("UNPAUSE")
@@ -357,7 +357,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn client_setname(&self, name: &str) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("CLIENT")
             .arg("SETNAME")
@@ -369,7 +369,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn client_getname(&self) -> Result<Option<String>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let name: Option<String> = redis::cmd("CLIENT")
             .arg("GETNAME")
@@ -380,7 +380,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn client_id(&self) -> Result<i64, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let id: i64 = redis::cmd("CLIENT")
             .arg("ID")
@@ -395,7 +395,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn slowlog_get(&self, count: i64) -> Result<Vec<SlowlogEntry>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: Vec<Vec<redis::Value>> = redis::cmd("SLOWLOG")
             .arg("GET")
@@ -407,7 +407,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn slowlog_len(&self) -> Result<i64, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let length: i64 = redis::cmd("SLOWLOG")
             .arg("LEN")
@@ -418,7 +418,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn slowlog_reset(&self) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let _: () = redis::cmd("SLOWLOG")
             .arg("RESET")
@@ -433,7 +433,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn latency_latest(&self) -> Result<Vec<LatencyEvent>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: Vec<Vec<redis::Value>> = redis::cmd("LATENCY")
             .arg("LATEST")
@@ -444,7 +444,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn latency_history(&self, event: &str) -> Result<Vec<LatencyEvent>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let result: Vec<Vec<redis::Value>> = redis::cmd("LATENCY")
             .arg("HISTORY")
@@ -479,7 +479,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn latency_doctor(&self) -> Result<String, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let report: String = redis::cmd("LATENCY")
             .arg("DOCTOR")
@@ -490,7 +490,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn latency_reset(&self, events: &[String]) -> Result<(), CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mut cmd = redis::cmd("LATENCY");
         cmd.arg("RESET");
@@ -508,7 +508,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn acl_list(&self) -> Result<Vec<String>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let rules: Vec<String> = redis::cmd("ACL").arg("LIST").query_async(&mut conn).await?;
 
@@ -516,7 +516,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn acl_users(&self) -> Result<Vec<String>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let users: Vec<String> = redis::cmd("ACL")
             .arg("USERS")
@@ -527,7 +527,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn acl_whoami(&self) -> Result<String, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let username: String = redis::cmd("ACL")
             .arg("WHOAMI")
@@ -538,7 +538,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn acl_cat(&self, category: Option<&str>) -> Result<Vec<String>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mut cmd = redis::cmd("ACL");
         cmd.arg("CAT");
@@ -552,7 +552,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn acl_genpass(&self, bits: u32) -> Result<String, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let password: String = redis::cmd("ACL")
             .arg("GENPASS")
@@ -568,7 +568,7 @@ impl AdminRepository for RedisAdminRepository {
         count: Option<i64>,
         reset: bool,
     ) -> Result<Vec<AclLogEntry>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mut cmd = redis::cmd("ACL");
         cmd.arg("LOG");
@@ -589,7 +589,7 @@ impl AdminRepository for RedisAdminRepository {
         username: &str,
         command: &[String],
     ) -> Result<AclDryrunResult, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
 
         let mut cmd = redis::cmd("ACL");
         cmd.arg("DRYRUN").arg(username);
@@ -617,7 +617,7 @@ impl AdminRepository for RedisAdminRepository {
     // ========================================================================
 
     async fn command_list(&self, filter: Option<&str>) -> Result<Vec<String>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
         let mut cmd = redis::cmd("COMMAND");
         cmd.arg("LIST");
         if let Some(f) = filter {
@@ -628,7 +628,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn command_count(&self) -> Result<i64, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
         let result: i64 = redis::cmd("COMMAND")
             .arg("COUNT")
             .query_async(&mut conn)
@@ -637,7 +637,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn command_docs(&self, commands: &[String]) -> Result<serde_json::Value, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
         let mut cmd = redis::cmd("COMMAND");
         cmd.arg("DOCS");
         for c in commands {
@@ -648,7 +648,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn command_info(&self, commands: &[String]) -> Result<serde_json::Value, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
         let mut cmd = redis::cmd("COMMAND");
         cmd.arg("INFO");
         for c in commands {
@@ -659,7 +659,7 @@ impl AdminRepository for RedisAdminRepository {
     }
 
     async fn command_getkeys(&self, command: &[String]) -> Result<Vec<String>, CacheError> {
-        let mut conn = self.pool.get().await?;
+        let mut conn = self.pool.get_standalone().await?;
         let mut cmd = redis::cmd("COMMAND");
         cmd.arg("GETKEYS");
         for arg in command {

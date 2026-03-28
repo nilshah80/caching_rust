@@ -42,7 +42,7 @@ impl PubSubRepository for RedisPubSubRepository {
         let receivers: i64 = redis::cmd("SPUBLISH")
             .arg(channel)
             .arg(message)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(PublishResult {
@@ -60,7 +60,7 @@ impl PubSubRepository for RedisPubSubRepository {
             cmd.arg(p);
         }
 
-        let channels: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let channels: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(channels)
     }
 
@@ -74,7 +74,7 @@ impl PubSubRepository for RedisPubSubRepository {
         }
 
         // NUMSUB returns flat array: [channel1, count1, channel2, count2, ...]
-        let result: Vec<redis::Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<redis::Value> = cmd.query_async(&mut conn).await?;
 
         let mut results = Vec::new();
         let mut iter = result.into_iter();
@@ -105,7 +105,7 @@ impl PubSubRepository for RedisPubSubRepository {
 
         let count: i64 = redis::cmd("PUBSUB")
             .arg("NUMPAT")
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await?;
 
         Ok(count)
@@ -121,7 +121,7 @@ impl PubSubRepository for RedisPubSubRepository {
             cmd.arg(p);
         }
 
-        let channels: Vec<String> = cmd.query_async(&mut *conn).await?;
+        let channels: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(channels)
     }
 
@@ -139,7 +139,7 @@ impl PubSubRepository for RedisPubSubRepository {
         }
 
         // Returns flat array like NUMSUB
-        let result: Vec<redis::Value> = cmd.query_async(&mut *conn).await?;
+        let result: Vec<redis::Value> = cmd.query_async(&mut conn).await?;
 
         let mut results = Vec::new();
         let mut iter = result.into_iter();
