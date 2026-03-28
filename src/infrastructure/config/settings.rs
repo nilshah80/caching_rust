@@ -259,7 +259,7 @@ fn default_stream_read_count() -> usize {
 }
 
 fn default_rate_limit_enabled() -> bool {
-    true
+    false
 }
 
 fn default_rate_limit_rps() -> u64 {
@@ -397,7 +397,7 @@ impl Settings {
             .set_default("blocking.max_sse_connections", 5)?
             .set_default("blocking.default_stream_read_count", 100)?
             .set_default("admin.api_key", "changeme-admin-key")?
-            .set_default("rate_limit.enabled", true)?
+            .set_default("rate_limit.enabled", false)?
             .set_default("rate_limit.requests_per_second", 100)?
             .set_default("rate_limit.burst_size", 50)?
             .set_default("log.level", "info")?
