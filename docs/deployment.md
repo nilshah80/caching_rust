@@ -13,10 +13,10 @@ docker build -t redis-caching-service .
 ```
 
 **Build features:**
-- **Multi-stage build** — dependencies are cached separately from application code for fast rebuilds
+- **Cargo Chef dependency caching** — dependency layers are separated from application code for faster incremental rebuilds
 - **Non-root user** — the service runs as `appuser` for security
 - **Health check** — built-in Docker HEALTHCHECK hitting `/health`
-- **Minimal runtime** — `debian:bookworm-slim` base with only `ca-certificates`, `libssl3`, and `curl`
+- **Minimal runtime** — `debian:bookworm-slim` base with only `ca-certificates` and `curl`
 
 ### Running with Docker
 
@@ -106,7 +106,7 @@ The service exposes three health endpoints:
 **Docker health check** (built into Dockerfile):
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
 ```
 
 ### TLS Configuration
@@ -237,6 +237,42 @@ The service is stateless and horizontally scalable. Run multiple instances behin
 - Pub/Sub subscriptions are per-instance; each instance maintains its own WebSocket connections
 - SSE connections are per-instance; clients reconnect to any instance on disconnect
 - Pool sizes should be set per-instance (total Redis connections = instances × `POOL__MAX_SIZE`)
+
+## Kubernetes
+
+The repository includes baseline manifests in `k8s/` for a production-style deployment:
+
+- `configmap.yaml` — non-secret runtime configuration
+- `secret.yaml` — Redis connection URL and admin API key placeholders
+- `deployment.yaml` — hardened `Deployment` with liveness, readiness, and startup probes
+- `service.yaml` — internal `ClusterIP` service
+- `hpa.yaml` — CPU and memory based horizontal autoscaling
+- `kustomization.yaml` — applies the full set together
+
+### Deploying
+
+Update `k8s/secret.yaml` before applying:
+
+```yaml
+stringData:
+  REDIS__URL: "redis://:change-me@redis:6379"
+  ADMIN__API_KEY: "change-me-admin-key"
+```
+
+Then apply the manifests:
+
+```bash
+kubectl apply -k k8s/
+kubectl rollout status deployment/redis-caching-service
+kubectl get hpa redis-caching-service
+```
+
+### Kubernetes Notes
+
+- The default `Deployment` runs **2 replicas** so the `HPA` has room to scale horizontally
+- `readinessProbe` uses `/health/ready`, which verifies Redis connectivity before serving traffic
+- The container runs as a non-root user and drops all Linux capabilities
+- Replace the `image` field in `k8s/deployment.yaml` with your published registry image before deployment
 
 ### Graceful Shutdown
 

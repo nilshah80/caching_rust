@@ -1,62 +1,56 @@
-# Build stage
-FROM rust:1.92-slim AS builder
+# syntax=docker/dockerfile:1.7
+
+FROM rust:1.92-slim AS chef
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
+# cargo-chef keeps dependency builds cacheable across source-only changes.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
+    ca-certificates \
     curl \
+    && cargo install cargo-chef --locked \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy manifests
+FROM chef AS planner
+
 COPY Cargo.toml Cargo.lock ./
-
-# Create dummy source files to build dependencies
-RUN mkdir -p src benches && \
-    echo "fn main() {}" > src/main.rs && \
-    echo "pub fn dummy() {}" > src/lib.rs && \
-    echo "fn main() {}" > benches/redis_operations.rs
-
-# Build dependencies only
-RUN cargo build --release && rm -rf src benches
-
-# Copy actual source code
 COPY src ./src
 COPY benches ./benches
+RUN cargo chef prepare --recipe-path recipe.json
 
-# Build the actual application
-RUN touch src/main.rs src/lib.rs && \
-    cargo build --release
+FROM chef AS builder
 
-# Runtime stage
-FROM debian:bookworm-slim
+COPY --from=planner /app/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo chef cook --release --locked --recipe-path recipe.json
+
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY benches ./benches
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --release --locked --bin redis-caching-service
+
+FROM debian:bookworm-slim AS runtime
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libssl3 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy binary from builder
-COPY --from=builder /app/target/release/redis-caching-service /app/redis-caching-service
+RUN groupadd --system --gid 10001 appuser && \
+    useradd --system --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin appuser
 
-# Create non-root user
-RUN useradd -r -s /bin/false appuser && \
-    chown -R appuser:appuser /app
+COPY --from=builder /app/target/release/redis-caching-service /usr/local/bin/redis-caching-service
 
-USER appuser
+USER 10001:10001
 
-# Expose port
 EXPOSE 8080
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
 
-# Run the application
-CMD ["./redis-caching-service"]
+ENTRYPOINT ["redis-caching-service"]

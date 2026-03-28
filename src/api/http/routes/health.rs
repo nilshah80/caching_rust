@@ -2,7 +2,7 @@
 //!
 //! Endpoints for liveness and readiness probes.
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -78,7 +78,7 @@ async fn liveness() -> Json<HealthResponse> {
 
 /// Readiness probe endpoint
 ///
-/// Returns 200 if the service is ready to receive traffic.
+/// Returns 200 if the service is ready to receive traffic, or 503 if Redis is unavailable.
 /// Checks Redis connectivity and returns capabilities.
 #[utoipa::path(
     get,
@@ -89,20 +89,29 @@ async fn liveness() -> Json<HealthResponse> {
     ),
     tag = "Health"
 )]
-async fn readiness(State(state): State<AppState>) -> Json<ReadinessResponse> {
+async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<ReadinessResponse>) {
     let pool_stats = state.pool.get_stats();
 
     // Check if we can get a connection
     let connected = state.pool.get().await.is_ok();
 
-    Json(ReadinessResponse {
-        status: if connected { "ready" } else { "not_ready" }.to_string(),
-        redis: RedisHealthStatus {
-            connected,
-            pool: pool_stats,
-        },
-        capabilities: (*state.capabilities).clone(),
-    })
+    let status = if connected {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (
+        status,
+        Json(ReadinessResponse {
+            status: if connected { "ready" } else { "not_ready" }.to_string(),
+            redis: RedisHealthStatus {
+                connected,
+                pool: pool_stats,
+            },
+            capabilities: (*state.capabilities).clone(),
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -122,7 +131,15 @@ mod tests {
     #[tokio::test]
     async fn test_readiness_endpoint() {
         let (state, _, _, _) = test_state();
-        let response = readiness(State(state)).await;
+        let (status, response) = readiness(State(state)).await;
         assert!(matches!(response.0.status.as_str(), "ready" | "not_ready"));
+        assert_eq!(
+            status,
+            if response.0.redis.connected {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+        );
     }
 }

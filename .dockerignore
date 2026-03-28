@@ -1,0 +1,15 @@
+target/
+.git/
+.github/
+.cursor/
+.vscode/
+docs/
+examples/
+tests/
+k8s/
+helm/
+tasks.md
+plan.md
+docker-compose.yml
+docker-compose.benchmark.yml
+*.log

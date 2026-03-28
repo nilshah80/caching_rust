@@ -2854,8 +2854,8 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 - [x] **Task 9.1.6**: Document architectural decisions (blocking, pub/sub, transactions)
 
 ### 9.2 Docker & Deployment
-- [ ] **Task 9.2.1**: Optimize Dockerfile for production
-- [ ] **Task 9.2.2**: Create Kubernetes manifests
+- [x] **Task 9.2.1**: Optimize Dockerfile for production
+- [x] **Task 9.2.2**: Create Kubernetes manifests
   - Deployment
   - Service
   - ConfigMap
