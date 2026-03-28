@@ -44,12 +44,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # Distroless has no shell/curl; probe from the host or use Kubernetes probes.
+    # For compose, we disable the in-container check and verify externally.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      test: ["NONE"]
+      disable: true
 
 volumes:
   redis-data:

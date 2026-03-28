@@ -32,25 +32,15 @@ COPY benches ./benches
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked --bin redis-caching-service
 
-FROM debian:bookworm-slim AS runtime
+FROM gcr.io/distroless/cc-debian12 AS runtime
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN groupadd --system --gid 10001 appuser && \
-    useradd --system --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin appuser
-
+# The distroless image runs entirely without a shell. No additional installation needed.
 COPY --from=builder /app/target/release/redis-caching-service /usr/local/bin/redis-caching-service
 
-USER 10001:10001
+USER nonroot:nonroot
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
-
-ENTRYPOINT ["redis-caching-service"]
+ENTRYPOINT ["/usr/local/bin/redis-caching-service"]

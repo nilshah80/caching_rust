@@ -39,8 +39,8 @@ pub struct ResourceSnapshot {
 pub struct LoadMetrics {
     /// Test name
     pub name: String,
-    /// Start time
-    start_time: Instant,
+    /// Start time (wrapped for phase resets)
+    start_time: RwLock<Instant>,
     /// Total requests
     total_requests: AtomicU64,
     /// Successful requests
@@ -64,7 +64,7 @@ impl LoadMetrics {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            start_time: Instant::now(),
+            start_time: RwLock::new(Instant::now()),
             total_requests: AtomicU64::new(0),
             successful_requests: AtomicU64::new(0),
             failed_requests: AtomicU64::new(0),
@@ -75,6 +75,25 @@ impl LoadMetrics {
             resource_snapshots: RwLock::new(VecDeque::new()),
             bytes_sent: AtomicU64::new(0),
             bytes_received: AtomicU64::new(0),
+        }
+    }
+
+    /// Reset all counters, histograms, and the measurement window for a new phase.
+    /// Resource snapshots are preserved (they span the full test).
+    pub fn reset(&self) {
+        self.total_requests.store(0, Ordering::Relaxed);
+        self.successful_requests.store(0, Ordering::Relaxed);
+        self.failed_requests.store(0, Ordering::Relaxed);
+        self.bytes_sent.store(0, Ordering::Relaxed);
+        self.bytes_received.store(0, Ordering::Relaxed);
+        if let Ok(mut t) = self.start_time.write() {
+            *t = Instant::now();
+        }
+        if let Ok(mut hist) = self.latency_histogram.write() {
+            hist.reset();
+        }
+        if let Ok(mut errors) = self.error_counts.write() {
+            errors.clear();
         }
     }
 
@@ -133,9 +152,9 @@ impl LoadMetrics {
         }
     }
 
-    /// Get elapsed duration
+    /// Get elapsed duration since last reset (or creation)
     pub fn elapsed(&self) -> Duration {
-        self.start_time.elapsed()
+        self.start_time.read().map_or(Duration::ZERO, |t| t.elapsed())
     }
 
     /// Get total requests

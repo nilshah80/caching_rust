@@ -27,6 +27,7 @@ pub async fn test_large_dataset(base_url: &str) -> Result<TestResult> {
 
     for size in dataset_sizes {
         println!("Loading {} keys...", size);
+        metrics.reset();
 
         // Write phase - populate dataset
         let write_config = LoadTestConfig {
@@ -42,6 +43,7 @@ pub async fn test_large_dataset(base_url: &str) -> Result<TestResult> {
         println!("  Write complete. Testing reads...");
 
         // Read phase - test read performance at scale
+        metrics.reset();
         let read_config = LoadTestConfig {
             concurrency: 100,
             duration: Duration::from_secs(60),
@@ -92,6 +94,7 @@ pub async fn test_connection_stress(base_url: &str) -> Result<TestResult> {
 
     for connections in connection_levels {
         println!("Testing with {} concurrent connections...", connections);
+        metrics.reset();
 
         let config = LoadTestConfig {
             concurrency: connections,
@@ -160,6 +163,7 @@ pub async fn test_key_expiration(base_url: &str) -> Result<TestResult> {
     run_expiring_write_phase(&client, &metrics, write_config, key_count, ttl_seconds).await?;
 
     println!("Waiting for keys to expire while reading...");
+    metrics.reset();
 
     // Read while keys expire
     let read_config = LoadTestConfig {
@@ -174,6 +178,7 @@ pub async fn test_key_expiration(base_url: &str) -> Result<TestResult> {
 
     // Continue reading after most keys should be expired
     println!("Testing reads after expiration...");
+    metrics.reset();
 
     let post_expire_config = LoadTestConfig {
         concurrency: 20,
@@ -222,6 +227,7 @@ pub async fn test_memory_pressure(base_url: &str) -> Result<TestResult> {
 
     for (size, label) in value_sizes {
         println!("Testing with {} values...", label);
+        metrics.reset();
 
         let config = LoadTestConfig {
             concurrency: 30,
@@ -272,6 +278,7 @@ pub async fn test_command_pipeline(base_url: &str) -> Result<TestResult> {
 
     for batch_size in batch_sizes {
         println!("Testing pipeline with batch size {}...", batch_size);
+        metrics.reset();
 
         let config = LoadTestConfig {
             concurrency: 30,

@@ -2862,8 +2862,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   - Secret
   - HPA (Horizontal Pod Autoscaler)
 
-- [ ] **Task 9.2.3**: Create Helm chart (optional)
-- [ ] **Task 9.2.4**: Set up CI/CD pipeline
+- [x] **Task 9.2.3**: Set up CI/CD pipeline
   - GitHub Actions workflow
   - Build and test on PR
   - Docker image build and push

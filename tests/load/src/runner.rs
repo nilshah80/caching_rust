@@ -9,59 +9,51 @@ use futures::future::join_all;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Semaphore;
-use tokio::time::interval;
+use tokio::sync::Mutex;
+use tokio::time::{Instant as TokioInstant, interval, sleep_until};
 
-/// Rate limiter using token bucket algorithm
+/// Rate limiter using slot-based pacing.
+///
+/// Each acquisition reserves the next request slot on a shared timeline.
+/// This spreads requests evenly across the second instead of releasing them
+/// in one-second bursts, which produces RPS closer to the configured target.
 #[allow(dead_code)]
 pub struct RateLimiter {
-    tokens: Arc<Semaphore>,
+    next_slot: Arc<Mutex<TokioInstant>>,
+    interval: Duration,
     refill_rate: u64,
-    running: Arc<AtomicBool>,
 }
 
 impl RateLimiter {
     /// Create new rate limiter with specified RPS
     pub fn new(rps: u64) -> Self {
-        let tokens = Arc::new(Semaphore::new(rps as usize));
-        let running = Arc::new(AtomicBool::new(true));
-
-        // Spawn token refiller
-        let tokens_clone = tokens.clone();
-        let running_clone = running.clone();
-        tokio::spawn(async move {
-            let mut ticker = interval(Duration::from_secs(1));
-            while running_clone.load(Ordering::Relaxed) {
-                ticker.tick().await;
-                // Refill tokens up to capacity
-                let available = tokens_clone.available_permits();
-                let to_add = (rps as usize).saturating_sub(available);
-                tokens_clone.add_permits(to_add);
-            }
-        });
+        let nanos_per_request = (1_000_000_000u64 / rps).max(1);
+        let interval = Duration::from_nanos(nanos_per_request);
 
         Self {
-            tokens,
+            next_slot: Arc::new(Mutex::new(TokioInstant::now())),
+            interval,
             refill_rate: rps,
-            running,
         }
     }
 
-    /// Acquire a token (wait if necessary)
+    /// Acquire the next paced request slot.
     pub async fn acquire(&self) {
-        let _ = self.tokens.acquire().await;
+        let scheduled = {
+            let mut next_slot = self.next_slot.lock().await;
+            let now = TokioInstant::now();
+            let scheduled = (*next_slot).max(now);
+            *next_slot = scheduled + self.interval;
+            scheduled
+        };
+
+        sleep_until(scheduled).await;
     }
 
     /// Get current RPS setting
     #[allow(dead_code)]
     pub fn rps(&self) -> u64 {
         self.refill_rate
-    }
-}
-
-impl Drop for RateLimiter {
-    fn drop(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
     }
 }
 
@@ -163,6 +155,9 @@ impl LoadTestRunner {
                 false,
             )
             .await;
+            // Warmup requests are intentionally excluded from metrics, so reset
+            // the measurement window before the real test phase begins.
+            self.metrics.reset();
         }
 
         // Main test phase
@@ -219,7 +214,7 @@ impl LoadTestRunner {
 
             let handle = tokio::spawn(async move {
                 while running.load(Ordering::Relaxed) && Instant::now() < deadline {
-                    // Rate limiting
+                    // Rate limiting — token is consumed (forgotten) on acquire
                     if let Some(ref limiter) = rate_limiter {
                         limiter.acquire().await;
                     }
@@ -369,11 +364,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limiter() {
-        let limiter = RateLimiter::new(100);
-        assert_eq!(limiter.rps(), 100);
+        let limiter = RateLimiter::new(20);
+        assert_eq!(limiter.rps(), 20);
 
-        // Should be able to acquire immediately
-        limiter.acquire().await;
+        let start = Instant::now();
+        for _ in 0..5 {
+            limiter.acquire().await;
+        }
+
+        // Five acquires at 20 RPS should take about 200ms end-to-end.
+        // Leave headroom for CI jitter while still catching burst regressions.
+        assert!(start.elapsed() >= Duration::from_millis(150));
     }
 
     #[test]

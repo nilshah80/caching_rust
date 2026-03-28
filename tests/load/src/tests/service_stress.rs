@@ -46,6 +46,7 @@ pub async fn test_spike_load(base_url: &str) -> Result<TestResult> {
 
     // Phase 2: Spike (1000 RPS for 60s)
     println!("Phase 2: Spike load (1000 RPS)...");
+    metrics.reset();
     let spike_config = LoadTestConfig {
         concurrency: 100,
         duration: Duration::from_secs(60),
@@ -59,6 +60,7 @@ pub async fn test_spike_load(base_url: &str) -> Result<TestResult> {
 
     // Phase 3: Recovery (100 RPS for 60s)
     println!("Phase 3: Recovery (100 RPS)...");
+    metrics.reset();
     let recovery_config = LoadTestConfig {
         concurrency: 20,
         duration: Duration::from_secs(60),
@@ -105,6 +107,7 @@ pub async fn test_overload(base_url: &str) -> Result<TestResult> {
 
     for &rps in &rps_levels {
         println!("Testing at {} RPS...", rps);
+        metrics.reset();
 
         let config = LoadTestConfig {
             concurrency: (rps / 10).max(10) as usize,
@@ -165,6 +168,7 @@ pub async fn test_memory_stress(base_url: &str) -> Result<TestResult> {
 
     for (size, label) in value_sizes {
         println!("Testing with {} values...", label);
+        metrics.reset();
 
         let config = LoadTestConfig {
             concurrency: 10,
@@ -218,6 +222,7 @@ pub async fn test_batch_operations(base_url: &str) -> Result<TestResult> {
 
     for batch_size in batch_sizes {
         println!("Testing with batch size {}...", batch_size);
+        metrics.reset();
 
         let config = LoadTestConfig {
             concurrency: 20,
