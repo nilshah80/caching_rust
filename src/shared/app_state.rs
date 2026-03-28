@@ -15,6 +15,7 @@ use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::pubsub_manager::PubSubManager;
+use metrics_exporter_prometheus::PrometheusHandle;
 
 /// Application state shared across all handlers
 #[derive(Clone)]
@@ -88,6 +89,9 @@ pub struct AppState {
 
     /// RedisTimeSeries operations service
     pub timeseries_service: Arc<TimeSeriesService>,
+
+    /// Prometheus metrics handle for rendering /metrics endpoint
+    pub metrics_handle: Option<Arc<PrometheusHandle>>,
 }
 
 impl AppState {
@@ -129,6 +133,11 @@ impl AppState {
         let function_service = Arc::new(FunctionService::new(pool.clone()));
         let timeseries_service = Arc::new(TimeSeriesService::new(pool.clone()));
 
+        // Install Prometheus recorder (None if already installed, e.g. in tests)
+        let metrics_handle = crate::infrastructure::metrics::install_prometheus_recorder()
+            .ok()
+            .map(Arc::new);
+
         Self::new_with_services(
             pool,
             config,
@@ -153,6 +162,7 @@ impl AppState {
             scripting_service,
             function_service,
             timeseries_service,
+            metrics_handle,
         )
     }
 
@@ -182,6 +192,7 @@ impl AppState {
         scripting_service: Arc<ScriptingService>,
         function_service: Arc<FunctionService>,
         timeseries_service: Arc<TimeSeriesService>,
+        metrics_handle: Option<Arc<PrometheusHandle>>,
     ) -> Self {
         Self {
             pool,
@@ -207,6 +218,7 @@ impl AppState {
             scripting_service,
             function_service,
             timeseries_service,
+            metrics_handle,
         }
     }
 }
@@ -308,6 +320,7 @@ mod tests {
             scripting_service.clone(),
             function_service,
             timeseries_service,
+            None,
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);

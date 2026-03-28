@@ -2868,16 +2868,35 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   - Docker image build and push
   - Release automation
 
-### 9.3 Production Readiness
-- [ ] **Task 9.3.1**: Add metrics endpoint (Prometheus format)
-  - Connection pool metrics
-  - Pub/Sub subscription metrics
-  - Request latency histograms
-  - Error counters
-- [ ] **Task 9.3.2**: Implement rate limiting
-- [ ] **Task 9.3.3**: Add request size limits
-- [ ] **Task 9.3.4**: Security audit
-- [ ] **Task 9.3.5**: Load testing
+### 9.3 Production Readiness ✅
+- [x] **Task 9.3.1**: Add metrics endpoint (Prometheus format)
+  - `GET /metrics` endpoint with Prometheus text exposition format
+  - Connection pool metrics (size, available, max, waiting, failed checkouts)
+  - Pub/Sub subscription metrics (active, max, created, messages, errors)
+  - HTTP request latency histograms (`http_request_duration_seconds`)
+  - HTTP request counters by method/path/status (`http_requests_total`)
+  - Path normalization to reduce metric cardinality
+  - Uses `metrics` + `metrics-exporter-prometheus` crates
+- [x] **Task 9.3.2**: Implement rate limiting
+  - Global token-bucket rate limiter using `governor` crate
+  - Configurable via `RATE_LIMIT__REQUESTS_PER_SECOND` (default: 100) and `RATE_LIMIT__BURST_SIZE` (default: 50)
+  - Returns 429 Too Many Requests with `Retry-After` header
+  - Can be disabled via `RATE_LIMIT__ENABLED=false`
+- [x] **Task 9.3.3**: Add request size limits
+  - Request body size limit via `DefaultBodyLimit` middleware (default: 10MB)
+  - Batch operation size limits enforced in handlers (`max_batch_size`: 1000)
+  - String value size limits enforced (`max_value_size_bytes`: 512KB)
+  - All configurable via environment variables
+- [x] **Task 9.3.4**: Security audit
+  - CORS tightened: explicit allowed methods (GET/POST/PUT/PATCH/DELETE/OPTIONS) and headers
+  - Security response headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Cache-Control: no-store`
+  - Startup warning when admin API key uses default value
+  - `unsafe_code = "forbid"` lint already enforced
+  - Clippy security lints enabled (unwrap_used, expect_used, panic, mem_forget)
+- [x] **Task 9.3.5**: Load testing
+  - Load test framework in `tests/load/` with service and Redis stress tests
+  - Rate limiter verified under parallel load (429s returned correctly)
+  - All 1028 tests passing (1010 main + 18 load test crate)
 
 ---
 

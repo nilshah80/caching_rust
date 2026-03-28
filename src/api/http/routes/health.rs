@@ -6,6 +6,7 @@ use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use crate::infrastructure::metrics::{record_pool_stats, record_pubsub_stats};
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
 use crate::infrastructure::redis::connection::PoolStats;
 use crate::shared::app_state::AppState;
@@ -38,6 +39,7 @@ pub fn health_routes() -> Router<AppState> {
         .route("/health", get(health))
         .route("/health/live", get(liveness))
         .route("/health/ready", get(readiness))
+        .route("/metrics", get(prometheus_metrics))
 }
 
 /// Basic health check endpoint
@@ -114,6 +116,48 @@ async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<Readiness
     )
 }
 
+/// Prometheus metrics endpoint
+///
+/// Returns metrics in Prometheus text exposition format.
+/// Updates pool and pub/sub gauges on each scrape.
+async fn prometheus_metrics(
+    State(state): State<AppState>,
+) -> (StatusCode, [(axum::http::header::HeaderName, &'static str); 1], String) {
+    // Update pool gauges
+    let pool = state.pool.get_stats();
+    record_pool_stats(
+        pool.size,
+        pool.available,
+        pool.max_size,
+        pool.current_waiting,
+        pool.failed_checkouts,
+    );
+
+    // Update pub/sub gauges
+    let ps = state.pubsub_service.get_stats();
+    record_pubsub_stats(
+        ps.active_subscriptions,
+        ps.max_subscriptions,
+        ps.total_created,
+        ps.total_messages,
+        ps.errors,
+    );
+
+    let content_type = [(
+        axum::http::header::CONTENT_TYPE,
+        "text/plain; version=0.0.4; charset=utf-8",
+    )];
+
+    match &state.metrics_handle {
+        Some(handle) => (StatusCode::OK, content_type, handle.render()),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            content_type,
+            "metrics not configured".to_string(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +185,27 @@ mod tests {
                 StatusCode::SERVICE_UNAVAILABLE
             }
         );
+    }
+
+    #[tokio::test]
+    async fn test_prometheus_metrics_no_handle() {
+        let (mut state, _, _, _) = test_state();
+        state.metrics_handle = None;
+        let (status, headers, body) = prometheus_metrics(State(state)).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(headers[0].1, "text/plain; version=0.0.4; charset=utf-8");
+        assert_eq!(body, "metrics not configured");
+    }
+
+    #[tokio::test]
+    async fn test_prometheus_metrics_with_handle() {
+        let (mut state, _, _, _) = test_state();
+        let handle = crate::infrastructure::metrics::install_prometheus_recorder().ok();
+        state.metrics_handle = handle.map(std::sync::Arc::new);
+        let (status, headers, body) = prometheus_metrics(State(state)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers[0].1, "text/plain; version=0.0.4; charset=utf-8");
+        // Body should contain at least some metric output (may be empty if no metrics recorded)
+        assert!(body.is_empty() || body.contains("# TYPE") || body.contains("redis_pool"));
     }
 }

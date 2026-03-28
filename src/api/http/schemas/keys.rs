@@ -501,4 +501,26 @@ mod tests {
         let result = req.validate();
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_sort_order_desc_conversion() {
+        let order: crate::domain::repositories::SortOrder = SortOrderSchema::Desc.into();
+        assert!(matches!(order, crate::domain::repositories::SortOrder::Desc));
+    }
+
+    #[test]
+    fn test_sort_request_into_sort_options_with_limit() {
+        let req = SortRequest {
+            by: Some("weight_*".to_string()),
+            get: vec!["#".to_string()],
+            offset: Some(10),
+            count: Some(5),
+            order: SortOrderSchema::Desc,
+            alpha: true,
+        };
+        let opts = req.into_sort_options();
+        assert_eq!(opts.limit, Some((10, 5)));
+        assert!(opts.alpha);
+        assert!(matches!(opts.order, crate::domain::repositories::SortOrder::Desc));
+    }
 }

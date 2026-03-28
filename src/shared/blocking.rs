@@ -82,6 +82,12 @@ mod tests {
     }
 
     #[test]
+    fn test_default_trait_impl() {
+        let enforcer = BlockingTimeoutEnforcer::default();
+        assert_eq!(enforcer.max_timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
     fn test_enforce_clamps_zero_to_min() {
         let enforcer = BlockingTimeoutEnforcer::new();
         assert_eq!(enforcer.enforce(Duration::ZERO), Duration::from_secs(1));

@@ -7,7 +7,7 @@ use redis_caching_service::infrastructure::redis::connection::InstrumentedPool;
 use redis_caching_service::shared::app_state::AppState;
 
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,6 +28,11 @@ async fn main() -> anyhow::Result<()> {
     // Detect Redis capabilities
     let capabilities = pool.detect_capabilities().await?;
     info!(?capabilities, "Redis capabilities detected");
+
+    // Security warnings
+    if settings.admin.api_key == "changeme-admin-key" {
+        warn!("Admin API key is set to the default value — change ADMIN__API_KEY before deploying to production");
+    }
 
     // Create application state
     let state = AppState::new(

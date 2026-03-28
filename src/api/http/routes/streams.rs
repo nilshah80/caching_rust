@@ -1489,6 +1489,7 @@ mod tests {
             scripting_service,
             function_service,
             timeseries_service,
+            None,
         )
     }
 
@@ -2260,6 +2261,7 @@ mod tests {
             scripting_service,
             function_service,
             timeseries_service,
+            None,
         )
     }
 

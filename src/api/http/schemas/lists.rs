@@ -356,6 +356,11 @@ mod tests {
     }
 
     #[test]
+    fn test_default_poll_seconds() {
+        assert_eq!(default_poll_seconds(), Some(5));
+    }
+
+    #[test]
     fn test_blocking_pop_request_serialization() {
         let req = BlockingPopRequest {
             keys: vec!["list1".to_string(), "list2".to_string()],

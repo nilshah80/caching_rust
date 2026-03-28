@@ -15,6 +15,7 @@ pub struct Settings {
     pub blocking: BlockingConfig,
     pub admin: AdminConfig,
     pub log: LogConfig,
+    pub rate_limit: RateLimitConfig,
 }
 
 /// HTTP Server configuration
@@ -43,6 +44,12 @@ pub struct ServerConfig {
     /// Maximum string value size in bytes (default: 512KB)
     #[serde(default = "default_max_value_size")]
     pub max_value_size_bytes: usize,
+
+    /// Allowed CORS origins (comma-separated). Use "*" to allow any origin.
+    /// Default: "*" (permissive, suitable for development only).
+    /// Example: "https://app.example.com,https://admin.example.com"
+    #[serde(default = "default_cors_origins")]
+    pub cors_origins: String,
 }
 
 /// Redis connection configuration
@@ -144,6 +151,22 @@ pub struct AdminConfig {
     pub api_key: String,
 }
 
+/// Rate limiting configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct RateLimitConfig {
+    /// Enable rate limiting (default: true)
+    #[serde(default = "default_rate_limit_enabled")]
+    pub enabled: bool,
+
+    /// Maximum requests per second (global, shared across all clients) (default: 100)
+    #[serde(default = "default_rate_limit_rps")]
+    pub requests_per_second: u64,
+
+    /// Burst size (default: 50)
+    #[serde(default = "default_rate_limit_burst")]
+    pub burst_size: u32,
+}
+
 /// Logging configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct LogConfig {
@@ -179,6 +202,10 @@ fn default_max_batch_size() -> usize {
 
 fn default_max_value_size() -> usize {
     512 * 1024 // 512KB
+}
+
+fn default_cors_origins() -> String {
+    "*".to_string()
 }
 
 fn default_redis_url() -> String {
@@ -231,6 +258,18 @@ fn default_stream_read_count() -> usize {
     100
 }
 
+fn default_rate_limit_enabled() -> bool {
+    true
+}
+
+fn default_rate_limit_rps() -> u64 {
+    100
+}
+
+fn default_rate_limit_burst() -> u32 {
+    50
+}
+
 fn default_log_level() -> String {
     "info".to_string()
 }
@@ -248,6 +287,7 @@ impl Default for ServerConfig {
             max_body_size_bytes: default_max_body_size(),
             max_batch_size: default_max_batch_size(),
             max_value_size_bytes: default_max_value_size(),
+            cors_origins: default_cors_origins(),
         }
     }
 }
@@ -299,6 +339,16 @@ impl Default for BlockingConfig {
     }
 }
 
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_rate_limit_enabled(),
+            requests_per_second: default_rate_limit_rps(),
+            burst_size: default_rate_limit_burst(),
+        }
+    }
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
@@ -330,6 +380,7 @@ impl Settings {
             .set_default("server.max_body_size_bytes", 10 * 1024 * 1024)?
             .set_default("server.max_batch_size", 1000)?
             .set_default("server.max_value_size_bytes", 512 * 1024)?
+            .set_default("server.cors_origins", "*")?
             .set_default("redis.url", "redis://localhost:6379")?
             .set_default("redis.database", 0)?
             .set_default("redis.tls_enabled", false)?
@@ -346,6 +397,9 @@ impl Settings {
             .set_default("blocking.max_sse_connections", 5)?
             .set_default("blocking.default_stream_read_count", 100)?
             .set_default("admin.api_key", "changeme-admin-key")?
+            .set_default("rate_limit.enabled", true)?
+            .set_default("rate_limit.requests_per_second", 100)?
+            .set_default("rate_limit.burst_size", 50)?
             .set_default("log.level", "info")?
             .set_default("log.format", "json")?
             // Load from environment with double underscore separator for nested config
@@ -354,7 +408,23 @@ impl Settings {
             .build()?;
 
         let settings: Settings = config.try_deserialize()?;
+        settings.validate()?;
         Ok(settings)
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        if self.rate_limit.enabled {
+            anyhow::ensure!(
+                self.rate_limit.requests_per_second > 0,
+                "rate_limit.requests_per_second must be greater than 0 when rate limiting is enabled"
+            );
+            anyhow::ensure!(
+                self.rate_limit.burst_size > 0,
+                "rate_limit.burst_size must be greater than 0 when rate limiting is enabled"
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -401,6 +471,56 @@ mod tests {
         let config = PubSubConfig::default();
         assert_eq!(config.max_subscriptions, 100);
         assert_eq!(config.connection_timeout_ms, 30000);
+    }
+
+    #[test]
+    fn test_validate_rejects_zero_rate_limit_rps_when_enabled() {
+        let settings = Settings {
+            rate_limit: RateLimitConfig {
+                enabled: true,
+                requests_per_second: 0,
+                burst_size: 50,
+            },
+            ..Settings::default()
+        };
+
+        let err = settings.validate().expect_err("validation should fail");
+        assert!(
+            err.to_string()
+                .contains("rate_limit.requests_per_second must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_zero_rate_limit_burst_when_enabled() {
+        let settings = Settings {
+            rate_limit: RateLimitConfig {
+                enabled: true,
+                requests_per_second: 100,
+                burst_size: 0,
+            },
+            ..Settings::default()
+        };
+
+        let err = settings.validate().expect_err("validation should fail");
+        assert!(
+            err.to_string()
+                .contains("rate_limit.burst_size must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn test_validate_allows_zero_values_when_rate_limit_disabled() {
+        let settings = Settings {
+            rate_limit: RateLimitConfig {
+                enabled: false,
+                requests_per_second: 0,
+                burst_size: 0,
+            },
+            ..Settings::default()
+        };
+
+        settings.validate().expect("validation should pass");
     }
 
     #[test]

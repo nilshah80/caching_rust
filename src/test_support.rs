@@ -1,4 +1,3 @@
-#![cfg(test)]
 #![allow(dead_code, clippy::needless_range_loop)]
 
 use std::collections::HashMap;
@@ -2493,6 +2492,7 @@ pub fn test_state_with_all_repos_and_config(
         scripting_service,
         function_service,
         timeseries_service,
+        None,
     )
 }
 

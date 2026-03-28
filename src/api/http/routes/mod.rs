@@ -49,13 +49,17 @@ pub use transactions::transaction_routes;
 use crate::shared::app_state::AppState;
 use axum::Router;
 
+/// Build operational routes that must be exempt from rate limiting
+/// (health probes, metrics, liveness/readiness for Kubernetes).
+pub fn operational_routes() -> Router<AppState> {
+    health_routes()
+}
+
 /// Build the complete API router based on detected capabilities
 pub fn build_router(state: AppState) -> Router {
     let capabilities = state.capabilities.clone();
 
     let mut router = Router::new()
-        // Always available - health checks
-        .merge(health_routes())
         // Always available - core Redis types
         .merge(string_routes())
         // Hash operations
@@ -139,7 +143,8 @@ mod tests {
     #[tokio::test]
     async fn test_build_router_health() {
         let (state, _) = test_state_with_json_repo();
-        let app = build_router(state);
+        // Health routes are in operational_routes(), not build_router()
+        let app = operational_routes().with_state(state);
         let response = app
             .oneshot(
                 Request::builder()

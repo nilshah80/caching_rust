@@ -548,6 +548,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_default_zpop_poll_seconds() {
+        assert_eq!(default_zpop_poll_seconds(), Some(5));
+    }
+
+    #[test]
     fn test_zadd_request() {
         let json = r#"{"members": [{"member": "a", "score": 1.0}, {"member": "b", "score": 2.0}]}"#;
         let req: ZAddRequest = serde_json::from_str(json).unwrap();

@@ -10,13 +10,19 @@ use axum::extract::DefaultBodyLimit;
 #[cfg(not(test))]
 use axum::http::StatusCode;
 #[cfg(not(test))]
+use axum::Router;
+#[cfg(not(test))]
 use tokio::net::TcpListener;
 #[cfg(not(test))]
 use tokio::signal;
 #[cfg(not(test))]
 use tower::ServiceBuilder;
 #[cfg(not(test))]
-use tower_http::cors::{Any, CorsLayer};
+use axum::http::{HeaderValue, Method, header};
+#[cfg(not(test))]
+use tower_http::cors::CorsLayer;
+#[cfg(not(test))]
+use tower_http::set_header::SetResponseHeaderLayer;
 #[cfg(not(test))]
 use tower_http::timeout::TimeoutLayer;
 #[cfg(not(test))]
@@ -25,7 +31,14 @@ use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 
 #[cfg(not(test))]
-use crate::api::http::routes::build_router;
+use axum::middleware as axum_mw;
+
+#[cfg(not(test))]
+use crate::api::http::middleware::metrics_middleware;
+#[cfg(not(test))]
+use crate::api::http::middleware::rate_limit::{create_rate_limiter, rate_limit_middleware};
+#[cfg(not(test))]
+use crate::api::http::routes::{build_router, operational_routes};
 use crate::infrastructure::config::ServerConfig;
 use crate::shared::app_state::AppState;
 
@@ -38,33 +51,94 @@ use crate::shared::app_state::AppState;
 /// - The server encounters a fatal error during operation
 #[cfg(not(test))]
 pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
-    // Build the router with all routes
-    let app = build_router(state.clone());
+    // Build API routes (rate-limited) and operational routes (exempt)
+    let mut api_router = build_router(state.clone());
+    let rate_limit = &state.config.rate_limit;
+    if rate_limit.enabled {
+        let limiter = create_rate_limiter(rate_limit.requests_per_second, rate_limit.burst_size);
+        api_router = api_router.layer(axum_mw::from_fn_with_state(limiter, rate_limit_middleware));
+    }
+
+    // Health/metrics/readiness are never rate-limited — Kubernetes probes
+    // and Prometheus scrapes must always succeed, especially under load.
+    let app = Router::new()
+        .merge(operational_routes().with_state(state.clone()))
+        .merge(api_router);
 
     // Add middleware
-    let app = app.layer(
-        ServiceBuilder::new()
-            // Add request body size limit (prevents OOM from large payloads)
-            .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
-            // Add tracing
-            .layer(TraceLayer::new_for_http())
-            // Add request timeout (returns 408 Request Timeout on timeout)
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                Duration::from_millis(config.request_timeout_ms),
-            ))
-            // Add CORS
-            .layer(
-                CorsLayer::new()
-                    .allow_origin(Any)
-                    .allow_methods(Any)
-                    .allow_headers(Any),
-            ),
-    );
+    let app = app
+        .layer(axum_mw::from_fn(metrics_middleware))
+        .layer(
+            ServiceBuilder::new()
+                // Add request body size limit (prevents OOM from large payloads)
+                .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
+                // Add tracing
+                .layer(TraceLayer::new_for_http())
+                // Add request timeout (returns 408 Request Timeout on timeout)
+                .layer(TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    Duration::from_millis(config.request_timeout_ms),
+                ))
+                // Add CORS (origin is configurable via SERVER__CORS_ORIGINS)
+                .layer({
+                    let cors = CorsLayer::new()
+                        .allow_methods([
+                            Method::GET,
+                            Method::POST,
+                            Method::PUT,
+                            Method::PATCH,
+                            Method::DELETE,
+                            Method::OPTIONS,
+                        ])
+                        .allow_headers([
+                            header::CONTENT_TYPE,
+                            header::AUTHORIZATION,
+                            header::ACCEPT,
+                            header::HeaderName::from_static("x-admin-api-key"),
+                            header::HeaderName::from_static("x-request-id"),
+                        ]);
+
+                    if config.cors_origins == "*" {
+                        cors.allow_origin(tower_http::cors::Any)
+                    } else {
+                        let origins: Vec<HeaderValue> = config
+                            .cors_origins
+                            .split(',')
+                            .filter_map(|o| o.trim().parse().ok())
+                            .collect();
+                        cors.allow_origin(origins)
+                    }
+                })
+                // Security headers
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::X_CONTENT_TYPE_OPTIONS,
+                    HeaderValue::from_static("nosniff"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::HeaderName::from_static("x-frame-options"),
+                    HeaderValue::from_static("DENY"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::HeaderName::from_static("x-xss-protection"),
+                    HeaderValue::from_static("1; mode=block"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store"),
+                )),
+        );
+
+    if config.cors_origins == "*" {
+        warn!("CORS allows any origin — set SERVER__CORS_ORIGINS for production");
+    }
 
     info!(
         max_body_size_mb = config.max_body_size_bytes / 1024 / 1024,
         max_batch_size = config.max_batch_size,
+        rate_limit_rps = state.config.rate_limit.requests_per_second,
+        rate_limit_burst = state.config.rate_limit.burst_size,
+        rate_limit_enabled = state.config.rate_limit.enabled,
+        cors_origins = %config.cors_origins,
         "Request limits configured"
     );
 
