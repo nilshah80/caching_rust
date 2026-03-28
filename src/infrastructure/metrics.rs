@@ -14,7 +14,8 @@ use std::time::Duration;
 /// # Errors
 ///
 /// Returns an error if the recorder has already been installed.
-pub fn install_prometheus_recorder() -> Result<PrometheusHandle, metrics_exporter_prometheus::BuildError> {
+pub fn install_prometheus_recorder()
+-> Result<PrometheusHandle, metrics_exporter_prometheus::BuildError> {
     PrometheusBuilder::new().install_recorder()
 }
 

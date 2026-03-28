@@ -35,7 +35,9 @@ pub async fn rate_limit_middleware(
         Ok(_) => next.run(request).await,
         Err(_not_until) => {
             let retry_after = _not_until
-                .wait_time_from(governor::clock::Clock::now(&governor::clock::DefaultClock::default()))
+                .wait_time_from(governor::clock::Clock::now(
+                    &governor::clock::DefaultClock::default(),
+                ))
                 .as_secs()
                 .max(1);
             (
@@ -51,11 +53,11 @@ pub async fn rate_limit_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::Router;
     use axum::body::Body;
     use axum::http::Request;
     use axum::middleware as axum_mw;
     use axum::routing::get;
-    use axum::Router;
     use tower::ServiceExt;
 
     #[test]

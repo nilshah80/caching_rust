@@ -122,7 +122,11 @@ async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<Readiness
 /// Updates pool and pub/sub gauges on each scrape.
 async fn prometheus_metrics(
     State(state): State<AppState>,
-) -> (StatusCode, [(axum::http::header::HeaderName, &'static str); 1], String) {
+) -> (
+    StatusCode,
+    [(axum::http::header::HeaderName, &'static str); 1],
+    String,
+) {
     // Update pool gauges
     let pool = state.pool.get_stats();
     record_pool_stats(

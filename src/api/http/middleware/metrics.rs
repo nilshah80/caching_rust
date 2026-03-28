@@ -34,9 +34,21 @@ fn normalize_path(path: &str) -> String {
 
     // Known API prefixes that have a dynamic key segment
     let api_prefixes = [
-        "strings", "hashes", "lists", "sets", "sorted-sets", "bitmaps",
-        "geo", "json", "bloom", "streams", "keys", "timeseries",
-        "cms", "topk", "hyperloglog",
+        "strings",
+        "hashes",
+        "lists",
+        "sets",
+        "sorted-sets",
+        "bitmaps",
+        "geo",
+        "json",
+        "bloom",
+        "streams",
+        "keys",
+        "timeseries",
+        "cms",
+        "topk",
+        "hyperloglog",
     ];
 
     let mut normalized = Vec::with_capacity(parts.len());
@@ -99,11 +111,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_middleware_passes_through() {
+        use axum::Router;
         use axum::body::Body;
         use axum::http::Request;
         use axum::middleware as axum_mw;
         use axum::routing::get;
-        use axum::Router;
         use tower::ServiceExt;
 
         let app = Router::new()

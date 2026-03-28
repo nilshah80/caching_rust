@@ -6,19 +6,19 @@
 use std::time::Duration;
 
 #[cfg(not(test))]
+use axum::Router;
+#[cfg(not(test))]
 use axum::extract::DefaultBodyLimit;
 #[cfg(not(test))]
 use axum::http::StatusCode;
 #[cfg(not(test))]
-use axum::Router;
+use axum::http::{HeaderValue, Method, header};
 #[cfg(not(test))]
 use tokio::net::TcpListener;
 #[cfg(not(test))]
 use tokio::signal;
 #[cfg(not(test))]
 use tower::ServiceBuilder;
-#[cfg(not(test))]
-use axum::http::{HeaderValue, Method, header};
 #[cfg(not(test))]
 use tower_http::cors::CorsLayer;
 #[cfg(not(test))]
@@ -66,67 +66,65 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
         .merge(api_router);
 
     // Add middleware
-    let app = app
-        .layer(axum_mw::from_fn(metrics_middleware))
-        .layer(
-            ServiceBuilder::new()
-                // Add request body size limit (prevents OOM from large payloads)
-                .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
-                // Add tracing
-                .layer(TraceLayer::new_for_http())
-                // Add request timeout (returns 408 Request Timeout on timeout)
-                .layer(TimeoutLayer::with_status_code(
-                    StatusCode::REQUEST_TIMEOUT,
-                    Duration::from_millis(config.request_timeout_ms),
-                ))
-                // Add CORS (origin is configurable via SERVER__CORS_ORIGINS)
-                .layer({
-                    let cors = CorsLayer::new()
-                        .allow_methods([
-                            Method::GET,
-                            Method::POST,
-                            Method::PUT,
-                            Method::PATCH,
-                            Method::DELETE,
-                            Method::OPTIONS,
-                        ])
-                        .allow_headers([
-                            header::CONTENT_TYPE,
-                            header::AUTHORIZATION,
-                            header::ACCEPT,
-                            header::HeaderName::from_static("x-admin-api-key"),
-                            header::HeaderName::from_static("x-request-id"),
-                        ]);
+    let app = app.layer(axum_mw::from_fn(metrics_middleware)).layer(
+        ServiceBuilder::new()
+            // Add request body size limit (prevents OOM from large payloads)
+            .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
+            // Add tracing
+            .layer(TraceLayer::new_for_http())
+            // Add request timeout (returns 408 Request Timeout on timeout)
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                Duration::from_millis(config.request_timeout_ms),
+            ))
+            // Add CORS (origin is configurable via SERVER__CORS_ORIGINS)
+            .layer({
+                let cors = CorsLayer::new()
+                    .allow_methods([
+                        Method::GET,
+                        Method::POST,
+                        Method::PUT,
+                        Method::PATCH,
+                        Method::DELETE,
+                        Method::OPTIONS,
+                    ])
+                    .allow_headers([
+                        header::CONTENT_TYPE,
+                        header::AUTHORIZATION,
+                        header::ACCEPT,
+                        header::HeaderName::from_static("x-admin-api-key"),
+                        header::HeaderName::from_static("x-request-id"),
+                    ]);
 
-                    if config.cors_origins == "*" {
-                        cors.allow_origin(tower_http::cors::Any)
-                    } else {
-                        let origins: Vec<HeaderValue> = config
-                            .cors_origins
-                            .split(',')
-                            .filter_map(|o| o.trim().parse().ok())
-                            .collect();
-                        cors.allow_origin(origins)
-                    }
-                })
-                // Security headers
-                .layer(SetResponseHeaderLayer::overriding(
-                    header::X_CONTENT_TYPE_OPTIONS,
-                    HeaderValue::from_static("nosniff"),
-                ))
-                .layer(SetResponseHeaderLayer::overriding(
-                    header::HeaderName::from_static("x-frame-options"),
-                    HeaderValue::from_static("DENY"),
-                ))
-                .layer(SetResponseHeaderLayer::overriding(
-                    header::HeaderName::from_static("x-xss-protection"),
-                    HeaderValue::from_static("1; mode=block"),
-                ))
-                .layer(SetResponseHeaderLayer::overriding(
-                    header::CACHE_CONTROL,
-                    HeaderValue::from_static("no-store"),
-                )),
-        );
+                if config.cors_origins == "*" {
+                    cors.allow_origin(tower_http::cors::Any)
+                } else {
+                    let origins: Vec<HeaderValue> = config
+                        .cors_origins
+                        .split(',')
+                        .filter_map(|o| o.trim().parse().ok())
+                        .collect();
+                    cors.allow_origin(origins)
+                }
+            })
+            // Security headers
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("x-frame-options"),
+                HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::HeaderName::from_static("x-xss-protection"),
+                HeaderValue::from_static("1; mode=block"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store"),
+            )),
+    );
 
     if config.cors_origins == "*" {
         warn!("CORS allows any origin — set SERVER__CORS_ORIGINS for production");

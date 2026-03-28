@@ -505,7 +505,10 @@ mod tests {
     #[test]
     fn test_sort_order_desc_conversion() {
         let order: crate::domain::repositories::SortOrder = SortOrderSchema::Desc.into();
-        assert!(matches!(order, crate::domain::repositories::SortOrder::Desc));
+        assert!(matches!(
+            order,
+            crate::domain::repositories::SortOrder::Desc
+        ));
     }
 
     #[test]
@@ -521,6 +524,9 @@ mod tests {
         let opts = req.into_sort_options();
         assert_eq!(opts.limit, Some((10, 5)));
         assert!(opts.alpha);
-        assert!(matches!(opts.order, crate::domain::repositories::SortOrder::Desc));
+        assert!(matches!(
+            opts.order,
+            crate::domain::repositories::SortOrder::Desc
+        ));
     }
 }

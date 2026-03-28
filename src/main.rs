@@ -31,7 +31,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Security warnings
     if settings.admin.api_key == "changeme-admin-key" {
-        warn!("Admin API key is set to the default value — change ADMIN__API_KEY before deploying to production");
+        warn!(
+            "Admin API key is set to the default value — change ADMIN__API_KEY before deploying to production"
+        );
     }
 
     // Create application state
