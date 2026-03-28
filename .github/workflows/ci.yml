@@ -31,8 +31,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - name: Run clippy (release profile)
+        run: cargo clippy --all-targets --all-features --locked --release -- -D warnings
 
   test:
     name: Test
