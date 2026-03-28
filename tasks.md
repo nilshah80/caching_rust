@@ -2845,13 +2845,13 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 
 ## Phase 9: Documentation & Deployment
 
-### 9.1 Documentation
-- [ ] **Task 9.1.1**: Write README.md with usage instructions
-- [ ] **Task 9.1.2**: Write API documentation
-- [ ] **Task 9.1.3**: Write configuration guide
-- [ ] **Task 9.1.4**: Write deployment guide
-- [ ] **Task 9.1.5**: Create example client code
-- [ ] **Task 9.1.6**: Document architectural decisions (blocking, pub/sub, transactions)
+### 9.1 Documentation ✅
+- [x] **Task 9.1.1**: Write README.md with usage instructions
+- [x] **Task 9.1.2**: Write API documentation
+- [x] **Task 9.1.3**: Write configuration guide
+- [x] **Task 9.1.4**: Write deployment guide
+- [x] **Task 9.1.5**: Create example client code
+- [x] **Task 9.1.6**: Document architectural decisions (blocking, pub/sub, transactions)
 
 ### 9.2 Docker & Deployment
 - [ ] **Task 9.2.1**: Optimize Dockerfile for production
