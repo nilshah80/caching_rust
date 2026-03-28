@@ -5,6 +5,7 @@
 mod admin_repo;
 mod bitmap_repo;
 mod bloom_repo;
+mod function_repo;
 mod geo_repo;
 mod hash_repo;
 mod json_repo;
@@ -17,10 +18,12 @@ mod set_repo;
 mod sorted_set_repo;
 mod stream_repo;
 mod string_repo;
+mod timeseries_repo;
 
 pub use admin_repo::RedisAdminRepository;
 pub use bitmap_repo::RedisBitMapRepository;
 pub use bloom_repo::RedisBloomRepository;
+pub use function_repo::RedisFunctionRepository;
 pub use geo_repo::RedisGeoRepository;
 pub use hash_repo::RedisHashRepository;
 pub use json_repo::RedisJsonRepository;
@@ -33,3 +36,4 @@ pub use set_repo::RedisSetRepository;
 pub use sorted_set_repo::RedisSortedSetRepository;
 pub use stream_repo::RedisStreamRepository;
 pub use string_repo::RedisStringRepository;
+pub use timeseries_repo::RedisTimeSeriesRepository;

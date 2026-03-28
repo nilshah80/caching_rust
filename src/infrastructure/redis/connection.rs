@@ -77,7 +77,7 @@ pub struct InstrumentedPool {
     inner: Pool,
     metrics: Arc<PoolMetrics>,
     max_size: usize,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     allow_get: bool,
 }
 
@@ -135,7 +135,7 @@ impl InstrumentedPool {
             inner: pool,
             metrics: Arc::new(PoolMetrics::default()),
             max_size: pool_config.max_size as usize,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-utils"))]
             allow_get: true,
         })
     }
@@ -170,7 +170,7 @@ impl InstrumentedPool {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn new_for_tests_with_url(redis_url: &str) -> Result<Self, CacheError> {
         let cfg = Config::from_url(redis_url);
         let pool = cfg
@@ -289,7 +289,7 @@ impl InstrumentedPool {
     }
 
     /// Get a connection from the pool with instrumentation
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-utils")))]
     pub async fn get(&self) -> Result<Connection, CacheError> {
         self.metrics.current_waiting.fetch_add(1, Ordering::Relaxed);
         self.metrics
@@ -320,7 +320,7 @@ impl InstrumentedPool {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn get(&self) -> Result<Connection, CacheError> {
         if !self.allow_get {
             return Err(CacheError::PoolError(

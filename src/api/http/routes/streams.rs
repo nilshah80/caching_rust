@@ -1455,6 +1455,12 @@ mod tests {
         let scripting_service = Arc::new(crate::application::services::ScriptingService::new(
             pool.clone(),
         ));
+        let function_service = Arc::new(crate::application::services::FunctionService::new(
+            pool.clone(),
+        ));
+        let timeseries_service = Arc::new(crate::application::services::TimeSeriesService::new(
+            pool.clone(),
+        ));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(
             config.blocking.max_sse_connections,
         ));
@@ -1481,6 +1487,8 @@ mod tests {
             pubsub_service,
             transaction_service,
             scripting_service,
+            function_service,
+            timeseries_service,
         )
     }
 
@@ -2220,6 +2228,12 @@ mod tests {
         let scripting_service = Arc::new(crate::application::services::ScriptingService::new(
             pool.clone(),
         ));
+        let function_service = Arc::new(crate::application::services::FunctionService::new(
+            pool.clone(),
+        ));
+        let timeseries_service = Arc::new(crate::application::services::TimeSeriesService::new(
+            pool.clone(),
+        ));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(max_sse));
 
         AppState::new_with_services(
@@ -2244,6 +2258,8 @@ mod tests {
             pubsub_service,
             transaction_service,
             scripting_service,
+            function_service,
+            timeseries_service,
         )
     }
 

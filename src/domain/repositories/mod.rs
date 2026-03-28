@@ -5,6 +5,7 @@
 mod admin_repository;
 mod bitmap_repository;
 mod bloom_repository;
+mod function_repository;
 mod geo_repository;
 mod hash_repository;
 mod json_repository;
@@ -17,6 +18,7 @@ mod set_repository;
 mod sorted_set_repository;
 mod stream_repository;
 mod string_repository;
+mod timeseries_repository;
 
 pub use admin_repository::AdminRepository;
 pub use bitmap_repository::{
@@ -24,6 +26,7 @@ pub use bitmap_repository::{
     BitfieldResult,
 };
 pub use bloom_repository::BloomRepository;
+pub use function_repository::{FunctionFlushMode, FunctionRepository, FunctionRestorePolicy};
 pub use geo_repository::{
     GeoAddOptions, GeoAddResult, GeoMember, GeoPosition, GeoRepository, GeoSearchCenter,
     GeoSearchOptions, GeoSearchResult, GeoSearchShape, GeoSearchStoreResult, GeoSortOrder, GeoUnit,
@@ -44,3 +47,7 @@ pub use sorted_set_repository::{
 };
 pub use stream_repository::StreamRepository;
 pub use string_repository::{LcsMatch, LcsMatchResult, LcsOptions, LcsResult, StringRepository};
+pub use timeseries_repository::{
+    TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
+    TimeSeriesRepository, TimeSeriesSample, TsAggregation, TsDuplicatePolicy,
+};

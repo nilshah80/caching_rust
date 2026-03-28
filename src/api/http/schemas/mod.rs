@@ -5,6 +5,7 @@
 pub mod bitmaps;
 pub mod bloom;
 pub mod common;
+pub mod functions;
 pub mod geo;
 pub mod hashes;
 pub mod json;
@@ -18,11 +19,13 @@ pub mod sets;
 pub mod sorted_sets;
 pub mod streams;
 pub mod strings;
+pub mod timeseries;
 pub mod transactions;
 
 pub use bitmaps::*;
 pub use bloom::*;
 pub use common::*;
+pub use functions::*;
 pub use geo::*;
 pub use hashes::*;
 pub use json::*;
@@ -36,4 +39,5 @@ pub use sets::*;
 pub use sorted_sets::*;
 pub use streams::*;
 pub use strings::*;
+pub use timeseries::*;
 pub use transactions::*;

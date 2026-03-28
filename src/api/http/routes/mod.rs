@@ -5,6 +5,7 @@
 mod admin;
 mod bitmaps;
 mod bloom;
+mod functions;
 mod geo;
 mod hashes;
 mod health;
@@ -20,11 +21,13 @@ mod sets;
 mod sorted_sets;
 mod streams;
 mod strings;
+mod timeseries;
 mod transactions;
 
 pub use admin::admin_routes;
 pub use bitmaps::bitmap_routes;
 pub use bloom::bloom_routes;
+pub use functions::functions_routes;
 pub use geo::geo_routes;
 pub use hashes::hash_routes;
 pub use health::health_routes;
@@ -40,6 +43,7 @@ pub use sets::set_routes;
 pub use sorted_sets::sorted_set_routes;
 pub use streams::{stream_admin_routes, stream_routes};
 pub use strings::string_routes;
+pub use timeseries::timeseries_routes;
 pub use transactions::transaction_routes;
 
 use crate::shared::app_state::AppState;
@@ -109,10 +113,13 @@ pub fn build_router(state: AppState) -> Router {
     // Scripting is always available (core Redis)
     router = router.merge(scripting_routes());
 
-    // TODO: Add more routes as they are implemented
-    // Conditionally add routes based on capabilities:
-    // - timeseries_routes() (requires RedisTimeSeries module)
-    // - functions_routes() (Redis 7.0+)
+    if capabilities.features.functions {
+        router = router.merge(functions_routes());
+    }
+
+    if capabilities.modules.timeseries {
+        router = router.merge(timeseries_routes());
+    }
 
     router.with_state(state)
 }
@@ -122,7 +129,8 @@ mod tests {
     use super::*;
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::test_support::{
-        test_state_with_bloom_repo, test_state_with_json_repo, test_state_with_search_repo,
+        test_state_with_bloom_repo, test_state_with_function_repo, test_state_with_json_repo,
+        test_state_with_search_repo, test_state_with_timeseries_repo,
     };
     use axum::http::Request;
     use std::sync::Arc;
@@ -202,5 +210,45 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_with_functions_routes() {
+        let (mut state, _) = test_state_with_function_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.features.functions = true;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/functions")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_ne!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_with_timeseries_routes() {
+        let (mut state, _) = test_state_with_timeseries_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.modules.timeseries = true;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/timeseries/example")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_ne!(response.status(), axum::http::StatusCode::NOT_FOUND);
     }
 }

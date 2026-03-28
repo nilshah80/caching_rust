@@ -8,9 +8,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::application::services::{
-    AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService,
-    ListService, ProbabilisticService, PubSubService, SearchService, SetService, SortedSetService,
-    StreamService, StringService,
+    AdminService, BitMapService, BloomService, FunctionService, GeoService, HashService,
+    JsonService, KeyService, ListService, ProbabilisticService, PubSubService, SearchService,
+    SetService, SortedSetService, StreamService, StringService, TimeSeriesService,
 };
 use crate::domain::entities::{
     AclDryrunResult,
@@ -161,13 +161,15 @@ use crate::domain::entities::{
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
-    BlockingPopResult, BloomRepository, ExpireCondition, HSetExCondition, HashExpiration,
-    HashRepository, InsertPosition, JsonRepository, KeyRepository, LMPopResult, LPosOptions,
-    LcsMatch, LcsMatchResult, LcsOptions, LcsResult, LexRange, ListDirection, ListRepository,
-    NumSubResult, ProbabilisticRepository, PubSubRepository, PublishResult, ScoreRange,
-    ScoredMember, SearchRepository, SetRepository, SetScanResult, SortOptions, SortedSetRepository,
-    StreamRepository, StringRepository, ZAddOptions, ZAddResult, ZPopDirection, ZPopResult,
-    ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
+    BlockingPopResult, BloomRepository, ExpireCondition, FunctionFlushMode, FunctionRepository,
+    FunctionRestorePolicy, HSetExCondition, HashExpiration, HashRepository, InsertPosition,
+    JsonRepository, KeyRepository, LMPopResult, LPosOptions, LcsMatch, LcsMatchResult, LcsOptions,
+    LcsResult, LexRange, ListDirection, ListRepository, NumSubResult, ProbabilisticRepository,
+    PubSubRepository, PublishResult, ScoreRange, ScoredMember, SearchRepository, SetRepository,
+    SetScanResult, SortOptions, SortedSetRepository, StreamRepository, StringRepository,
+    TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
+    TimeSeriesRepository, TimeSeriesSample, TsAggregation, ZAddOptions, ZAddResult, ZPopDirection,
+    ZPopResult, ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -761,6 +763,272 @@ impl AdminRepository for MockAdminRepository {
 
     async fn command_getkeys(&self, _command: &[String]) -> Result<Vec<String>, CacheError> {
         Ok(vec!["mykey".to_string()])
+    }
+}
+
+#[derive(Default)]
+pub struct MockFunctionRepository;
+
+#[async_trait]
+impl FunctionRepository for MockFunctionRepository {
+    async fn function_load(&self, code: &str, _replace: bool) -> Result<String, CacheError> {
+        let name = code
+            .lines()
+            .find_map(|line| line.strip_prefix("#!lua name="))
+            .unwrap_or("library");
+        Ok(name.to_string())
+    }
+
+    async fn function_delete(&self, _name: &str) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn function_flush(&self, _mode: Option<FunctionFlushMode>) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn function_dump(&self) -> Result<Vec<u8>, CacheError> {
+        Ok(vec![1, 2, 3])
+    }
+
+    async fn function_restore(
+        &self,
+        _payload: &[u8],
+        _policy: Option<FunctionRestorePolicy>,
+    ) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn function_list(&self, with_code: bool) -> Result<serde_json::Value, CacheError> {
+        Ok(serde_json::json!([{
+            "library_name": "lib",
+            "engine": "LUA",
+            "functions": [{"name": "echo"}],
+            "library_code": if with_code { "code" } else { "" }
+        }]))
+    }
+
+    async fn function_stats(&self) -> Result<serde_json::Value, CacheError> {
+        Ok(serde_json::json!({"running_script": null}))
+    }
+
+    async fn function_kill(&self) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn fcall(
+        &self,
+        _name: &str,
+        _keys: &[String],
+        args: &[serde_json::Value],
+        _readonly: bool,
+    ) -> Result<serde_json::Value, CacheError> {
+        Ok(args.first().cloned().unwrap_or(serde_json::Value::Null))
+    }
+}
+
+#[derive(Default)]
+pub struct MockTimeSeriesRepository {
+    data: Mutex<HashMap<String, Vec<TimeSeriesSample>>>,
+    labels: Mutex<HashMap<String, HashMap<String, String>>>,
+}
+
+impl MockTimeSeriesRepository {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl TimeSeriesRepository for MockTimeSeriesRepository {
+    async fn ts_create(
+        &self,
+        key: &str,
+        options: TimeSeriesCreateOptions,
+    ) -> Result<(), CacheError> {
+        self.data
+            .lock()
+            .expect("lock")
+            .entry(key.to_string())
+            .or_default();
+        self.labels
+            .lock()
+            .expect("lock")
+            .insert(key.to_string(), options.labels);
+        Ok(())
+    }
+
+    async fn ts_alter(
+        &self,
+        key: &str,
+        options: TimeSeriesCreateOptions,
+    ) -> Result<(), CacheError> {
+        self.labels
+            .lock()
+            .expect("lock")
+            .insert(key.to_string(), options.labels);
+        Ok(())
+    }
+
+    async fn ts_add(&self, key: &str, sample: TimeSeriesSample) -> Result<i64, CacheError> {
+        self.data
+            .lock()
+            .expect("lock")
+            .entry(key.to_string())
+            .or_default()
+            .push(sample.clone());
+        Ok(sample.timestamp)
+    }
+
+    async fn ts_madd(&self, items: &[(String, TimeSeriesSample)]) -> Result<Vec<i64>, CacheError> {
+        let mut data = self.data.lock().expect("lock");
+        let mut timestamps = Vec::with_capacity(items.len());
+        for (key, sample) in items {
+            data.entry(key.clone()).or_default().push(sample.clone());
+            timestamps.push(sample.timestamp);
+        }
+        Ok(timestamps)
+    }
+
+    async fn ts_incr_by(
+        &self,
+        key: &str,
+        value: f64,
+        timestamp: Option<i64>,
+    ) -> Result<i64, CacheError> {
+        let timestamp = timestamp.unwrap_or(1);
+        self.data
+            .lock()
+            .expect("lock")
+            .entry(key.to_string())
+            .or_default()
+            .push(TimeSeriesSample { timestamp, value });
+        Ok(timestamp)
+    }
+
+    async fn ts_decr_by(
+        &self,
+        key: &str,
+        value: f64,
+        timestamp: Option<i64>,
+    ) -> Result<i64, CacheError> {
+        self.ts_incr_by(key, -value, timestamp).await
+    }
+
+    async fn ts_del(&self, key: &str, from: i64, to: i64) -> Result<i64, CacheError> {
+        let mut data = self.data.lock().expect("lock");
+        let series = data.entry(key.to_string()).or_default();
+        let before = series.len();
+        series.retain(|sample| sample.timestamp < from || sample.timestamp > to);
+        Ok((before - series.len()) as i64)
+    }
+
+    async fn ts_get(&self, key: &str) -> Result<Option<TimeSeriesSample>, CacheError> {
+        Ok(self
+            .data
+            .lock()
+            .expect("lock")
+            .get(key)
+            .and_then(|series| series.last().cloned()))
+    }
+
+    async fn ts_mget(&self, filters: &[String]) -> Result<Vec<TimeSeriesMGetResult>, CacheError> {
+        let data = self.data.lock().expect("lock");
+        let labels = self.labels.lock().expect("lock");
+        Ok(filters
+            .iter()
+            .map(|filter| TimeSeriesMGetResult {
+                key: filter.clone(),
+                labels: labels.get(filter).cloned().unwrap_or_default(),
+                sample: data.get(filter).and_then(|series| series.last().cloned()),
+            })
+            .collect())
+    }
+
+    async fn ts_range(
+        &self,
+        key: &str,
+        from: i64,
+        to: i64,
+        _options: TimeSeriesRangeOptions,
+    ) -> Result<Vec<TimeSeriesSample>, CacheError> {
+        Ok(self
+            .data
+            .lock()
+            .expect("lock")
+            .get(key)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|sample| sample.timestamp >= from && sample.timestamp <= to)
+            .collect())
+    }
+
+    async fn ts_rev_range(
+        &self,
+        key: &str,
+        from: i64,
+        to: i64,
+        options: TimeSeriesRangeOptions,
+    ) -> Result<Vec<TimeSeriesSample>, CacheError> {
+        let mut samples = self.ts_range(key, from, to, options).await?;
+        samples.reverse();
+        Ok(samples)
+    }
+
+    async fn ts_mrange(
+        &self,
+        from: i64,
+        to: i64,
+        filters: &[String],
+        options: TimeSeriesRangeOptions,
+    ) -> Result<Vec<TimeSeriesRangeResult>, CacheError> {
+        let labels = self.labels.lock().expect("lock").clone();
+        let mut results = Vec::with_capacity(filters.len());
+        for filter in filters {
+            results.push(TimeSeriesRangeResult {
+                key: filter.clone(),
+                labels: labels.get(filter).cloned().unwrap_or_default(),
+                samples: self.ts_range(filter, from, to, options.clone()).await?,
+            });
+        }
+        Ok(results)
+    }
+
+    async fn ts_mrev_range(
+        &self,
+        from: i64,
+        to: i64,
+        filters: &[String],
+        options: TimeSeriesRangeOptions,
+    ) -> Result<Vec<TimeSeriesRangeResult>, CacheError> {
+        let mut results = self.ts_mrange(from, to, filters, options).await?;
+        for result in &mut results {
+            result.samples.reverse();
+        }
+        Ok(results)
+    }
+
+    async fn ts_query_index(&self, filters: &[String]) -> Result<Vec<String>, CacheError> {
+        Ok(filters.to_vec())
+    }
+
+    async fn ts_info(&self, key: &str) -> Result<serde_json::Value, CacheError> {
+        Ok(serde_json::json!({ "key": key }))
+    }
+
+    async fn ts_create_rule(
+        &self,
+        _source: &str,
+        _dest: &str,
+        _aggregation: TsAggregation,
+        _bucket_duration_ms: u64,
+    ) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn ts_delete_rule(&self, _source: &str, _dest: &str) -> Result<(), CacheError> {
+        Ok(())
     }
 }
 
@@ -2194,6 +2462,12 @@ pub fn test_state_with_all_repos_and_config(
     let scripting_service = Arc::new(crate::application::services::ScriptingService::new(
         pool.clone(),
     ));
+    let function_service = Arc::new(FunctionService::new_with_repository(Arc::new(
+        MockFunctionRepository,
+    )));
+    let timeseries_service = Arc::new(TimeSeriesService::new_with_repository(Arc::new(
+        MockTimeSeriesRepository::new(),
+    )));
 
     AppState::new_with_services(
         pool,
@@ -2217,6 +2491,8 @@ pub fn test_state_with_all_repos_and_config(
         pubsub_service,
         transaction_service,
         scripting_service,
+        function_service,
+        timeseries_service,
     )
 }
 
@@ -2308,6 +2584,36 @@ pub fn test_state_with_hash_repo() -> (AppState, Arc<MockHashRepository>) {
         geo_repo,
     );
     (state, hash_repo)
+}
+
+pub fn test_state_with_function_repo() -> (AppState, Arc<MockFunctionRepository>) {
+    let function_repo = Arc::new(MockFunctionRepository);
+    let mut state = test_state_with_repos(
+        Arc::new(MockStringRepository::new()),
+        Arc::new(MockKeyRepository::new()),
+        Arc::new(MockAdminRepository),
+    );
+    state.function_service = Arc::new(FunctionService::new_with_repository(function_repo.clone()));
+    let mut caps = (*state.capabilities).clone();
+    caps.features.functions = true;
+    state.capabilities = Arc::new(caps);
+    (state, function_repo)
+}
+
+pub fn test_state_with_timeseries_repo() -> (AppState, Arc<MockTimeSeriesRepository>) {
+    let timeseries_repo = Arc::new(MockTimeSeriesRepository::new());
+    let mut state = test_state_with_repos(
+        Arc::new(MockStringRepository::new()),
+        Arc::new(MockKeyRepository::new()),
+        Arc::new(MockAdminRepository),
+    );
+    state.timeseries_service = Arc::new(TimeSeriesService::new_with_repository(
+        timeseries_repo.clone(),
+    ));
+    let mut caps = (*state.capabilities).clone();
+    caps.modules.timeseries = true;
+    state.capabilities = Arc::new(caps);
+    (state, timeseries_repo)
 }
 
 pub fn test_state_with_list_repo() -> (AppState, Arc<MockListRepository>) {

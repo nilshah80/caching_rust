@@ -1822,8 +1822,8 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 - All validation paths tested
 
 ### 5.6 Redis Functions Operations (NEW)
-- [ ] **Task 5.6.1**: Implement Functions repository trait (gated by `capabilities.features.functions`)
-- [ ] **Task 5.6.2**: Implement Functions operations
+- [x] **Task 5.6.1**: Implement Functions repository trait (gated by `capabilities.features.functions`)
+- [x] **Task 5.6.2**: Implement Functions operations
   | Command | Method | Priority |
   |---------|--------|----------|
   | FUNCTION LOAD | `function_load` | High |
@@ -1837,18 +1837,18 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   | FCALL | `fcall` | High |
   | FCALL_RO | `fcall_ro` | High |
 
-- [ ] **Task 5.6.3**: Create Functions API routes
+- [x] **Task 5.6.3**: Create Functions API routes
   - `POST /api/v1/functions/load`
   - `DELETE /api/v1/functions/:name`
   - `POST /api/v1/functions/flush`
   - `GET /api/v1/functions`
   - `POST /api/v1/functions/call`
 
-- [ ] **Task 5.6.4**: Create Functions request/response schemas
+- [x] **Task 5.6.4**: Create Functions request/response schemas
 
 ### 5.7 RedisTimeSeries Operations (NEW)
-- [ ] **Task 5.7.1**: Implement TimeSeries repository trait (gated by `capabilities.modules.timeseries`)
-- [ ] **Task 5.7.2**: Implement TimeSeries operations
+- [x] **Task 5.7.1**: Implement TimeSeries repository trait (gated by `capabilities.modules.timeseries`)
+- [x] **Task 5.7.2**: Implement TimeSeries operations
   | Command | Method | Priority |
   |---------|--------|----------|
   | TS.CREATE | `ts_create` | High |
@@ -1869,7 +1869,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   | TS.CREATERULE | `ts_create_rule` | Medium |
   | TS.DELETERULE | `ts_delete_rule` | Medium |
 
-- [ ] **Task 5.7.3**: Create TimeSeries API routes
+- [x] **Task 5.7.3**: Create TimeSeries API routes
   - `POST /api/v1/timeseries`
   - `POST /api/v1/timeseries/:key/samples`
   - `GET /api/v1/timeseries/:key`
@@ -1877,7 +1877,7 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   - `POST /api/v1/timeseries/mget`
   - `POST /api/v1/timeseries/mrange`
 
-- [ ] **Task 5.7.4**: Create TimeSeries request/response schemas
+- [x] **Task 5.7.4**: Create TimeSeries request/response schemas
   ```rust
   #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
   pub struct Sample {

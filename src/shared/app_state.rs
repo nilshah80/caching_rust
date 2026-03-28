@@ -6,9 +6,10 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::application::services::{
-    AdminService, BitMapService, BloomService, GeoService, HashService, JsonService, KeyService,
-    ListService, ProbabilisticService, PubSubService, ScriptingService, SearchService, SetService,
-    SortedSetService, StreamService, StringService, TransactionService,
+    AdminService, BitMapService, BloomService, FunctionService, GeoService, HashService,
+    JsonService, KeyService, ListService, ProbabilisticService, PubSubService, ScriptingService,
+    SearchService, SetService, SortedSetService, StreamService, StringService, TimeSeriesService,
+    TransactionService,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -81,6 +82,12 @@ pub struct AppState {
 
     /// Lua scripting operations service
     pub scripting_service: Arc<ScriptingService>,
+
+    /// Redis functions operations service
+    pub function_service: Arc<FunctionService>,
+
+    /// RedisTimeSeries operations service
+    pub timeseries_service: Arc<TimeSeriesService>,
 }
 
 impl AppState {
@@ -119,6 +126,8 @@ impl AppState {
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(TransactionService::new(pool.clone()));
         let scripting_service = Arc::new(ScriptingService::new(pool.clone()));
+        let function_service = Arc::new(FunctionService::new(pool.clone()));
+        let timeseries_service = Arc::new(TimeSeriesService::new(pool.clone()));
 
         Self::new_with_services(
             pool,
@@ -142,6 +151,8 @@ impl AppState {
             pubsub_service,
             transaction_service,
             scripting_service,
+            function_service,
+            timeseries_service,
         )
     }
 
@@ -169,6 +180,8 @@ impl AppState {
         pubsub_service: Arc<PubSubService>,
         transaction_service: Arc<TransactionService>,
         scripting_service: Arc<ScriptingService>,
+        function_service: Arc<FunctionService>,
+        timeseries_service: Arc<TimeSeriesService>,
     ) -> Self {
         Self {
             pool,
@@ -192,6 +205,8 @@ impl AppState {
             pubsub_service,
             transaction_service,
             scripting_service,
+            function_service,
+            timeseries_service,
         }
     }
 }
@@ -200,10 +215,11 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::test_support::{
-        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository,
-        MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
-        MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
+        MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockFunctionRepository,
+        MockGeoRepository, MockHashRepository, MockJsonRepository, MockKeyRepository,
+        MockListRepository, MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
         MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+        MockTimeSeriesRepository,
     };
 
     #[test]
@@ -261,6 +277,12 @@ mod tests {
         let pubsub_service = Arc::new(PubSubService::new(pool.clone(), pubsub_manager));
         let transaction_service = Arc::new(TransactionService::new(pool.clone()));
         let scripting_service = Arc::new(ScriptingService::new(pool.clone()));
+        let function_service = Arc::new(FunctionService::new_with_repository(Arc::new(
+            MockFunctionRepository,
+        )));
+        let timeseries_service = Arc::new(TimeSeriesService::new_with_repository(Arc::new(
+            MockTimeSeriesRepository::new(),
+        )));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -284,6 +306,8 @@ mod tests {
             pubsub_service.clone(),
             transaction_service.clone(),
             scripting_service.clone(),
+            function_service,
+            timeseries_service,
         );
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);
