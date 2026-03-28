@@ -9,4 +9,5 @@
 )]
 
 mod core_features;
+mod error_scenarios;
 mod phase5_features;

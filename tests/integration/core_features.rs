@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::redis::{Redis, REDIS_PORT};
+use testcontainers_modules::redis::{REDIS_PORT, Redis};
 
 use redis_caching_service::application::services::{
     HashService, KeyService, ListService, SortedSetService, StringService,
 };
 use redis_caching_service::domain::repositories::ScoredMember;
-use redis_caching_service::infrastructure::redis::connection::InstrumentedPool;
+use redis_caching_service::infrastructure::redis::connection::{InstrumentedPool, PoolStats};
 
 async fn create_pool() -> (testcontainers::ContainerAsync<Redis>, Arc<InstrumentedPool>) {
     let container = Redis::default().start().await.unwrap();
@@ -32,7 +32,11 @@ async fn test_string_set_get_cycle() {
         .unwrap();
 
     // GET key
-    let val = service.get("hello").await.unwrap().expect("key should exist");
+    let val = service
+        .get("hello")
+        .await
+        .unwrap()
+        .expect("key should exist");
     assert_eq!(val.value, "world");
 }
 
@@ -121,23 +125,79 @@ async fn test_key_exists_delete() {
         .unwrap();
 
     // EXISTS
-    let exists = key_svc
-        .exists(vec!["tempkey".into()])
-        .await
-        .unwrap();
+    let exists = key_svc.exists(vec!["tempkey".into()]).await.unwrap();
     assert_eq!(exists.count, 1);
 
     // DEL
-    let deleted = key_svc
-        .delete(vec!["tempkey".into()])
-        .await
-        .unwrap();
+    let deleted = key_svc.delete(vec!["tempkey".into()]).await.unwrap();
     assert_eq!(deleted.count, 1);
 
     // EXISTS again — should be 0
-    let exists = key_svc
-        .exists(vec!["tempkey".into()])
-        .await
-        .unwrap();
+    let exists = key_svc.exists(vec!["tempkey".into()]).await.unwrap();
     assert_eq!(exists.count, 0);
+}
+
+// =========================================================================
+// Pool Metrics Integration Tests (8.2.3)
+// =========================================================================
+
+#[tokio::test]
+async fn test_pool_metrics_track_connections() {
+    let (_container, pool) = create_pool().await;
+
+    // Get a connection — this should increment total_wait_count
+    let _conn = pool.get().await.unwrap();
+
+    let stats: PoolStats = pool.get_stats();
+    assert!(
+        stats.total_wait_count >= 1,
+        "total_wait_count should be at least 1 after getting a connection, got {}",
+        stats.total_wait_count
+    );
+    assert!(
+        stats.size > 0,
+        "pool size should be greater than 0, got {}",
+        stats.size
+    );
+}
+
+#[tokio::test]
+async fn test_pool_get_stats() {
+    let (_container, pool) = create_pool().await;
+
+    // Make a few connections to accumulate stats
+    let _conn1 = pool.get().await.unwrap();
+    drop(_conn1);
+    let _conn2 = pool.get().await.unwrap();
+    drop(_conn2);
+    let _conn3 = pool.get().await.unwrap();
+
+    let stats: PoolStats = pool.get_stats();
+
+    // We made 3 checkout requests
+    assert!(
+        stats.total_wait_count >= 3,
+        "total_wait_count should be at least 3, got {}",
+        stats.total_wait_count
+    );
+    // max_size was set to 4 in new_for_tests_with_url
+    assert_eq!(stats.max_size, 4);
+    // avg_wait_ms should be non-negative
+    assert!(
+        stats.avg_wait_ms >= 0.0,
+        "avg_wait_ms should be non-negative, got {}",
+        stats.avg_wait_ms
+    );
+    // No failures expected
+    assert_eq!(
+        stats.failed_checkouts, 0,
+        "failed_checkouts should be 0, got {}",
+        stats.failed_checkouts
+    );
+    // current_waiting should be 0 since we are not blocking
+    assert_eq!(
+        stats.current_waiting, 0,
+        "current_waiting should be 0, got {}",
+        stats.current_waiting
+    );
 }

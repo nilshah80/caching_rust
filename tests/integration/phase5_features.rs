@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::redis::{Redis, REDIS_PORT};
+use testcontainers_modules::redis::{REDIS_PORT, Redis};
 
 use redis_caching_service::application::services::{
     FunctionService, HashService, KeyService, ListService, StringService, TimeSeriesService,
@@ -44,9 +44,7 @@ async fn test_lcs_operations() {
         .unwrap();
 
     // Default LCS — returns the common subsequence string
-    let result = service
-        .lcs("lcs1", "lcs2", LcsOptions::default())
-        .await;
+    let result = service.lcs("lcs1", "lcs2", LcsOptions::default()).await;
     match result {
         Err(e) if e.to_string().contains("unknown command") || e.to_string().contains("ERR") => {
             // Redis < 7.0, skip
@@ -64,7 +62,14 @@ async fn test_lcs_operations() {
 
     // LCS with LEN
     let result = service
-        .lcs("lcs1", "lcs2", LcsOptions { len: true, ..Default::default() })
+        .lcs(
+            "lcs1",
+            "lcs2",
+            LcsOptions {
+                len: true,
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     if let redis_caching_service::domain::repositories::LcsResult::Length(n) = result {
@@ -118,9 +123,7 @@ async fn test_sort_operations() {
     assert_eq!(vals, vec!["1", "2", "3"]);
 
     // SORT_RO (read-only variant, Redis 7.0+)
-    let sorted_ro = key_svc
-        .sort_ro("sortlist", SortOptions::default())
-        .await;
+    let sorted_ro = key_svc.sort_ro("sortlist", SortOptions::default()).await;
     match sorted_ro {
         Err(e) if e.to_string().contains("unknown command") => {
             // Redis < 7.0, skip SORT_RO check
@@ -195,7 +198,10 @@ async fn test_function_lifecycle() {
     // FUNCTION LOAD
     let load_result = service.function_load(code, false).await;
     match load_result {
-        Err(e) if e.to_string().contains("unknown command") || e.to_string().contains("unknown subcommand") => {
+        Err(e)
+            if e.to_string().contains("unknown command")
+                || e.to_string().contains("unknown subcommand") =>
+        {
             // Redis < 7.0, skip
             return;
         }
@@ -262,13 +268,25 @@ async fn test_timeseries_lifecycle() {
 
     // TS.ADD
     let ts = service
-        .ts_add("ts:test", TimeSeriesSample { timestamp: 1000, value: 25.5 })
+        .ts_add(
+            "ts:test",
+            TimeSeriesSample {
+                timestamp: 1000,
+                value: 25.5,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(ts, 1000);
 
     let ts2 = service
-        .ts_add("ts:test", TimeSeriesSample { timestamp: 2000, value: 26.0 })
+        .ts_add(
+            "ts:test",
+            TimeSeriesSample {
+                timestamp: 2000,
+                value: 26.0,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(ts2, 2000);
@@ -306,7 +324,10 @@ async fn test_hash_field_expiration() {
     let service = HashService::new(pool);
 
     service
-        .hset("exphash", vec![("f1".into(), "v1".into()), ("f2".into(), "v2".into())])
+        .hset(
+            "exphash",
+            vec![("f1".into(), "v1".into()), ("f2".into(), "v2".into())],
+        )
         .await
         .unwrap();
 
@@ -334,7 +355,10 @@ async fn test_hash_field_expiration() {
     assert!(ttls[0] > 0 && ttls[0] <= 300);
 
     // HPERSIST — remove the expiry
-    let persist = service.hpersist("exphash", vec!["f1".into()]).await.unwrap();
+    let persist = service
+        .hpersist("exphash", vec!["f1".into()])
+        .await
+        .unwrap();
     // 1 = expiry removed
     assert_eq!(persist, vec![1]);
 
@@ -353,13 +377,20 @@ async fn test_redis8_hash_commands() {
     let service = HashService::new(pool);
 
     service
-        .hset("r8hash", vec![("a".into(), "1".into()), ("b".into(), "2".into())])
+        .hset(
+            "r8hash",
+            vec![("a".into(), "1".into()), ("b".into(), "2".into())],
+        )
         .await
         .unwrap();
 
     // HGETEX — get fields and optionally set expiration
     let result = service
-        .hgetex("r8hash", vec!["a".into(), "b".into()], Some(HashExpiration::Ex(600)))
+        .hgetex(
+            "r8hash",
+            vec!["a".into(), "b".into()],
+            Some(HashExpiration::Ex(600)),
+        )
         .await;
     match result {
         Err(e)

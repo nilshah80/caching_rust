@@ -12,10 +12,9 @@ use crate::api::http::schemas::timeseries::{
     Aggregation, DuplicatePolicy, Sample, TimeSeriesAddRequest, TimeSeriesCreateRequest,
     TimeSeriesGetResponse, TimeSeriesMGetItem, TimeSeriesMGetRequest, TimeSeriesMGetResponse,
     TimeSeriesMRangeRequest, TimeSeriesMRangeResponse, TimeSeriesRangeItem, TimeSeriesRangeQuery,
-    TimeSeriesRangeResponse, TimeSeriesWriteResponse,
-    TsAlterRequest, TsCreateRuleRequest, TsDelQuery, TsDelResponse,
-    TsIncrDecrRequest, TsMaddRequest, TsMaddResponse,
-    TsMrevRangeRequest, TsQueryIndexRequest, TsQueryIndexResponse, TsInfoResponse,
+    TimeSeriesRangeResponse, TimeSeriesWriteResponse, TsAlterRequest, TsCreateRuleRequest,
+    TsDelQuery, TsDelResponse, TsIncrDecrRequest, TsInfoResponse, TsMaddRequest, TsMaddResponse,
+    TsMrevRangeRequest, TsQueryIndexRequest, TsQueryIndexResponse,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
@@ -36,14 +35,20 @@ pub fn timeseries_routes() -> Router<AppState> {
         .route("/api/v1/timeseries/queryindex", post(ts_query_index))
         // Wildcard {key} paths
         .route("/api/v1/timeseries/{key}", get(ts_get).patch(ts_alter))
-        .route("/api/v1/timeseries/{key}/samples", post(ts_add).delete(ts_del))
+        .route(
+            "/api/v1/timeseries/{key}/samples",
+            post(ts_add).delete(ts_del),
+        )
         .route("/api/v1/timeseries/{key}/range", get(ts_range))
         .route("/api/v1/timeseries/{key}/revrange", get(ts_rev_range))
         .route("/api/v1/timeseries/{key}/incrby", post(ts_incr_by))
         .route("/api/v1/timeseries/{key}/decrby", post(ts_decr_by))
         .route("/api/v1/timeseries/{key}/info", get(ts_info))
         .route("/api/v1/timeseries/{key}/rules", post(ts_create_rule))
-        .route("/api/v1/timeseries/{key}/rules/{dest_key}", delete(ts_delete_rule))
+        .route(
+            "/api/v1/timeseries/{key}/rules/{dest_key}",
+            delete(ts_delete_rule),
+        )
 }
 
 fn require_timeseries(state: &AppState) -> Result<(), CacheError> {

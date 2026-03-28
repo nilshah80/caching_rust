@@ -210,10 +210,9 @@ use crate::api::http::schemas::timeseries::{
     Aggregation, DuplicatePolicy, Sample, TimeSeriesAddRequest, TimeSeriesCreateRequest,
     TimeSeriesGetResponse, TimeSeriesMGetItem, TimeSeriesMGetRequest, TimeSeriesMGetResponse,
     TimeSeriesMRangeRequest, TimeSeriesMRangeResponse, TimeSeriesRangeItem, TimeSeriesRangeQuery,
-    TimeSeriesRangeResponse, TimeSeriesWriteResponse,
-    TsAlterRequest, TsCreateRuleRequest, TsDelQuery, TsDelResponse,
-    TsIncrDecrRequest, TsMaddItem, TsMaddRequest, TsMaddResponse,
-    TsMrevRangeRequest, TsQueryIndexRequest, TsQueryIndexResponse, TsInfoResponse,
+    TimeSeriesRangeResponse, TimeSeriesWriteResponse, TsAlterRequest, TsCreateRuleRequest,
+    TsDelQuery, TsDelResponse, TsIncrDecrRequest, TsInfoResponse, TsMaddItem, TsMaddRequest,
+    TsMaddResponse, TsMrevRangeRequest, TsQueryIndexRequest, TsQueryIndexResponse,
 };
 use crate::api::http::schemas::transactions::{
     CommandResult, CompareAndSetRequest, CompareAndSetResponse, FieldValue, HCompareAndSetRequest,

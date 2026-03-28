@@ -2788,12 +2788,12 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
 ## Phase 8: Testing
 
 ### 8.1 Unit Tests
-- [ ] **Task 8.1.1**: Set up unit test infrastructure
+- [x] **Task 8.1.1**: Set up unit test infrastructure
   - Configure test utilities
   - Create mock Redis client
   - Set up test fixtures
 
-- [ ] **Task 8.1.2**: Write unit tests for all services
+- [x] **Task 8.1.2**: Write unit tests for all services
   - String service tests
   - Hash service tests
   - List service tests (including blocking operations)
@@ -2813,33 +2813,33 @@ POST   /api/v1/transactions/hcas        # Compare-and-set (hash field) via Lua s
   - TimeSeries service tests
   - Admin service tests
 
-- [ ] **Task 8.1.3**: Write unit tests for validators
-- [ ] **Task 8.1.4**: Write unit tests for error handling
-- [ ] **Task 8.1.5**: Write unit tests for capability detection
+- [x] **Task 8.1.3**: Write unit tests for validators
+- [x] **Task 8.1.4**: Write unit tests for error handling
+- [x] **Task 8.1.5**: Write unit tests for capability detection
 
 ### 8.2 Integration Tests
-- [ ] **Task 8.2.1**: Set up testcontainers with Redis Stack
-- [ ] **Task 8.2.2**: Write integration tests for all repositories
-- [ ] **Task 8.2.3**: Write integration tests for connection pool (including metrics)
-- [ ] **Task 8.2.4**: Write integration tests for Pub/Sub manager
-- [ ] **Task 8.2.5**: Write integration tests for blocking operations
-- [ ] **Task 8.2.6**: Write integration tests for transactions
-- [ ] **Task 8.2.7**: Write integration tests for error scenarios
+- [x] **Task 8.2.1**: Set up testcontainers with Redis Stack
+- [x] **Task 8.2.2**: Write integration tests for all repositories
+- [x] **Task 8.2.3**: Write integration tests for connection pool (including metrics)
+- [x] **Task 8.2.4**: Write integration tests for Pub/Sub manager
+- [x] **Task 8.2.5**: Write integration tests for blocking operations
+- [x] **Task 8.2.6**: Write integration tests for transactions
+- [x] **Task 8.2.7**: Write integration tests for error scenarios
 
 ### 8.3 E2E Tests
-- [ ] **Task 8.3.1**: Set up E2E test infrastructure
-- [ ] **Task 8.3.2**: Write E2E tests for all API endpoints
-- [ ] **Task 8.3.3**: Write E2E tests for authentication
-- [ ] **Task 8.3.4**: Write E2E tests for WebSocket subscriptions
-- [ ] **Task 8.3.5**: Write E2E tests for SSE streaming
-- [ ] **Task 8.3.6**: Write E2E tests for error responses
+- [x] **Task 8.3.1**: Set up E2E test infrastructure
+- [x] **Task 8.3.2**: Write E2E tests for all API endpoints
+- [x] **Task 8.3.3**: Write E2E tests for authentication
+- [x] **Task 8.3.4**: Write E2E tests for WebSocket subscriptions
+- [x] **Task 8.3.5**: Write E2E tests for SSE streaming
+- [x] **Task 8.3.6**: Write E2E tests for error responses
 
 ### 8.4 Benchmark Tests
-- [ ] **Task 8.4.1**: Set up criterion for benchmarking
-- [ ] **Task 8.4.2**: Write benchmarks for string operations
-- [ ] **Task 8.4.3**: Write benchmarks for hash operations
-- [ ] **Task 8.4.4**: Write benchmarks for concurrent operations
-- [ ] **Task 8.4.5**: Write benchmarks for connection pool
+- [x] **Task 8.4.1**: Set up criterion for benchmarking
+- [x] **Task 8.4.2**: Write benchmarks for string operations
+- [x] **Task 8.4.3**: Write benchmarks for hash operations
+- [x] **Task 8.4.4**: Write benchmarks for concurrent operations
+- [x] **Task 8.4.5**: Write benchmarks for connection pool
 
 ---
 
