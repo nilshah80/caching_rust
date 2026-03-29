@@ -113,4 +113,18 @@ mod tests {
         let slot = service.cluster_keyslot("test").await.unwrap();
         assert_eq!(slot, 12539);
     }
+
+    #[tokio::test]
+    async fn test_cluster_slots() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let slots = service.cluster_slots().await.unwrap();
+        assert!(slots.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cluster_shards() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let shards = service.cluster_shards().await.unwrap();
+        assert!(matches!(shards, redis::Value::Array(v) if v.is_empty()));
+    }
 }

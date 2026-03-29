@@ -507,6 +507,44 @@ mod tests {
         assert_eq!(stats.active_subscriptions, 0);
     }
 
+    #[test]
+    fn test_url_source_static() {
+        let source = UrlSource::Static("redis://localhost:6379".to_string());
+        assert_eq!(source.url(), "redis://localhost:6379");
+    }
+
+    #[test]
+    fn test_url_source_pool() {
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let source = UrlSource::Pool(pool);
+        assert_eq!(source.url(), "redis://127.0.0.1:0");
+    }
+
+    #[test]
+    fn test_new_with_pool() {
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let config = PubSubConfig::default();
+        let manager = PubSubManager::new_with_pool(pool, config);
+        assert_eq!(manager.max_subscriptions(), 100);
+        assert_eq!(manager.active_subscriptions(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_failure_with_pool_source() {
+        // Pool resolves to unreachable URL
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let config = PubSubConfig {
+            connection_timeout_ms: 500,
+            ..PubSubConfig::default()
+        };
+        let manager = PubSubManager::new_with_pool(pool, config);
+
+        let result = timeout(Duration::from_secs(2), manager.create_subscription()).await;
+        let err = result.expect("should not timeout").unwrap_err();
+        assert!(matches!(err, CacheError::ConnectionFailed(_)));
+        assert_eq!(manager.active_subscriptions(), 0);
+    }
+
     #[tokio::test]
     async fn test_pubsub_connection_with_real_redis() {
         let (_container, redis_url) = start_redis().await;

@@ -217,4 +217,37 @@ mod tests {
         let val = redis::Value::Array(vec![redis::Value::Int(1), redis::Value::Int(2)]);
         assert_eq!(redis_value_to_json(&val), serde_json::json!([1, 2]));
     }
+
+    #[test]
+    fn test_redis_value_to_json_ok() {
+        assert_eq!(
+            redis_value_to_json(&redis::Value::Okay),
+            serde_json::json!("OK")
+        );
+    }
+
+    #[test]
+    fn test_redis_value_to_json_simple_string() {
+        assert_eq!(
+            redis_value_to_json(&redis::Value::SimpleString("PONG".to_string())),
+            serde_json::json!("PONG")
+        );
+    }
+
+    #[test]
+    fn test_redis_value_to_json_map() {
+        let val = redis::Value::Map(vec![
+            (
+                redis::Value::BulkString(b"key".to_vec()),
+                redis::Value::Int(42),
+            ),
+            (
+                redis::Value::SimpleString("name".to_string()),
+                redis::Value::BulkString(b"test".to_vec()),
+            ),
+        ]);
+        let json = redis_value_to_json(&val);
+        assert_eq!(json["key"], serde_json::json!(42));
+        assert_eq!(json["name"], serde_json::json!("test"));
+    }
 }

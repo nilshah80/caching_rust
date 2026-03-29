@@ -949,4 +949,43 @@ mod tests {
         let err = pool.detect_capabilities().await.unwrap_err();
         assert!(matches!(err, CacheError::ConnectionFailed(_)));
     }
+
+    #[test]
+    fn test_resolved_url() {
+        let pool = InstrumentedPool::new_for_tests();
+        assert_eq!(pool.resolved_url(), "redis://127.0.0.1:0");
+    }
+
+    #[test]
+    fn test_swap_pool_updates_url() {
+        let pool = InstrumentedPool::new_for_tests();
+        assert_eq!(pool.resolved_url(), "redis://127.0.0.1:0");
+
+        // Create a new pool and swap
+        let cfg = Config::from_url("redis://127.0.0.1:9999");
+        let new_pool = cfg
+            .builder()
+            .expect("builder")
+            .max_size(1)
+            .runtime(Runtime::Tokio1)
+            .build()
+            .expect("build");
+
+        pool.swap_pool(new_pool, "redis://127.0.0.1:9999".to_string());
+        assert_eq!(pool.resolved_url(), "redis://127.0.0.1:9999");
+    }
+
+    #[tokio::test]
+    async fn test_get_standalone_disabled_in_tests() {
+        let pool = InstrumentedPool::new_for_tests();
+        let err = pool.get_standalone().await.err().expect("should error");
+        assert!(matches!(err, CacheError::PoolError(_)));
+    }
+
+    #[test]
+    fn test_new_for_tests_with_url() {
+        let pool = InstrumentedPool::new_for_tests_with_url("redis://127.0.0.1:6379").unwrap();
+        assert_eq!(pool.resolved_url(), "redis://127.0.0.1:6379");
+        assert_eq!(pool.get_stats().max_size, 4);
+    }
 }

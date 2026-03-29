@@ -201,4 +201,38 @@ mod tests {
             .build();
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_mask_password_no_auth() {
+        assert_eq!(mask_password("redis://host:6379/0"), "redis://host:6379/0");
+    }
+
+    #[test]
+    fn test_mask_password_with_tls() {
+        assert_eq!(
+            mask_password("rediss://:pw@host:6380#insecure"),
+            "rediss://:***@host:6380#insecure"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_current_master_no_sentinels() {
+        let config = RedisConfig {
+            sentinel_enabled: true,
+            sentinel_nodes: "redis://127.0.0.1:1".to_string(),
+            sentinel_master_name: "mymaster".to_string(),
+            ..RedisConfig::default()
+        };
+        let result = resolve_current_master(&config).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no sentinel could resolve"));
+    }
+
+    #[tokio::test]
+    async fn test_create_verified_pool_unreachable() {
+        let config = PoolConfig::default();
+        let result = create_verified_pool("redis://127.0.0.1:1", &config).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unreachable"));
+    }
 }

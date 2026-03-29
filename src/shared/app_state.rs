@@ -370,5 +370,31 @@ mod tests {
 
         assert_eq!(state.config.admin.api_key, config.admin.api_key);
         assert_eq!(state.pool.get_stats().max_size, 1);
+        assert!(state.cluster_pool.is_none());
+    }
+
+    #[test]
+    fn test_new_with_cluster_none() {
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let config = Arc::new(Settings::default());
+        let capabilities = Arc::new(RedisCapabilities::default_capabilities());
+
+        let state = AppState::new_with_cluster(pool, config, capabilities, None);
+        assert!(state.cluster_pool.is_none());
+    }
+
+    #[test]
+    fn test_new_with_cluster_some() {
+        let pool = Arc::new(InstrumentedPool::new_for_tests());
+        let mut config = Settings::default();
+        config.redis.cluster_enabled = true;
+        config.redis.cluster_nodes = "redis://127.0.0.1:7001".to_string();
+        let config = Arc::new(config);
+        let capabilities = Arc::new(RedisCapabilities::default_capabilities());
+
+        let cp = crate::infrastructure::redis::cluster_connection::ClusterPool::new(&config.redis)
+            .unwrap();
+        let state = AppState::new_with_cluster(pool, config, capabilities, Some(Arc::new(cp)));
+        assert!(state.cluster_pool.is_some());
     }
 }
