@@ -128,12 +128,9 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_middleware_allows_request() {
         let limiter = create_rate_limiter(10, 5);
-        let app = Router::new()
-            .route("/test", get(|| async { "ok" }))
-            .layer(axum_mw::from_fn_with_state(
-                test_state(limiter),
-                rate_limit_middleware,
-            ));
+        let app = Router::new().route("/test", get(|| async { "ok" })).layer(
+            axum_mw::from_fn_with_state(test_state(limiter), rate_limit_middleware),
+        );
 
         let resp = app
             .oneshot(Request::get("/test").body(Body::empty()).unwrap())
@@ -149,12 +146,9 @@ mod tests {
         // Exhaust the single token for 127.0.0.1 (default fallback IP)
         limiter.check_key(&ip).unwrap();
 
-        let app = Router::new()
-            .route("/test", get(|| async { "ok" }))
-            .layer(axum_mw::from_fn_with_state(
-                test_state(limiter),
-                rate_limit_middleware,
-            ));
+        let app = Router::new().route("/test", get(|| async { "ok" })).layer(
+            axum_mw::from_fn_with_state(test_state(limiter), rate_limit_middleware),
+        );
 
         let resp = app
             .oneshot(Request::get("/test").body(Body::empty()).unwrap())

@@ -313,7 +313,11 @@ mod tests {
         start_generic_redis_image(image, 6379, Duration::from_secs(2), "redis").await
     }
 
-    async fn service_with_redis() -> Option<(ContainerAsync<GenericImage>, Arc<InstrumentedPool>, FunctionService)> {
+    async fn service_with_redis() -> Option<(
+        ContainerAsync<GenericImage>,
+        Arc<InstrumentedPool>,
+        FunctionService,
+    )> {
         let (container, redis_url) = start_redis().await?;
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).expect("pool"));
         let service = FunctionService::new(pool.clone());

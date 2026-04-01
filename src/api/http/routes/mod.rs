@@ -48,10 +48,10 @@ pub use strings::string_routes;
 pub use timeseries::timeseries_routes;
 pub use transactions::transaction_routes;
 
-use axum::routing::any;
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
 use axum::Router;
+use axum::routing::any;
 
 /// Build operational routes that must be exempt from rate limiting
 /// (health probes, metrics, liveness/readiness for Kubernetes).
@@ -196,9 +196,12 @@ fn unavailable_feature_routes(
     message: &'static str,
 ) -> Router<AppState> {
     Router::new()
-        .route(base_path, any(move || async move {
-            Err::<(), CacheError>(CacheError::ModuleNotAvailable(message.to_string()))
-        }))
+        .route(
+            base_path,
+            any(move || async move {
+                Err::<(), CacheError>(CacheError::ModuleNotAvailable(message.to_string()))
+            }),
+        )
         .route(
             wildcard_path,
             any(move || async move {
@@ -273,10 +276,7 @@ mod tests {
             )
             .await
             .expect("response");
-        assert_eq!(
-            response.status(),
-            axum::http::StatusCode::NOT_IMPLEMENTED
-        );
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_IMPLEMENTED);
     }
 
     #[tokio::test]

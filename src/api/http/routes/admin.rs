@@ -588,9 +588,7 @@ fn verify_admin_key(headers: &HeaderMap, state: &AppState) -> Result<(), StatusC
         .and_then(|v| v.to_str().ok());
 
     match api_key {
-        Some(key)
-            if bool::from(key.as_bytes().ct_eq(state.config.admin.api_key.as_bytes())) =>
-        {
+        Some(key) if bool::from(key.as_bytes().ct_eq(state.config.admin.api_key.as_bytes())) => {
             Ok(())
         }
         _ => Err(StatusCode::UNAUTHORIZED),

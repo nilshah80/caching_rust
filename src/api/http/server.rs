@@ -36,11 +36,11 @@ use tracing::{info, warn};
 use axum::middleware as axum_mw;
 
 #[cfg(not(test))]
-use crate::api::http::middleware::{
-    logging_middleware, metrics_middleware, request_id_middleware,
+use crate::api::http::middleware::rate_limit::{
+    RateLimitState, create_rate_limiter, rate_limit_middleware,
 };
 #[cfg(not(test))]
-use crate::api::http::middleware::rate_limit::{RateLimitState, create_rate_limiter, rate_limit_middleware};
+use crate::api::http::middleware::{logging_middleware, metrics_middleware, request_id_middleware};
 #[cfg(not(test))]
 use crate::api::http::routes::{build_router, operational_routes};
 use crate::infrastructure::config::ServerConfig;
@@ -64,8 +64,10 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
             limiter,
             trust_proxy: config.trust_proxy,
         };
-        api_router =
-            api_router.layer(axum_mw::from_fn_with_state(rate_limit_state, rate_limit_middleware));
+        api_router = api_router.layer(axum_mw::from_fn_with_state(
+            rate_limit_state,
+            rate_limit_middleware,
+        ));
     }
 
     // Health/metrics/readiness are never rate-limited — Kubernetes probes
@@ -81,62 +83,62 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
         .layer(axum_mw::from_fn(request_id_middleware))
         .layer(
             ServiceBuilder::new()
-            // Add request body size limit (prevents OOM from large payloads)
-            .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
-            // Add tracing
-            .layer(TraceLayer::new_for_http())
-            // Add request timeout (returns 408 Request Timeout on timeout)
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                Duration::from_millis(config.request_timeout_ms),
-            ))
-            // Add CORS (origin is configurable via SERVER__CORS_ORIGINS)
-            .layer({
-                let cors = CorsLayer::new()
-                    .allow_methods([
-                        Method::GET,
-                        Method::POST,
-                        Method::PUT,
-                        Method::PATCH,
-                        Method::DELETE,
-                        Method::OPTIONS,
-                    ])
-                    .allow_headers([
-                        header::CONTENT_TYPE,
-                        header::AUTHORIZATION,
-                        header::ACCEPT,
-                        header::HeaderName::from_static("x-admin-api-key"),
-                        header::HeaderName::from_static("x-request-id"),
-                    ]);
+                // Add request body size limit (prevents OOM from large payloads)
+                .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
+                // Add tracing
+                .layer(TraceLayer::new_for_http())
+                // Add request timeout (returns 408 Request Timeout on timeout)
+                .layer(TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    Duration::from_millis(config.request_timeout_ms),
+                ))
+                // Add CORS (origin is configurable via SERVER__CORS_ORIGINS)
+                .layer({
+                    let cors = CorsLayer::new()
+                        .allow_methods([
+                            Method::GET,
+                            Method::POST,
+                            Method::PUT,
+                            Method::PATCH,
+                            Method::DELETE,
+                            Method::OPTIONS,
+                        ])
+                        .allow_headers([
+                            header::CONTENT_TYPE,
+                            header::AUTHORIZATION,
+                            header::ACCEPT,
+                            header::HeaderName::from_static("x-admin-api-key"),
+                            header::HeaderName::from_static("x-request-id"),
+                        ]);
 
-                if config.cors_origins == "*" {
-                    cors.allow_origin(tower_http::cors::Any)
-                } else {
-                    let origins: Vec<HeaderValue> = config
-                        .cors_origins
-                        .split(',')
-                        .filter_map(|o| o.trim().parse().ok())
-                        .collect();
-                    cors.allow_origin(origins)
-                }
-            })
-            // Security headers
-            .layer(SetResponseHeaderLayer::overriding(
-                header::X_CONTENT_TYPE_OPTIONS,
-                HeaderValue::from_static("nosniff"),
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                header::HeaderName::from_static("x-frame-options"),
-                HeaderValue::from_static("DENY"),
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                header::HeaderName::from_static("x-xss-protection"),
-                HeaderValue::from_static("1; mode=block"),
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static("no-store"),
-            )),
+                    if config.cors_origins == "*" {
+                        cors.allow_origin(tower_http::cors::Any)
+                    } else {
+                        let origins: Vec<HeaderValue> = config
+                            .cors_origins
+                            .split(',')
+                            .filter_map(|o| o.trim().parse().ok())
+                            .collect();
+                        cors.allow_origin(origins)
+                    }
+                })
+                // Security headers
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::X_CONTENT_TYPE_OPTIONS,
+                    HeaderValue::from_static("nosniff"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::HeaderName::from_static("x-frame-options"),
+                    HeaderValue::from_static("DENY"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::HeaderName::from_static("x-xss-protection"),
+                    HeaderValue::from_static("1; mode=block"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store"),
+                )),
         );
 
     if config.cors_origins == "*" {

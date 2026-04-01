@@ -313,8 +313,8 @@ pub async fn function_kill(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderMap;
     use crate::test_support::test_state_with_function_repo;
+    use axum::http::HeaderMap;
 
     fn admin_headers(api_key: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -386,10 +386,13 @@ mod tests {
     async fn test_function_list_handler() {
         let (state, _) = test_state_with_function_repo();
         let headers = admin_headers(&state.config.admin.api_key);
-        let response =
-            function_list(headers, State(state), Query(FunctionListQuery { with_code: true }))
-                .await
-                .expect("list");
+        let response = function_list(
+            headers,
+            State(state),
+            Query(FunctionListQuery { with_code: true }),
+        )
+        .await
+        .expect("list");
         assert!(response.0.data.expect("data").libraries.is_array());
     }
 
@@ -499,8 +502,12 @@ mod tests {
         let mut caps = (*state.capabilities).clone();
         caps.features.functions = false;
         state.capabilities = std::sync::Arc::new(caps);
-        let result =
-            function_flush(headers, State(state), Json(FunctionFlushRequest { mode: None })).await;
+        let result = function_flush(
+            headers,
+            State(state),
+            Json(FunctionFlushRequest { mode: None }),
+        )
+        .await;
         assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
     }
 
@@ -524,10 +531,13 @@ mod tests {
     async fn test_function_flush_no_mode() {
         let (state, _) = test_state_with_function_repo();
         let headers = admin_headers(&state.config.admin.api_key);
-        let response =
-            function_flush(headers, State(state), Json(FunctionFlushRequest { mode: None }))
-                .await
-                .expect("flush no mode");
+        let response = function_flush(
+            headers,
+            State(state),
+            Json(FunctionFlushRequest { mode: None }),
+        )
+        .await
+        .expect("flush no mode");
         assert!(response.0.data.expect("data").success);
     }
 

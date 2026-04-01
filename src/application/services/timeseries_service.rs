@@ -694,7 +694,8 @@ mod tests {
         start_generic_redis_image(image, 6379, Duration::from_secs(2), "redis stack").await
     }
 
-    async fn service_with_timeseries() -> Option<(ContainerAsync<GenericImage>, TimeSeriesService)> {
+    async fn service_with_timeseries() -> Option<(ContainerAsync<GenericImage>, TimeSeriesService)>
+    {
         let (container, redis_url) = start_redis_stack().await?;
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).expect("pool"));
         let service = TimeSeriesService::new(pool);

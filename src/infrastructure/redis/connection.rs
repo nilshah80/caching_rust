@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use std::time::Instant;
 
-use deadpool_redis::{Config, Connection, Pool, Runtime};
 #[cfg(not(test))]
 use deadpool_redis::Hook;
+use deadpool_redis::{Config, Connection, Pool, Runtime};
 use serde::Serialize;
 #[cfg(not(test))]
 use tracing::{debug, info, warn};
@@ -202,8 +202,7 @@ impl InstrumentedPool {
         let mut managed_pool = deadpool_redis::PoolConfig::new(pool_config.max_size as usize);
         managed_pool.timeouts.wait = Some(Duration::from_millis(pool_config.connect_timeout_ms));
         managed_pool.timeouts.create = Some(Duration::from_millis(pool_config.connect_timeout_ms));
-        managed_pool.timeouts.recycle =
-            Some(Duration::from_millis(pool_config.command_timeout_ms));
+        managed_pool.timeouts.recycle = Some(Duration::from_millis(pool_config.command_timeout_ms));
         cfg.pool = Some(managed_pool);
 
         let command_timeout = Duration::from_millis(pool_config.command_timeout_ms);
@@ -279,7 +278,10 @@ impl InstrumentedPool {
 
             // Authenticate to the sentinel node (separate from Redis master password)
             if let Some(ref sentinel_pw) = config.sentinel_password {
-                let redis_settings = sentinel_info.redis_settings().clone().set_password(sentinel_pw);
+                let redis_settings = sentinel_info
+                    .redis_settings()
+                    .clone()
+                    .set_password(sentinel_pw);
                 sentinel_info = sentinel_info.set_redis_settings(redis_settings);
             }
 
@@ -557,9 +559,7 @@ impl InstrumentedPool {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            self.circuit_breaker
-                .opened_at
-                .store(now, Ordering::Relaxed);
+            self.circuit_breaker.opened_at.store(now, Ordering::Relaxed);
         }
     }
 

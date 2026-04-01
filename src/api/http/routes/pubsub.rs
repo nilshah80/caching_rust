@@ -693,8 +693,7 @@ mod tests {
         MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockGeoRepository,
         MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
         MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
-        MockSortedSetRepository, MockStreamRepository, MockStringRepository,
-        start_redis_container,
+        MockSortedSetRepository, MockStreamRepository, MockStringRepository, start_redis_container,
         test_state_with_all_repos_and_config,
     };
 

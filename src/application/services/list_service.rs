@@ -486,9 +486,7 @@ mod integration_tests {
         };
 
         let start = std::time::Instant::now();
-        let result = service
-            .blpop(vec!["nonexistent_key".to_string()], 1)
-            .await;
+        let result = service.blpop(vec!["nonexistent_key".to_string()], 1).await;
         let elapsed = start.elapsed();
 
         // BLPOP timeout returns Ok(None) or a timeout error in some connection modes.

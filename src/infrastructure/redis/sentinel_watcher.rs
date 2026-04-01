@@ -8,9 +8,9 @@
 //!
 //! The old pool's connections drain naturally as they're returned and discarded.
 
-use crate::infrastructure::config::RedisConfig;
 #[cfg(not(test))]
 use crate::infrastructure::config::PoolConfig;
+use crate::infrastructure::config::RedisConfig;
 #[cfg(not(test))]
 use crate::infrastructure::redis::connection::InstrumentedPool;
 #[cfg(not(test))]
@@ -90,7 +90,10 @@ async fn resolve_current_master(config: &RedisConfig) -> Result<String, String> 
             .map_err(|e| format!("invalid sentinel URL {url}: {e}"))?;
 
         if let Some(ref sentinel_pw) = config.sentinel_password {
-            let redis_settings = sentinel_info.redis_settings().clone().set_password(sentinel_pw);
+            let redis_settings = sentinel_info
+                .redis_settings()
+                .clone()
+                .set_password(sentinel_pw);
             sentinel_info = sentinel_info.set_redis_settings(redis_settings);
         }
 

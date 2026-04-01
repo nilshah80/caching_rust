@@ -274,13 +274,13 @@ pub async fn script_debug(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderMap;
     use crate::api::http::schemas::scripting::{
         EvalRequest, EvalShaRequest, FlushMode, ScriptDebugMode, ScriptDebugRequest,
         ScriptExistsRequest, ScriptFlushRequest, ScriptLoadRequest,
     };
     use crate::infrastructure::config::Settings;
     use crate::test_support::test_state_with_config;
+    use axum::http::HeaderMap;
 
     fn admin_headers(api_key: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();

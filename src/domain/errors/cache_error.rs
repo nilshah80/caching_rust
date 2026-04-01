@@ -265,8 +265,11 @@ mod tests {
             StatusCode::GATEWAY_TIMEOUT
         );
         assert_eq!(
-            CacheError::RedisError(redis::RedisError::from((ErrorKind::UnexpectedReturnType, "err")))
-                .status_code(),
+            CacheError::RedisError(redis::RedisError::from((
+                ErrorKind::UnexpectedReturnType,
+                "err"
+            )))
+            .status_code(),
             StatusCode::INTERNAL_SERVER_ERROR
         );
         assert_eq!(
@@ -293,8 +296,11 @@ mod tests {
             "SCRIPT_ERROR"
         );
         assert_eq!(
-            CacheError::RedisError(redis::RedisError::from((ErrorKind::UnexpectedReturnType, "err")))
-                .error_code(),
+            CacheError::RedisError(redis::RedisError::from((
+                ErrorKind::UnexpectedReturnType,
+                "err"
+            )))
+            .error_code(),
             "REDIS_ERROR"
         );
     }

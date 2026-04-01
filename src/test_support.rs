@@ -263,9 +263,7 @@ pub async fn start_generic_redis_image(
 /// - Otherwise: prints a warning to stderr and returns `None` to skip the test.
 fn handle_docker_unavailable<T>(label: &str, err: &dyn std::fmt::Display) -> Option<T> {
     if std::env::var("REQUIRE_DOCKER").as_deref() == Ok("1") {
-        panic!(
-            "Docker-dependent {label} test failed and REQUIRE_DOCKER=1 is set: {err}"
-        );
+        panic!("Docker-dependent {label} test failed and REQUIRE_DOCKER=1 is set: {err}");
     }
     // Write directly to the stderr fd via std::io::Write, bypassing the test
     // harness's macro-level capture so the warning is visible even for passing

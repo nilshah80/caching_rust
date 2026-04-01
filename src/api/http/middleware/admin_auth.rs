@@ -12,7 +12,11 @@ pub const ADMIN_API_KEY_HEADER: &str = "X-Admin-Api-Key";
 
 /// Validate admin API key using constant-time comparison to prevent timing attacks.
 pub fn validate_admin_key(state: &AppState, token: &str) -> Result<(), CacheError> {
-    if token.as_bytes().ct_eq(state.config.admin.api_key.as_bytes()).into() {
+    if token
+        .as_bytes()
+        .ct_eq(state.config.admin.api_key.as_bytes())
+        .into()
+    {
         Ok(())
     } else {
         Err(CacheError::Unauthorized)

@@ -10,13 +10,13 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::api::http::routes::admin::{
     AclCatRequest,
     AclCatResponse,
+    // ACL operations
+    AclDelUserRequest,
+    AclDelUserResponse,
     AclDryrunRequest,
     AclDryrunResponse,
     AclGenPassRequest,
     AclGenPassResponse,
-    // ACL operations
-    AclDelUserRequest,
-    AclDelUserResponse,
     AclListResponse,
     AclLoadResponse,
     AclLogRequest,
@@ -27,8 +27,8 @@ use crate::api::http::routes::admin::{
     AclUsersResponse,
     AclWhoamiResponse,
     ClientGetNameResponse,
-    ClientInfoResponse,
     ClientIdResponse,
+    ClientInfoResponse,
     ClientKillRequest,
     ClientKillResponse,
     // Client operations
@@ -1413,7 +1413,12 @@ const CLUSTER_PREFIXES: &[&str] = &["/api/v1/cluster"];
 const STREAM_TAGS: &[&str] = &["Streams", "Streams (Admin)"];
 const JSON_TAGS: &[&str] = &["JSON"];
 const SEARCH_TAGS: &[&str] = &["Search"];
-const BLOOM_TAGS: &[&str] = &["Bloom Filters", "Cuckoo Filters", "Count-Min Sketch", "Top-K"];
+const BLOOM_TAGS: &[&str] = &[
+    "Bloom Filters",
+    "Cuckoo Filters",
+    "Count-Min Sketch",
+    "Top-K",
+];
 const TIMESERIES_TAGS: &[&str] = &["TimeSeries"];
 const FUNCTIONS_TAGS: &[&str] = &["Functions"];
 const CLUSTER_TAGS: &[&str] = &["Cluster"];
@@ -1461,7 +1466,9 @@ pub fn filtered_openapi(
     if !remove_prefixes.is_empty() {
         // Filter paths
         spec.paths.paths.retain(|path, _| {
-            !remove_prefixes.iter().any(|prefix| path.starts_with(prefix))
+            !remove_prefixes
+                .iter()
+                .any(|prefix| path.starts_with(prefix))
         });
 
         // Filter tags
@@ -1501,8 +1508,15 @@ mod tests {
         let mut caps = RedisCapabilities::default_capabilities();
         caps.modules.json = false;
         let spec = filtered_openapi(&caps);
-        let has_json_path = spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/json"));
-        assert!(!has_json_path, "JSON paths should be removed when module is disabled");
+        let has_json_path = spec
+            .paths
+            .paths
+            .keys()
+            .any(|p| p.starts_with("/api/v1/json"));
+        assert!(
+            !has_json_path,
+            "JSON paths should be removed when module is disabled"
+        );
     }
 
     #[test]
@@ -1510,8 +1524,15 @@ mod tests {
         let mut caps = RedisCapabilities::default_capabilities();
         caps.modules.json = true;
         let spec = filtered_openapi(&caps);
-        let has_json_path = spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/json"));
-        assert!(has_json_path, "JSON paths should be present when module is enabled");
+        let has_json_path = spec
+            .paths
+            .paths
+            .keys()
+            .any(|p| p.starts_with("/api/v1/json"));
+        assert!(
+            has_json_path,
+            "JSON paths should be present when module is enabled"
+        );
     }
 
     #[test]
@@ -1519,9 +1540,27 @@ mod tests {
         let mut caps = RedisCapabilities::default_capabilities();
         caps.modules.bloom = false;
         let spec = filtered_openapi(&caps);
-        assert!(!spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/bloom")));
-        assert!(!spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/cms")));
-        assert!(!spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/topk")));
+        assert!(
+            !spec
+                .paths
+                .paths
+                .keys()
+                .any(|p| p.starts_with("/api/v1/bloom"))
+        );
+        assert!(
+            !spec
+                .paths
+                .paths
+                .keys()
+                .any(|p| p.starts_with("/api/v1/cms"))
+        );
+        assert!(
+            !spec
+                .paths
+                .paths
+                .keys()
+                .any(|p| p.starts_with("/api/v1/topk"))
+        );
     }
 
     #[test]

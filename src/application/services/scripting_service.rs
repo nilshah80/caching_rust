@@ -525,8 +525,8 @@ impl ScriptingService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::start_redis_container;
     use crate::infrastructure::redis::connection::InstrumentedPool;
+    use crate::test_support::start_redis_container;
     use serde_json::json;
     use testcontainers::ContainerAsync;
     use testcontainers_modules::redis::Redis;

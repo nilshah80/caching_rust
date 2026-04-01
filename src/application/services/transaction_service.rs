@@ -842,7 +842,8 @@ mod tests {
         start_redis_container().await
     }
 
-    async fn service_with_redis() -> Option<(ContainerAsync<Redis>, TransactionService, redis::Client)> {
+    async fn service_with_redis()
+    -> Option<(ContainerAsync<Redis>, TransactionService, redis::Client)> {
         let (container, redis_url) = start_redis().await?;
         let pool = InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap();
         let service = TransactionService::new(Arc::new(pool));
@@ -1728,7 +1729,8 @@ mod integration_tests {
         start_redis_container().await
     }
 
-    async fn service_with_redis() -> Option<(ContainerAsync<Redis>, TransactionService, redis::Client)> {
+    async fn service_with_redis()
+    -> Option<(ContainerAsync<Redis>, TransactionService, redis::Client)> {
         let (container, redis_url) = start_redis().await?;
         let pool = InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap();
         let service = TransactionService::new(Arc::new(pool));

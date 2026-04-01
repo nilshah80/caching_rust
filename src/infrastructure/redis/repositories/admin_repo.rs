@@ -427,7 +427,10 @@ impl AdminRepository for RedisAdminRepository {
             .query_async(&mut conn)
             .await?;
 
-        Ok(parse_client_list(&result).into_iter().next().unwrap_or_default())
+        Ok(parse_client_list(&result)
+            .into_iter()
+            .next()
+            .unwrap_or_default())
     }
 
     // ========================================================================
@@ -693,10 +696,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn acl_load(&self) -> Result<(), CacheError> {
         let mut conn = self.pool.get_standalone().await?;
 
-        let _: () = redis::cmd("ACL")
-            .arg("LOAD")
-            .query_async(&mut conn)
-            .await?;
+        let _: () = redis::cmd("ACL").arg("LOAD").query_async(&mut conn).await?;
 
         Ok(())
     }
@@ -704,10 +704,7 @@ impl AdminRepository for RedisAdminRepository {
     async fn acl_save(&self) -> Result<(), CacheError> {
         let mut conn = self.pool.get_standalone().await?;
 
-        let _: () = redis::cmd("ACL")
-            .arg("SAVE")
-            .query_async(&mut conn)
-            .await?;
+        let _: () = redis::cmd("ACL").arg("SAVE").query_async(&mut conn).await?;
 
         Ok(())
     }

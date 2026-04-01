@@ -26,7 +26,8 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
 
     // Process request inside a request-scoped context so response builders
     // and error conversion can access the active request ID.
-    let mut response = request_context::scope_request_id(request_id.clone(), next.run(request)).await;
+    let mut response =
+        request_context::scope_request_id(request_id.clone(), next.run(request)).await;
 
     // Add request ID to response headers - UUID strings are always valid ASCII
     if let Ok(header_value) = HeaderValue::from_str(&request_id) {
