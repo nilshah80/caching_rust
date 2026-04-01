@@ -81,6 +81,31 @@ struct PoolState {
     url: String,
 }
 
+/// Simple circuit breaker state for fast-failing when Redis is unreachable.
+/// After `CIRCUIT_BREAKER_THRESHOLD` consecutive failures, requests are rejected
+/// immediately until a cooldown period elapses and a probe succeeds.
+struct CircuitBreaker {
+    /// Consecutive connection failures
+    consecutive_failures: AtomicU64,
+    /// Timestamp (epoch secs) when the circuit was opened
+    opened_at: AtomicU64,
+}
+
+impl Default for CircuitBreaker {
+    fn default() -> Self {
+        Self {
+            consecutive_failures: AtomicU64::new(0),
+            opened_at: AtomicU64::new(0),
+        }
+    }
+}
+
+/// Number of consecutive failures before the circuit opens
+const CIRCUIT_BREAKER_THRESHOLD: u64 = 5;
+
+/// How long (seconds) the circuit stays open before allowing a probe request
+const CIRCUIT_BREAKER_COOLDOWN_SECS: u64 = 5;
+
 pub struct InstrumentedPool {
     /// Pool and resolved URL behind a single RwLock so sentinel failover swaps both atomically.
     /// The read path clones the Pool handle (cheap — internally Arc'd) and drops the lock
@@ -92,6 +117,8 @@ pub struct InstrumentedPool {
     /// Optional cluster pool. When set, `get()` returns cluster connections
     /// that route commands based on key hash slot (MOVED/ASK handling).
     cluster_pool: Option<crate::infrastructure::redis::cluster_connection::ClusterPool>,
+    /// Circuit breaker for fast-failing when Redis is unreachable
+    circuit_breaker: CircuitBreaker,
 }
 
 impl InstrumentedPool {
@@ -161,6 +188,7 @@ impl InstrumentedPool {
             max_size: pool_config.max_size as usize,
             allow_get: true,
             cluster_pool: None,
+            circuit_breaker: CircuitBreaker::default(),
         })
     }
 
@@ -351,6 +379,7 @@ impl InstrumentedPool {
             max_size: 1,
             allow_get: false,
             cluster_pool: None,
+            circuit_breaker: CircuitBreaker::default(),
         }
     }
 
@@ -373,6 +402,7 @@ impl InstrumentedPool {
             max_size: 4,
             allow_get: true,
             cluster_pool: None,
+            circuit_breaker: CircuitBreaker::default(),
         })
     }
 
@@ -484,15 +514,66 @@ impl InstrumentedPool {
         self.cluster_pool = Some(cluster);
     }
 
+    /// Check if the circuit breaker is open (Redis is considered down).
+    /// Returns Ok(()) if the request should proceed, Err if it should be fast-failed.
+    fn check_circuit_breaker(&self) -> Result<(), CacheError> {
+        let failures = self
+            .circuit_breaker
+            .consecutive_failures
+            .load(Ordering::Relaxed);
+        if failures >= CIRCUIT_BREAKER_THRESHOLD {
+            let opened_at = self.circuit_breaker.opened_at.load(Ordering::Relaxed);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            if now.saturating_sub(opened_at) < CIRCUIT_BREAKER_COOLDOWN_SECS {
+                return Err(CacheError::ConnectionFailed(
+                    "circuit breaker open — Redis unreachable".to_string(),
+                ));
+            }
+            // Cooldown elapsed — allow this request as a probe
+        }
+        Ok(())
+    }
+
+    /// Record a successful connection checkout — resets the circuit breaker.
+    fn record_success(&self) {
+        self.circuit_breaker
+            .consecutive_failures
+            .store(0, Ordering::Relaxed);
+    }
+
+    /// Record a failed connection checkout — may trip the circuit breaker.
+    fn record_failure(&self) {
+        let prev = self
+            .circuit_breaker
+            .consecutive_failures
+            .fetch_add(1, Ordering::Relaxed);
+        if prev + 1 >= CIRCUIT_BREAKER_THRESHOLD {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            self.circuit_breaker
+                .opened_at
+                .store(now, Ordering::Relaxed);
+        }
+    }
+
     /// Get a connection from the pool with instrumentation.
     /// Returns a `PoolConnection` which may be standalone or cluster-routed.
     /// In cluster mode, commands are automatically routed to the correct node.
+    /// Includes circuit breaker: fast-fails after consecutive connection failures.
     pub async fn get(&self) -> Result<PoolConnection, CacheError> {
         if !self.allow_get {
             return Err(CacheError::PoolError(
                 "pool get disabled in tests".to_string(),
             ));
         }
+
+        self.check_circuit_breaker()?;
 
         // If we have a cluster pool, prefer it for data command routing
         if let Some(ref cluster) = self.cluster_pool {
@@ -512,10 +593,12 @@ impl InstrumentedPool {
 
             return match result {
                 Ok(conn) => {
+                    self.record_success();
                     debug!(wait_ms, "Cluster connection acquired");
                     Ok(PoolConnection::Cluster(conn))
                 }
                 Err(e) => {
+                    self.record_failure();
                     self.metrics
                         .failed_checkouts
                         .fetch_add(1, Ordering::Relaxed);
@@ -549,10 +632,12 @@ impl InstrumentedPool {
 
         match result {
             Ok(conn) => {
+                self.record_success();
                 debug!(wait_ms, "Connection acquired from pool");
                 Ok(PoolConnection::Standalone(conn))
             }
             Err(e) => {
+                self.record_failure();
                 self.metrics
                     .failed_checkouts
                     .fetch_add(1, Ordering::Relaxed);

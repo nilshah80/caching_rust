@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use validator::Validate;
 
-use crate::api::http::middleware::admin_auth::ADMIN_API_KEY_HEADER;
+use crate::api::http::middleware::admin_auth::{ADMIN_API_KEY_HEADER, validate_admin_key};
 use crate::api::http::schemas::streams::{
     ConsumerCreateRequest, ConsumerGroupCreateRequest, ConsumerGroupCreateResponse,
     ConsumerGroupInfoResponse, ConsumerGroupSetIdRequest, ConsumerInfoResponse,
@@ -35,16 +35,13 @@ use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
 use crate::shared::response::ApiResponse;
 
-/// Verify admin API key from headers
+/// Verify admin API key from headers using constant-time comparison.
 fn verify_admin_key(headers: &HeaderMap, state: &AppState) -> Result<(), CacheError> {
-    let api_key = headers
+    let token = headers
         .get(ADMIN_API_KEY_HEADER)
-        .and_then(|v| v.to_str().ok());
-
-    match api_key {
-        Some(key) if key == state.config.admin.api_key => Ok(()),
-        _ => Err(CacheError::Unauthorized),
-    }
+        .and_then(|v| v.to_str().ok())
+        .ok_or(CacheError::Unauthorized)?;
+    validate_admin_key(state, token)
 }
 
 /// Create stream routes (conditionally registered based on Redis 5.0+ capability)

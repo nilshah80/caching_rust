@@ -2,9 +2,10 @@
 //!
 //! HTTP endpoints for Redis Lua scripting operations.
 
-use axum::{Json, Router, extract::State, routing::post};
+use axum::{Json, Router, extract::State, http::HeaderMap, routing::post};
 use validator::Validate;
 
+use crate::api::http::middleware::admin_auth::{ADMIN_API_KEY_HEADER, validate_admin_key};
 use crate::api::http::schemas::scripting::{
     EvalRequest, EvalResponse, EvalShaRequest, ScriptDebugRequest, ScriptDebugResponse,
     ScriptExistsRequest, ScriptExistsResponse, ScriptFlushRequest, ScriptFlushResponse,
@@ -14,7 +15,10 @@ use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
 use crate::shared::response::ApiResponse;
 
-/// Create Scripting routes
+/// Create Scripting routes.
+///
+/// All scripting endpoints require admin API key authentication because they
+/// allow arbitrary Lua code execution on the Redis server.
 pub fn scripting_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/scripts/eval", post(eval))
@@ -24,6 +28,15 @@ pub fn scripting_routes() -> Router<AppState> {
         .route("/api/v1/scripts/flush", post(script_flush))
         .route("/api/v1/scripts/kill", post(script_kill))
         .route("/api/v1/scripts/debug", post(script_debug))
+}
+
+/// Verify admin API key from request headers.
+fn require_admin(headers: &HeaderMap, state: &AppState) -> Result<(), CacheError> {
+    let token = headers
+        .get(ADMIN_API_KEY_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(CacheError::Unauthorized)?;
+    validate_admin_key(state, token)
 }
 
 /// POST /api/v1/scripts/eval
@@ -42,13 +55,17 @@ pub fn scripting_routes() -> Router<AppState> {
     responses(
         (status = 200, description = "Script executed successfully", body = EvalResponse),
         (status = 400, description = "Invalid request - empty script, too many keys/args, or Lua error"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error - Redis connection or execution error")
-    )
+    ),
+    security(("api_key" = []))
 )]
 pub async fn eval(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<EvalRequest>,
 ) -> Result<Json<ApiResponse<EvalResponse>>, CacheError> {
+    require_admin(&headers, &state)?;
     request
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
@@ -73,13 +90,17 @@ pub async fn eval(
     responses(
         (status = 200, description = "Cached script executed successfully", body = EvalResponse),
         (status = 400, description = "Invalid request - invalid SHA or script not found (use SCRIPT LOAD first)"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error - Redis connection or execution error")
-    )
+    ),
+    security(("api_key" = []))
 )]
 pub async fn evalsha(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<EvalShaRequest>,
 ) -> Result<Json<ApiResponse<EvalResponse>>, CacheError> {
+    require_admin(&headers, &state)?;
     request
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
@@ -103,13 +124,17 @@ pub async fn evalsha(
     responses(
         (status = 200, description = "Script loaded successfully", body = ScriptLoadResponse),
         (status = 400, description = "Invalid request - empty script or syntax error"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error - Redis connection error")
-    )
+    ),
+    security(("api_key" = []))
 )]
 pub async fn script_load(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<ScriptLoadRequest>,
 ) -> Result<Json<ApiResponse<ScriptLoadResponse>>, CacheError> {
+    require_admin(&headers, &state)?;
     request
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
@@ -132,13 +157,17 @@ pub async fn script_load(
     responses(
         (status = 200, description = "Script existence check completed", body = ScriptExistsResponse),
         (status = 400, description = "Invalid request - empty SHA list or invalid SHA format"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error - Redis connection error")
-    )
+    ),
+    security(("api_key" = []))
 )]
 pub async fn script_exists(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<ScriptExistsRequest>,
 ) -> Result<Json<ApiResponse<ScriptExistsResponse>>, CacheError> {
+    require_admin(&headers, &state)?;
     request
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
@@ -161,13 +190,17 @@ pub async fn script_exists(
     request_body = ScriptFlushRequest,
     responses(
         (status = 200, description = "Script cache flushed successfully", body = ScriptFlushResponse),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error - Redis connection error")
-    )
+    ),
+    security(("api_key" = []))
 )]
 pub async fn script_flush(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<ScriptFlushRequest>,
 ) -> Result<Json<ApiResponse<ScriptFlushResponse>>, CacheError> {
+    require_admin(&headers, &state)?;
     let response = state.scripting_service.script_flush(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -187,12 +220,16 @@ pub async fn script_flush(
     responses(
         (status = 200, description = "Running script killed successfully", body = ScriptKillResponse),
         (status = 400, description = "No script running or script has performed writes (cannot be killed)"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error - Redis connection error")
-    )
+    ),
+    security(("api_key" = []))
 )]
 pub async fn script_kill(
+    headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<ApiResponse<ScriptKillResponse>>, CacheError> {
+    require_admin(&headers, &state)?;
     let response = state.scripting_service.script_kill().await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -219,13 +256,17 @@ pub async fn script_kill(
     request_body = ScriptDebugRequest,
     responses(
         (status = 200, description = "Debug mode set successfully", body = ScriptDebugResponse),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error - Redis connection error")
-    )
+    ),
+    security(("api_key" = []))
 )]
 pub async fn script_debug(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(request): Json<ScriptDebugRequest>,
 ) -> Result<Json<ApiResponse<ScriptDebugResponse>>, CacheError> {
+    require_admin(&headers, &state)?;
     let response = state.scripting_service.script_debug(request).await?;
     Ok(Json(ApiResponse::success(response)))
 }
@@ -233,12 +274,19 @@ pub async fn script_debug(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderMap;
     use crate::api::http::schemas::scripting::{
         EvalRequest, EvalShaRequest, FlushMode, ScriptDebugMode, ScriptDebugRequest,
         ScriptExistsRequest, ScriptFlushRequest, ScriptLoadRequest,
     };
     use crate::infrastructure::config::Settings;
     use crate::test_support::test_state_with_config;
+
+    fn admin_headers(api_key: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(ADMIN_API_KEY_HEADER, api_key.parse().unwrap());
+        headers
+    }
 
     #[test]
     fn test_scripting_routes_creation() {
@@ -329,21 +377,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_eval_validation_error() {
-        let (state, _string_repo, _key_repo, _admin_repo) =
-            test_state_with_config(Settings::default());
-        let request = EvalRequest {
-            script: "".to_string(),
-            keys: Vec::new(),
-            args: Vec::new(),
-            readonly: false,
-        };
-        let result = eval(State(state), Json(request)).await;
-        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
-    }
-
-    #[tokio::test]
-    async fn test_eval_service_error_path() {
+    async fn test_eval_rejects_without_admin_key() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
         let request = EvalRequest {
@@ -352,7 +386,37 @@ mod tests {
             args: Vec::new(),
             readonly: false,
         };
-        let result = eval(State(state), Json(request)).await;
+        let result = eval(HeaderMap::new(), State(state), Json(request)).await;
+        assert!(matches!(result, Err(CacheError::Unauthorized)));
+    }
+
+    #[tokio::test]
+    async fn test_eval_validation_error() {
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
+        let request = EvalRequest {
+            script: "".to_string(),
+            keys: Vec::new(),
+            args: Vec::new(),
+            readonly: false,
+        };
+        let result = eval(headers, State(state), Json(request)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_eval_service_error_path() {
+        let (state, _string_repo, _key_repo, _admin_repo) =
+            test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
+        let request = EvalRequest {
+            script: "return 1".to_string(),
+            keys: Vec::new(),
+            args: Vec::new(),
+            readonly: false,
+        };
+        let result = eval(headers, State(state), Json(request)).await;
         assert!(matches!(
             result,
             Err(CacheError::PoolError(_))
@@ -365,13 +429,14 @@ mod tests {
     async fn test_evalsha_validation_error() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = EvalShaRequest {
             sha: "bad".to_string(),
             keys: Vec::new(),
             args: Vec::new(),
             readonly: false,
         };
-        let result = evalsha(State(state), Json(request)).await;
+        let result = evalsha(headers, State(state), Json(request)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
@@ -379,13 +444,14 @@ mod tests {
     async fn test_evalsha_service_error_path() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = EvalShaRequest {
             sha: "6b1bf486c81ceb7edf3c093f4a73d3e117c0b169".to_string(),
             keys: Vec::new(),
             args: Vec::new(),
             readonly: false,
         };
-        let result = evalsha(State(state), Json(request)).await;
+        let result = evalsha(headers, State(state), Json(request)).await;
         assert!(matches!(
             result,
             Err(CacheError::PoolError(_))
@@ -398,10 +464,11 @@ mod tests {
     async fn test_script_load_validation_error() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = ScriptLoadRequest {
             script: "".to_string(),
         };
-        let result = script_load(State(state), Json(request)).await;
+        let result = script_load(headers, State(state), Json(request)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
@@ -409,10 +476,11 @@ mod tests {
     async fn test_script_load_service_error_path() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = ScriptLoadRequest {
             script: "return 1".to_string(),
         };
-        let result = script_load(State(state), Json(request)).await;
+        let result = script_load(headers, State(state), Json(request)).await;
         assert!(matches!(
             result,
             Err(CacheError::PoolError(_))
@@ -425,8 +493,9 @@ mod tests {
     async fn test_script_exists_validation_error() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = ScriptExistsRequest { shas: Vec::new() };
-        let result = script_exists(State(state), Json(request)).await;
+        let result = script_exists(headers, State(state), Json(request)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
@@ -434,10 +503,11 @@ mod tests {
     async fn test_script_exists_service_error_path() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = ScriptExistsRequest {
             shas: vec!["6b1bf486c81ceb7edf3c093f4a73d3e117c0b169".to_string()],
         };
-        let result = script_exists(State(state), Json(request)).await;
+        let result = script_exists(headers, State(state), Json(request)).await;
         assert!(matches!(
             result,
             Err(CacheError::PoolError(_))
@@ -450,10 +520,11 @@ mod tests {
     async fn test_script_flush_service_error_path() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = ScriptFlushRequest {
             mode: Some(FlushMode::Sync),
         };
-        let result = script_flush(State(state), Json(request)).await;
+        let result = script_flush(headers, State(state), Json(request)).await;
         assert!(matches!(
             result,
             Err(CacheError::PoolError(_))
@@ -466,7 +537,8 @@ mod tests {
     async fn test_script_kill_service_error_path() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
-        let result = script_kill(State(state)).await;
+        let headers = admin_headers(&state.config.admin.api_key);
+        let result = script_kill(headers, State(state)).await;
         assert!(matches!(
             result,
             Err(CacheError::PoolError(_))
@@ -480,10 +552,11 @@ mod tests {
     async fn test_script_debug_service_error_path() {
         let (state, _string_repo, _key_repo, _admin_repo) =
             test_state_with_config(Settings::default());
+        let headers = admin_headers(&state.config.admin.api_key);
         let request = ScriptDebugRequest {
             mode: ScriptDebugMode::No,
         };
-        let result = script_debug(State(state), Json(request)).await;
+        let result = script_debug(headers, State(state), Json(request)).await;
         assert!(matches!(
             result,
             Err(CacheError::PoolError(_))

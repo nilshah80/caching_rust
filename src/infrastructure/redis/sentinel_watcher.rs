@@ -23,10 +23,6 @@ use tracing::warn;
 #[cfg(not(test))]
 use tracing::{error, info};
 
-/// How often to poll sentinel (seconds)
-#[cfg(not(test))]
-const POLL_INTERVAL_SECS: u64 = 10;
-
 /// Start the sentinel watcher as a background task.
 ///
 /// Returns a `JoinHandle` that runs until the process exits.
@@ -36,8 +32,9 @@ pub fn spawn_sentinel_watcher(
     redis_config: RedisConfig,
     pool_config: PoolConfig,
 ) -> tokio::task::JoinHandle<()> {
+    let poll_secs = redis_config.sentinel_poll_interval_secs.max(1);
     tokio::spawn(async move {
-        let mut ticker = interval(Duration::from_secs(POLL_INTERVAL_SECS));
+        let mut ticker = interval(Duration::from_secs(poll_secs));
 
         // Skip the immediate first tick
         ticker.tick().await;

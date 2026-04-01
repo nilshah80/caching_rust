@@ -3,6 +3,8 @@
 //! Axum server configuration with middleware and graceful shutdown.
 
 #[cfg(not(test))]
+use std::net::SocketAddr;
+#[cfg(not(test))]
 use std::time::Duration;
 
 #[cfg(not(test))]
@@ -38,7 +40,7 @@ use crate::api::http::middleware::{
     logging_middleware, metrics_middleware, request_id_middleware,
 };
 #[cfg(not(test))]
-use crate::api::http::middleware::rate_limit::{create_rate_limiter, rate_limit_middleware};
+use crate::api::http::middleware::rate_limit::{RateLimitState, create_rate_limiter, rate_limit_middleware};
 #[cfg(not(test))]
 use crate::api::http::routes::{build_router, operational_routes};
 use crate::infrastructure::config::ServerConfig;
@@ -58,7 +60,12 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
     let rate_limit = &state.config.rate_limit;
     if rate_limit.enabled {
         let limiter = create_rate_limiter(rate_limit.requests_per_second, rate_limit.burst_size);
-        api_router = api_router.layer(axum_mw::from_fn_with_state(limiter, rate_limit_middleware));
+        let rate_limit_state = RateLimitState {
+            limiter,
+            trust_proxy: config.trust_proxy,
+        };
+        api_router =
+            api_router.layer(axum_mw::from_fn_with_state(rate_limit_state, rate_limit_middleware));
     }
 
     // Health/metrics/readiness are never rate-limited — Kubernetes probes
@@ -152,10 +159,15 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
 
     info!(address = %addr, "Starting HTTP server");
 
-    // Run with graceful shutdown
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // Run with graceful shutdown.
+    // Use into_make_service_with_connect_info so ConnectInfo<SocketAddr> is available
+    // in middleware/handlers for accurate per-IP rate limiting.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     info!("Server shutdown complete");
     Ok(())

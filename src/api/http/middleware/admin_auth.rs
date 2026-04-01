@@ -2,15 +2,17 @@
 //!
 //! API key authentication for admin endpoints.
 
+use subtle::ConstantTimeEq;
+
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
 
 /// Header name for the admin API key
 pub const ADMIN_API_KEY_HEADER: &str = "X-Admin-Api-Key";
 
-/// Validate admin API key (Bearer token variant for use with typed headers)
+/// Validate admin API key using constant-time comparison to prevent timing attacks.
 pub fn validate_admin_key(state: &AppState, token: &str) -> Result<(), CacheError> {
-    if token == state.config.admin.api_key {
+    if token.as_bytes().ct_eq(state.config.admin.api_key.as_bytes()).into() {
         Ok(())
     } else {
         Err(CacheError::Unauthorized)

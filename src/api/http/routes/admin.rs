@@ -579,14 +579,20 @@ pub fn admin_routes() -> Router<AppState> {
 // Auth Helper
 // ============================================================================
 
-/// Verify admin API key from headers
+/// Verify admin API key from headers using constant-time comparison.
 fn verify_admin_key(headers: &HeaderMap, state: &AppState) -> Result<(), StatusCode> {
+    use subtle::ConstantTimeEq;
+
     let api_key = headers
         .get(ADMIN_API_KEY_HEADER)
         .and_then(|v| v.to_str().ok());
 
     match api_key {
-        Some(key) if key == state.config.admin.api_key => Ok(()),
+        Some(key)
+            if bool::from(key.as_bytes().ct_eq(state.config.admin.api_key.as_bytes())) =>
+        {
+            Ok(())
+        }
         _ => Err(StatusCode::UNAUTHORIZED),
     }
 }

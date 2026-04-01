@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
 
-use crate::api::http::middleware::admin_auth::ADMIN_API_KEY_HEADER;
+use crate::api::http::middleware::admin_auth::{ADMIN_API_KEY_HEADER, validate_admin_key};
 use crate::api::http::schemas::cluster::KeySlotResponse;
 use crate::domain::repositories::{ClusterInfo, ClusterNode, ClusterSlotRange};
 use crate::shared::app_state::AppState;
@@ -25,14 +25,11 @@ pub fn cluster_routes() -> Router<AppState> {
 }
 
 fn verify_admin_key(headers: &HeaderMap, state: &AppState) -> Result<(), StatusCode> {
-    let api_key = headers
+    let token = headers
         .get(ADMIN_API_KEY_HEADER)
-        .and_then(|v| v.to_str().ok());
-
-    match api_key {
-        Some(key) if key == state.config.admin.api_key => Ok(()),
-        _ => Err(StatusCode::UNAUTHORIZED),
-    }
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    validate_admin_key(state, token).map_err(|_| StatusCode::UNAUTHORIZED)
 }
 
 /// Get cluster info (CLUSTER INFO)

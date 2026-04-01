@@ -58,10 +58,28 @@ async fn main() -> anyhow::Result<()> {
     let capabilities = pool.detect_capabilities().await?;
     info!(?capabilities, mode, "Redis capabilities detected");
 
-    // Security warnings
+    // Security warnings and production safeguards
+    let is_production = std::env::var("ENVIRONMENT")
+        .or_else(|_| std::env::var("ENV"))
+        .map(|v| v == "production" || v == "prod")
+        .unwrap_or(false);
+
     if settings.admin.api_key == "changeme-admin-key" {
+        if is_production {
+            anyhow::bail!(
+                "ADMIN__API_KEY is set to the default value — refusing to start in production. \
+                 Set a strong, unique API key via ADMIN__API_KEY"
+            );
+        }
         warn!(
             "Admin API key is set to the default value — change ADMIN__API_KEY before deploying to production"
+        );
+    }
+
+    if settings.server.cors_origins == "*" && is_production {
+        anyhow::bail!(
+            "SERVER__CORS_ORIGINS is set to wildcard '*' — refusing to start in production. \
+             Set explicit origins via SERVER__CORS_ORIGINS"
         );
     }
 
@@ -69,7 +87,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Start sentinel failover watcher if in sentinel mode
     if settings.redis.sentinel_enabled {
-        info!("Starting sentinel failover watcher (polling every 10s)");
+        info!(
+            poll_interval_secs = settings.redis.sentinel_poll_interval_secs,
+            "Starting sentinel failover watcher"
+        );
         sentinel_watcher::spawn_sentinel_watcher(
             pool.clone(),
             settings.redis.clone(),

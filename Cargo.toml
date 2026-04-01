@@ -59,6 +59,9 @@ metrics-exporter-prometheus = { version = "0.16", features = ["http-listener"] }
 # Rate limiting
 governor = "0.8"
 
+# Constant-time comparison for API key authentication
+subtle = "2.6"
+
 # Pub/Sub support (WebSocket handled by axum's "ws" feature)
 futures = "0.3"
 
@@ -68,11 +71,11 @@ async-stream = "0.3"
 
 [dev-dependencies]
 tokio-test = "0.4"
-testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["redis"] }
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["redis"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
 reqwest = { version = "0.12", features = ["json"] }
-tokio-tungstenite = "0.26"
+tokio-tungstenite = "0.29"
 num-bigint = "0.4"
 
 [features]

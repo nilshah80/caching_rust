@@ -50,6 +50,12 @@ pub struct ServerConfig {
     /// Example: "https://app.example.com,https://admin.example.com"
     #[serde(default = "default_cors_origins")]
     pub cors_origins: String,
+
+    /// Trust X-Forwarded-For header for client IP extraction (default: false).
+    /// Only enable this when the service is behind a trusted reverse proxy.
+    /// When false, client IP is extracted from the TCP socket address only.
+    #[serde(default)]
+    pub trust_proxy: bool,
 }
 
 /// Redis connection configuration
@@ -58,6 +64,11 @@ pub struct RedisConfig {
     /// Redis URL (default: "redis://localhost:6379")
     #[serde(default = "default_redis_url")]
     pub url: String,
+
+    /// Sentinel poll interval in seconds (default: 10).
+    /// How often the sentinel watcher queries for master changes.
+    #[serde(default = "default_sentinel_poll_interval")]
+    pub sentinel_poll_interval_secs: u64,
 
     /// Redis password (optional)
     pub password: Option<String>,
@@ -187,7 +198,7 @@ pub struct RateLimitConfig {
     #[serde(default = "default_rate_limit_enabled")]
     pub enabled: bool,
 
-    /// Maximum requests per second (global, shared across all clients) (default: 100)
+    /// Maximum requests per second per client IP (default: 100)
     #[serde(default = "default_rate_limit_rps")]
     pub requests_per_second: u64,
 
@@ -235,6 +246,10 @@ fn default_max_value_size() -> usize {
 
 fn default_sentinel_master_name() -> String {
     "mymaster".to_string()
+}
+
+fn default_sentinel_poll_interval() -> u64 {
+    10
 }
 
 fn default_cors_origins() -> String {
@@ -321,6 +336,7 @@ impl Default for ServerConfig {
             max_batch_size: default_max_batch_size(),
             max_value_size_bytes: default_max_value_size(),
             cors_origins: default_cors_origins(),
+            trust_proxy: false,
         }
     }
 }
@@ -343,6 +359,7 @@ impl Default for RedisConfig {
             sentinel_nodes: String::new(),
             sentinel_master_name: default_sentinel_master_name(),
             sentinel_password: None,
+            sentinel_poll_interval_secs: default_sentinel_poll_interval(),
         }
     }
 }
@@ -451,6 +468,7 @@ impl Settings {
             .set_default("redis.sentinel_enabled", false)?
             .set_default("redis.sentinel_nodes", "")?
             .set_default("redis.sentinel_master_name", "mymaster")?
+            .set_default("redis.sentinel_poll_interval_secs", 10)?
             .set_default("pool.min_size", 2)?
             .set_default("pool.max_size", 10)?
             .set_default("pool.connect_timeout_ms", 5000)?

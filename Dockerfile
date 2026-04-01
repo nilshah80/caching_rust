@@ -43,4 +43,11 @@ USER nonroot:nonroot
 
 EXPOSE 8080
 
+# Health checks: distroless has no shell/curl, so HEALTHCHECK is omitted.
+# Use orchestrator probes instead:
+#   Kubernetes liveness:  GET /health/live
+#   Kubernetes readiness: GET /health/ready
+#   Docker Compose:       test: ["CMD-SHELL", "curl -f http://localhost:8080/health/live || exit 1"]
+#                         (requires a sidecar or non-distroless base)
+
 ENTRYPOINT ["/usr/local/bin/redis-caching-service"]
