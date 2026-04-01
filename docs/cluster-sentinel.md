@@ -146,12 +146,14 @@ docker-compose.sentinel-test.yml                   -- master + replica + 3 senti
 tests/fixtures/sentinel.conf                       -- sentinel config fixture
 ```
 
-### Not yet implemented
+### E2E and CI
 
 ```
-tests/e2e/cluster_test.sh                         -- cluster E2E test script
-tests/e2e/sentinel_test.sh                         -- sentinel E2E test script
-.github/workflows/ci.yml cluster/sentinel jobs     -- dedicated CI jobs
+tests/e2e/cluster_test.sh                          -- cluster E2E test script (20 assertions)
+tests/e2e/sentinel_test.sh                         -- sentinel E2E test script (11 assertions)
+docker-compose.cluster-test.yml                    -- all-in-Docker cluster test (service + 3 nodes + test runner)
+docker-compose.sentinel-test.yml                   -- all-in-Docker sentinel test (service + master + replica + 3 sentinels + test runner)
+.github/workflows/ci.yml                           -- cluster-test and sentinel-test CI jobs
 ```
 
 ## Testing
