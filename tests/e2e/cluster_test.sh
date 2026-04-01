@@ -112,6 +112,7 @@ echo "--- Scripting through cluster ---"
 status=$(curl -so /dev/null -w "%{http_code}" -X POST \
   "$BASE_URL/api/v1/scripts/eval" \
   -H "Content-Type: application/json" \
+  -H "X-Admin-Api-Key: $API_KEY" \
   -d '{"script":"return redis.call(\"get\", KEYS[1])","keys":["cluster-e2e-test"],"args":[]}')
 assert_status "EVAL through cluster (200)" "200" "$status"
 

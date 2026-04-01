@@ -206,7 +206,24 @@ pub async fn start_redis_container() -> Option<(ContainerAsync<Redis>, String)> 
             return handle_docker_unavailable("Redis", &err);
         }
     };
-    Some((container, format!("redis://{host}:{port}")))
+    let url = format!("redis://{host}:{port}");
+
+    // Wait for Redis to actually accept commands (port mapping != ready).
+    // Without this, blocking command tests can hit a timeout during startup.
+    for _ in 0..20 {
+        if let Ok(client) = redis::Client::open(url.as_str())
+            && let Ok(mut conn) = client.get_multiplexed_async_connection().await
+            && redis::cmd("PING")
+                .query_async::<String>(&mut conn)
+                .await
+                .is_ok()
+        {
+            return Some((container, url));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Some((container, url))
 }
 
 /// Start a generic Redis image for integration testing.

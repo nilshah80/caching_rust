@@ -279,7 +279,8 @@ impl InstrumentedPool {
 
             // Authenticate to the sentinel node (separate from Redis master password)
             if let Some(ref sentinel_pw) = config.sentinel_password {
-                sentinel_info.redis.password = Some(sentinel_pw.clone());
+                let redis_settings = sentinel_info.redis_settings().clone().set_password(sentinel_pw);
+                sentinel_info = sentinel_info.set_redis_settings(redis_settings);
             }
 
             let client = match redis::Client::open(sentinel_info) {

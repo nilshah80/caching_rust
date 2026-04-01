@@ -233,7 +233,7 @@ impl PubSubConnection {
             pubsub.subscribe(channel).await
         } else {
             Err(redis::RedisError::from((
-                redis::ErrorKind::IoError,
+                redis::ErrorKind::Io,
                 "PubSub connection already consumed",
             )))
         }
@@ -251,7 +251,7 @@ impl PubSubConnection {
             Ok(())
         } else {
             Err(redis::RedisError::from((
-                redis::ErrorKind::IoError,
+                redis::ErrorKind::Io,
                 "PubSub connection already consumed",
             )))
         }
@@ -263,7 +263,7 @@ impl PubSubConnection {
             pubsub.psubscribe(pattern).await
         } else {
             Err(redis::RedisError::from((
-                redis::ErrorKind::IoError,
+                redis::ErrorKind::Io,
                 "PubSub connection already consumed",
             )))
         }
@@ -281,7 +281,7 @@ impl PubSubConnection {
             Ok(())
         } else {
             Err(redis::RedisError::from((
-                redis::ErrorKind::IoError,
+                redis::ErrorKind::Io,
                 "PubSub connection already consumed",
             )))
         }
@@ -293,7 +293,7 @@ impl PubSubConnection {
             pubsub.unsubscribe(channel).await
         } else {
             Err(redis::RedisError::from((
-                redis::ErrorKind::IoError,
+                redis::ErrorKind::Io,
                 "PubSub connection already consumed",
             )))
         }
@@ -305,7 +305,7 @@ impl PubSubConnection {
             pubsub.punsubscribe(pattern).await
         } else {
             Err(redis::RedisError::from((
-                redis::ErrorKind::IoError,
+                redis::ErrorKind::Io,
                 "PubSub connection already consumed",
             )))
         }
@@ -469,22 +469,22 @@ mod tests {
         let mut conn = PubSubConnection { inner: None, stats };
 
         let err = conn.subscribe("chan").await.unwrap_err();
-        assert_eq!(err.kind(), redis::ErrorKind::IoError);
+        assert_eq!(err.kind(), redis::ErrorKind::Io);
 
         let err = conn.subscribe_many(["a", "b"]).await.unwrap_err();
-        assert_eq!(err.kind(), redis::ErrorKind::IoError);
+        assert_eq!(err.kind(), redis::ErrorKind::Io);
 
         let err = conn.psubscribe("pat").await.unwrap_err();
-        assert_eq!(err.kind(), redis::ErrorKind::IoError);
+        assert_eq!(err.kind(), redis::ErrorKind::Io);
 
         let err = conn.psubscribe_many(["pat1", "pat2"]).await.unwrap_err();
-        assert_eq!(err.kind(), redis::ErrorKind::IoError);
+        assert_eq!(err.kind(), redis::ErrorKind::Io);
 
         let err = conn.unsubscribe("chan").await.unwrap_err();
-        assert_eq!(err.kind(), redis::ErrorKind::IoError);
+        assert_eq!(err.kind(), redis::ErrorKind::Io);
 
         let err = conn.punsubscribe("pat").await.unwrap_err();
-        assert_eq!(err.kind(), redis::ErrorKind::IoError);
+        assert_eq!(err.kind(), redis::ErrorKind::Io);
 
         assert!(conn.into_on_message().is_none());
     }

@@ -40,14 +40,13 @@ pub fn create_rate_limiter(rps: u64, burst: u32) -> SharedRateLimiter {
 /// When `trust_proxy` is false, only uses the socket address — never trusts client-supplied headers.
 fn extract_client_ip(request: &Request, trust_proxy: bool) -> IpAddr {
     // Only check X-Forwarded-For when behind a trusted reverse proxy
-    if trust_proxy {
-        if let Some(forwarded) = request.headers().get("x-forwarded-for")
-            && let Ok(value) = forwarded.to_str()
-            && let Some(first_ip) = value.split(',').next()
-            && let Ok(ip) = first_ip.trim().parse::<IpAddr>()
-        {
-            return ip;
-        }
+    if trust_proxy
+        && let Some(forwarded) = request.headers().get("x-forwarded-for")
+        && let Ok(value) = forwarded.to_str()
+        && let Some(first_ip) = value.split(',').next()
+        && let Ok(ip) = first_ip.trim().parse::<IpAddr>()
+    {
+        return ip;
     }
 
     // Use the actual TCP socket address (requires into_make_service_with_connect_info)

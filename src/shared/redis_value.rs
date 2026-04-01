@@ -55,6 +55,7 @@ pub fn redis_value_to_json(value: redis::Value) -> Value {
         redis::Value::BigNumber(n) => Value::String(n.to_string()),
         // ServerError type is not publicly constructible — only testable via real Redis errors
         redis::Value::ServerError(err) => Value::String(format!("{err:?}")),
+        _ => Value::Null,
     }
 }
 

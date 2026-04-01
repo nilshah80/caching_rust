@@ -68,20 +68,20 @@ impl ScriptingService {
     /// Script execution errors (Lua errors, NOSCRIPT, NOTBUSY, UNKILLABLE) -> ScriptError (400)
     /// Connection/transport errors -> appropriate 5xx errors
     fn map_redis_error(e: redis::RedisError) -> CacheError {
-        use redis::ErrorKind;
+        use redis::{ErrorKind, ServerErrorKind};
         match e.kind() {
             // Script-specific errors -> 400
-            ErrorKind::NoScriptError => CacheError::ScriptError(
+            ErrorKind::Server(ServerErrorKind::NoScript) => CacheError::ScriptError(
                 "Script not found in cache. Use SCRIPT LOAD first.".to_string(),
             ),
             // NotBusy error from SCRIPT KILL when no script is running
-            ErrorKind::NotBusy => {
+            ErrorKind::Server(ServerErrorKind::NotBusy) => {
                 CacheError::ScriptError("No script is currently running".to_string())
             }
             // Extension errors include Lua runtime errors
-            ErrorKind::ExtensionError => CacheError::ScriptError(format!("Script error: {}", e)),
+            ErrorKind::Extension => CacheError::ScriptError(format!("Script error: {}", e)),
             // Response errors from Redis (including Lua errors returned by Redis)
-            ErrorKind::ResponseError => {
+            ErrorKind::Server(ServerErrorKind::ResponseError) => {
                 let msg = e.to_string();
                 // Check if it's a script-related error
                 if msg.contains("NOSCRIPT")
@@ -100,8 +100,8 @@ impl ScriptingService {
                 }
             }
             // Connection/transport errors -> 5xx
-            ErrorKind::IoError => CacheError::ConnectionFailed(e.to_string()),
-            ErrorKind::ClientError => CacheError::ConnectionFailed(e.to_string()),
+            ErrorKind::Io => CacheError::ConnectionFailed(e.to_string()),
+            ErrorKind::Client => CacheError::ConnectionFailed(e.to_string()),
             // Other errors use default RedisError mapping (500)
             _ => CacheError::RedisError(e),
         }
@@ -517,6 +517,7 @@ impl ScriptingService {
             redis::Value::ServerError(e) => {
                 serde_json::json!({"error": format!("{:?}", e)})
             }
+            _ => serde_json::Value::Null,
         }
     }
 }
@@ -766,26 +767,32 @@ mod tests {
 
     #[test]
     fn test_map_redis_error_variants() {
-        let noscript = redis::RedisError::from((redis::ErrorKind::NoScriptError, "NOSCRIPT"));
+        let noscript = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::NoScript),
+            "NOSCRIPT",
+        ));
         assert!(matches!(
             ScriptingService::map_redis_error(noscript),
             CacheError::ScriptError(_)
         ));
 
-        let notbusy = redis::RedisError::from((redis::ErrorKind::NotBusy, "NOTBUSY"));
+        let notbusy = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::NotBusy),
+            "NOTBUSY",
+        ));
         assert!(matches!(
             ScriptingService::map_redis_error(notbusy),
             CacheError::ScriptError(_)
         ));
 
-        let extension = redis::RedisError::from((redis::ErrorKind::ExtensionError, "ERR"));
+        let extension = redis::RedisError::from((redis::ErrorKind::Extension, "ERR"));
         assert!(matches!(
             ScriptingService::map_redis_error(extension),
             CacheError::ScriptError(_)
         ));
 
         let response_script = redis::RedisError::from((
-            redis::ErrorKind::ResponseError,
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
             "ERR",
             "NOSCRIPT missing".to_string(),
         ));
@@ -795,7 +802,7 @@ mod tests {
         ));
 
         let response_notbusy = redis::RedisError::from((
-            redis::ErrorKind::ResponseError,
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
             "ERR",
             "No scripts in execution".to_string(),
         ));
@@ -805,7 +812,7 @@ mod tests {
         ));
 
         let response_unkillable = redis::RedisError::from((
-            redis::ErrorKind::ResponseError,
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
             "ERR",
             "UNKILLABLE".to_string(),
         ));
@@ -814,20 +821,22 @@ mod tests {
             CacheError::ScriptError(_)
         ));
 
-        let response_other =
-            redis::RedisError::from((redis::ErrorKind::ResponseError, "WRONGTYPE"));
+        let response_other = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
+            "WRONGTYPE",
+        ));
         assert!(matches!(
             ScriptingService::map_redis_error(response_other),
             CacheError::RedisError(_)
         ));
 
-        let io_err = redis::RedisError::from((redis::ErrorKind::IoError, "io"));
+        let io_err = redis::RedisError::from((redis::ErrorKind::Io, "io"));
         assert!(matches!(
             ScriptingService::map_redis_error(io_err),
             CacheError::ConnectionFailed(_)
         ));
 
-        let client_err = redis::RedisError::from((redis::ErrorKind::ClientError, "client"));
+        let client_err = redis::RedisError::from((redis::ErrorKind::Client, "client"));
         assert!(matches!(
             ScriptingService::map_redis_error(client_err),
             CacheError::ConnectionFailed(_)

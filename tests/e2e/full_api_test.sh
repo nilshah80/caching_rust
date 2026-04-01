@@ -236,24 +236,24 @@ echo ""
 # ==========================================================================
 echo "--- Scripting ---"
 
-# EVAL: POST /api/v1/scripts/eval
-IFS='|' read -r status body < <(do_request POST "/api/v1/scripts/eval" \
+# EVAL: POST /api/v1/scripts/eval (admin-protected)
+IFS='|' read -r status body < <(admin_request POST "/api/v1/scripts/eval" \
     "{\"script\":\"return redis.call('SET', KEYS[1], ARGV[1])\",\"keys\":[\"${P}_lua\"],\"args\":[\"lua_val\"]}")
 check "EVAL" "200" "$status" "$body"
 
-# SCRIPT LOAD: POST /api/v1/scripts/load
-IFS='|' read -r status body < <(do_request POST "/api/v1/scripts/load" \
+# SCRIPT LOAD: POST /api/v1/scripts/load (admin-protected)
+IFS='|' read -r status body < <(admin_request POST "/api/v1/scripts/load" \
     '{"script":"return 1"}')
 check "SCRIPT LOAD" "200" "$status" "$body"
 
 # Extract SHA from response for EVALSHA
 SHA=$(echo "$body" | sed -n 's/.*"sha":"\([^"]*\)".*/\1/p' || echo "")
 if [[ -n "$SHA" ]]; then
-    IFS='|' read -r status body < <(do_request POST "/api/v1/scripts/evalsha" \
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/scripts/evalsha" \
         "{\"sha\":\"$SHA\",\"keys\":[],\"args\":[]}")
     check "EVALSHA" "200" "$status" "$body"
 
-    IFS='|' read -r status body < <(do_request POST "/api/v1/scripts/exists" \
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/scripts/exists" \
         "{\"shas\":[\"$SHA\"]}")
     check "SCRIPT EXISTS" "200" "$status" "$body"
 else
@@ -269,20 +269,20 @@ echo ""
 # ==========================================================================
 echo "--- Functions ---"
 
-IFS='|' read -r status body < <(do_request GET "/api/v1/functions")
+IFS='|' read -r status body < <(admin_request GET "/api/v1/functions")
 check_any "FUNCTION LIST" "$status" "$body" 200 501
 
 if [[ "$status" == "200" ]]; then
-    IFS='|' read -r status body < <(do_request POST "/api/v1/functions/load" \
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/functions/load" \
         '{"code":"#!lua name=e2elib\nredis.register_function(\"e2e_echo\", function(keys, args) return args[1] end)","replace":true}')
     check "FUNCTION LOAD" "200" "$status" "$body"
 
-    IFS='|' read -r status body < <(do_request POST "/api/v1/functions/call" \
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/functions/call" \
         '{"function":"e2e_echo","keys":[],"args":["hello"]}')
     check "FCALL" "200" "$status" "$body"
 
     # Cleanup
-    do_request POST "/api/v1/functions/flush" '{"mode":"async"}' > /dev/null 2>&1 || true
+    admin_request POST "/api/v1/functions/flush" '{"mode":"async"}' > /dev/null 2>&1 || true
 else
     SKIP=$((SKIP + 2))
     echo "  SKIP  FUNCTION LOAD (functions not available)"

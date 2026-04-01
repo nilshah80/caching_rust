@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.92-slim AS chef
+FROM rust:1.94-slim AS chef
 
 WORKDIR /app
 
@@ -32,11 +32,9 @@ COPY benches ./benches
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked --bin redis-caching-service
 
-FROM gcr.io/distroless/cc-debian12 AS runtime
+FROM gcr.io/distroless/cc-debian13 AS runtime
 
 WORKDIR /app
-
-# The distroless image runs entirely without a shell. No additional installation needed.
 COPY --from=builder /app/target/release/redis-caching-service /usr/local/bin/redis-caching-service
 
 USER nonroot:nonroot

@@ -136,16 +136,16 @@ impl TransactionService {
     /// Script execution errors (Lua errors) -> ScriptError (400)
     /// Connection/transport errors -> appropriate 5xx errors
     fn map_script_error(e: redis::RedisError) -> CacheError {
-        use redis::ErrorKind;
+        use redis::{ErrorKind, ServerErrorKind};
         match e.kind() {
             // Script-specific errors -> 400
-            ErrorKind::NoScriptError => {
+            ErrorKind::Server(ServerErrorKind::NoScript) => {
                 CacheError::ScriptError("Script not found in cache".to_string())
             }
             // Extension errors include Lua runtime errors
-            ErrorKind::ExtensionError => CacheError::ScriptError(format!("Script error: {}", e)),
+            ErrorKind::Extension => CacheError::ScriptError(format!("Script error: {}", e)),
             // Response errors from Redis (including Lua errors)
-            ErrorKind::ResponseError => {
+            ErrorKind::Server(ServerErrorKind::ResponseError) => {
                 let msg = e.to_string();
                 if msg.contains("NOSCRIPT")
                     || msg.contains("ERR Error")
@@ -157,8 +157,8 @@ impl TransactionService {
                 }
             }
             // Connection/transport errors -> 5xx
-            ErrorKind::IoError => CacheError::ConnectionFailed(e.to_string()),
-            ErrorKind::ClientError => CacheError::ConnectionFailed(e.to_string()),
+            ErrorKind::Io => CacheError::ConnectionFailed(e.to_string()),
+            ErrorKind::Client => CacheError::ConnectionFailed(e.to_string()),
             // Other errors use default RedisError mapping (500)
             _ => CacheError::RedisError(e),
         }
@@ -513,7 +513,12 @@ impl TransactionService {
                 pipe.hset_multiple(key, &pairs);
             }
             RedisCommand::HMGet { key, fields } => {
-                pipe.hget(key, fields);
+                let mut cmd = redis::cmd("HMGET");
+                cmd.arg(key.as_str());
+                for f in fields {
+                    cmd.arg(f.as_str());
+                }
+                pipe.add_command(cmd);
             }
             RedisCommand::HIncrBy { key, field, delta } => {
                 pipe.hincr(key, field, *delta);
@@ -1303,20 +1308,23 @@ mod tests {
 
     #[test]
     fn test_map_script_error_variants() {
-        let noscript = redis::RedisError::from((redis::ErrorKind::NoScriptError, "NOSCRIPT"));
+        let noscript = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::NoScript),
+            "NOSCRIPT",
+        ));
         assert!(matches!(
             TransactionService::map_script_error(noscript),
             CacheError::ScriptError(_)
         ));
 
-        let extension = redis::RedisError::from((redis::ErrorKind::ExtensionError, "ERR"));
+        let extension = redis::RedisError::from((redis::ErrorKind::Extension, "ERR"));
         assert!(matches!(
             TransactionService::map_script_error(extension),
             CacheError::ScriptError(_)
         ));
 
         let response = redis::RedisError::from((
-            redis::ErrorKind::ResponseError,
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
             "ERR",
             "NOSCRIPT missing".to_string(),
         ));
@@ -1325,13 +1333,16 @@ mod tests {
             CacheError::ScriptError(_)
         ));
 
-        let other = redis::RedisError::from((redis::ErrorKind::ResponseError, "WRONGTYPE"));
+        let other = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
+            "WRONGTYPE",
+        ));
         assert!(matches!(
             TransactionService::map_script_error(other),
             CacheError::RedisError(_)
         ));
 
-        let io_err = redis::RedisError::from((redis::ErrorKind::IoError, "io"));
+        let io_err = redis::RedisError::from((redis::ErrorKind::Io, "io"));
         assert!(matches!(
             TransactionService::map_script_error(io_err),
             CacheError::ConnectionFailed(_)
@@ -1541,7 +1552,7 @@ mod tests {
         };
         let mut conn = service.pool.get().await.unwrap();
         let err = redis::RedisError::from((
-            redis::ErrorKind::ResponseError,
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
             "EXECABORT Transaction discarded because of previous errors.",
         ));
         let result = TransactionService::handle_exec_error(&mut conn, err).await;
