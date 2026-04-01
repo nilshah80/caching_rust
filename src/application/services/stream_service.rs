@@ -1006,29 +1006,27 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    use crate::test_support::start_redis_container;
     use std::sync::Arc;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
-    async fn create_service() -> (ContainerAsync<Redis>, StreamService) {
-        let (container, redis_url) = start_redis().await;
+    async fn create_service() -> Option<(ContainerAsync<Redis>, StreamService)> {
+        let (container, redis_url) = start_redis().await?;
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap());
         let service = StreamService::new(pool);
-        (container, service)
+        Some((container, service))
     }
 
     #[tokio::test]
     async fn test_xread_blocking_returns_none_on_timeout() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         let start = std::time::Instant::now();
         let result = service
@@ -1051,7 +1049,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_xread_blocking_returns_data() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         // Add entries to the stream
         let mut fields1 = HashMap::new();

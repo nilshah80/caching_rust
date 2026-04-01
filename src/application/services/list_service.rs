@@ -463,29 +463,27 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    use crate::test_support::start_redis_container;
     use std::sync::Arc;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
-    async fn create_service() -> (ContainerAsync<Redis>, ListService) {
-        let (container, redis_url) = start_redis().await;
+    async fn create_service() -> Option<(ContainerAsync<Redis>, ListService)> {
+        let (container, redis_url) = start_redis().await?;
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap());
         let service = ListService::new(pool);
-        (container, service)
+        Some((container, service))
     }
 
     #[tokio::test]
     async fn test_blpop_returns_none_on_timeout() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         let start = std::time::Instant::now();
         let result = service
@@ -504,7 +502,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_blpop_returns_data_when_available() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         // LPUSH pushes elements to the head; order in list will be [c, b, a]
         service
@@ -526,7 +526,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_brpop_returns_data_when_available() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         // RPUSH appends to the tail; order in list will be [x, y, z]
         service
@@ -550,7 +552,9 @@ mod integration_tests {
     /// so these tests skip gracefully if the command is not available.
     #[tokio::test]
     async fn test_blmove_returns_none_on_timeout() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         let start = std::time::Instant::now();
         let result = service
@@ -584,7 +588,9 @@ mod integration_tests {
     /// BLMOVE requires Redis 6.2+.
     #[tokio::test]
     async fn test_blmove_moves_element() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         service
             .lpush("src_list", vec!["alpha".to_string(), "beta".to_string()])

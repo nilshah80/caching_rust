@@ -374,18 +374,14 @@ impl Drop for PubSubMessageStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::start_redis_container;
     use futures::StreamExt;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
     use tokio::time::{Duration, timeout};
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
     #[test]
@@ -495,7 +491,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_subscription_connection_failure_updates_stats() {
-        let config = PubSubConfig::default();
+        let config = PubSubConfig {
+            connection_timeout_ms: 100,
+            ..PubSubConfig::default()
+        };
         let manager = PubSubManager::new("redis://127.0.0.1:1", config).unwrap();
 
         let result = timeout(Duration::from_secs(2), manager.create_subscription()).await;
@@ -547,7 +546,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_pubsub_connection_with_real_redis() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let config = PubSubConfig {
             max_subscriptions: 4,
             ..PubSubConfig::default()

@@ -10,6 +10,7 @@ use axum::{
 use tracing::error;
 
 use crate::domain::errors::ErrorResponse;
+use crate::shared::request_context;
 
 /// Handle unhandled errors and convert to proper responses
 pub async fn error_handler(error: Box<dyn std::error::Error + Send + Sync>) -> Response {
@@ -18,7 +19,7 @@ pub async fn error_handler(error: Box<dyn std::error::Error + Send + Sync>) -> R
     let response = ErrorResponse {
         success: false,
         timestamp: chrono::Utc::now(),
-        request_id: None,
+        request_id: request_context::current_request_id(),
         error: crate::domain::errors::ErrorDetail {
             code: "INTERNAL_ERROR".to_string(),
             message: "An unexpected error occurred".to_string(),

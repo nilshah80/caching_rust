@@ -8,6 +8,8 @@
     clippy::indexing_slicing
 )]
 
+mod docker_helper;
+
 mod core_features;
 mod error_scenarios;
 mod phase5_features;

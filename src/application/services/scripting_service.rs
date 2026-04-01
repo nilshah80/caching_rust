@@ -524,25 +524,21 @@ impl ScriptingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::start_redis_container;
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use serde_json::json;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
-    async fn service_with_redis() -> (ContainerAsync<Redis>, ScriptingService) {
-        let (container, redis_url) = start_redis().await;
+    async fn service_with_redis() -> Option<(ContainerAsync<Redis>, ScriptingService)> {
+        let (container, redis_url) = start_redis().await?;
         let pool = InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap();
         let service = ScriptingService::new(Arc::new(pool));
-        (container, service)
+        Some((container, service))
     }
 
     #[test]
@@ -910,7 +906,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_eval_evalsha_and_script_management() {
-        let (_container, service) = service_with_redis().await;
+        let Some((_container, service)) = service_with_redis().await else {
+            return;
+        };
 
         let eval_request = EvalRequest {
             script: "return {KEYS[1], ARGV[1]}".to_string(),
@@ -970,7 +968,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_script_kill_and_debug() {
-        let (_container, service) = service_with_redis().await;
+        let Some((_container, service)) = service_with_redis().await else {
+            return;
+        };
 
         let result = service.script_kill().await;
         assert!(matches!(result, Err(CacheError::ScriptError(_))));

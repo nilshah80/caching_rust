@@ -55,6 +55,19 @@ impl AdminService {
         self.repository.get_last_save().await
     }
 
+    /// Get limited debug information for a key
+    pub async fn debug_object(&self, key: &str) -> Result<String, CacheError> {
+        if key.is_empty() {
+            return Err(CacheError::InvalidInput("Key cannot be empty".to_string()));
+        }
+        self.repository.debug_object(key).await
+    }
+
+    /// Shutdown the Redis server
+    pub async fn shutdown(&self, save: bool, now: bool) -> Result<(), CacheError> {
+        self.repository.shutdown(save, now).await
+    }
+
     // ========================================================================
     // Memory Operations
     // ========================================================================
@@ -253,6 +266,11 @@ impl AdminService {
         self.repository.client_id().await
     }
 
+    /// Get information about the current client
+    pub async fn client_info(&self) -> Result<ClientInfo, CacheError> {
+        self.repository.client_info().await
+    }
+
     // ========================================================================
     // Slowlog Operations
     // ========================================================================
@@ -300,6 +318,16 @@ impl AdminService {
     /// Reset latency events
     pub async fn latency_reset(&self, events: Vec<String>) -> Result<(), CacheError> {
         self.repository.latency_reset(&events).await
+    }
+
+    /// Get latency graph output for an event
+    pub async fn latency_graph(&self, event: &str) -> Result<String, CacheError> {
+        if event.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Event name cannot be empty".to_string(),
+            ));
+        }
+        self.repository.latency_graph(event).await
     }
 
     // ========================================================================
@@ -358,6 +386,41 @@ impl AdminService {
             ));
         }
         self.repository.acl_dryrun(username, command).await
+    }
+
+    /// Set or update an ACL user
+    pub async fn acl_setuser(&self, username: &str, rules: &[String]) -> Result<(), CacheError> {
+        if username.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Username cannot be empty".to_string(),
+            ));
+        }
+        if rules.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "ACL rules cannot be empty".to_string(),
+            ));
+        }
+        self.repository.acl_setuser(username, rules).await
+    }
+
+    /// Delete ACL users
+    pub async fn acl_deluser(&self, usernames: &[String]) -> Result<i64, CacheError> {
+        if usernames.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "At least one username is required".to_string(),
+            ));
+        }
+        self.repository.acl_deluser(usernames).await
+    }
+
+    /// Reload ACL rules from disk
+    pub async fn acl_load(&self) -> Result<(), CacheError> {
+        self.repository.acl_load().await
+    }
+
+    /// Save ACL rules to disk
+    pub async fn acl_save(&self) -> Result<(), CacheError> {
+        self.repository.acl_save().await
     }
 
     // ========================================================================
@@ -434,6 +497,12 @@ mod tests {
         }
         async fn get_last_save(&self) -> Result<i64, CacheError> {
             Ok(0)
+        }
+        async fn debug_object(&self, key: &str) -> Result<String, CacheError> {
+            Ok(format!("debug:{key}"))
+        }
+        async fn shutdown(&self, _save: bool, _now: bool) -> Result<(), CacheError> {
+            Ok(())
         }
         async fn get_memory_stats(&self) -> Result<MemoryStats, CacheError> {
             Ok(MemoryStats::default())
@@ -525,6 +594,9 @@ mod tests {
         async fn client_id(&self) -> Result<i64, CacheError> {
             Ok(0)
         }
+        async fn client_info(&self) -> Result<ClientInfo, CacheError> {
+            Ok(ClientInfo::default())
+        }
         async fn slowlog_get(&self, count: i64) -> Result<Vec<SlowlogEntry>, CacheError> {
             *self.slowlog_count.lock().expect("lock") = Some(count);
             Ok(vec![])
@@ -550,6 +622,9 @@ mod tests {
         }
         async fn latency_reset(&self, _events: &[String]) -> Result<(), CacheError> {
             Ok(())
+        }
+        async fn latency_graph(&self, event: &str) -> Result<String, CacheError> {
+            Ok(format!("graph:{event}"))
         }
         async fn acl_list(&self) -> Result<Vec<String>, CacheError> {
             Ok(vec![])
@@ -583,6 +658,18 @@ mod tests {
                 allowed: true,
                 reason: None,
             })
+        }
+        async fn acl_setuser(&self, _username: &str, _rules: &[String]) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn acl_deluser(&self, usernames: &[String]) -> Result<i64, CacheError> {
+            Ok(usernames.len() as i64)
+        }
+        async fn acl_load(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn acl_save(&self) -> Result<(), CacheError> {
+            Ok(())
         }
 
         async fn command_list(&self, _filter: Option<&str>) -> Result<Vec<String>, CacheError> {

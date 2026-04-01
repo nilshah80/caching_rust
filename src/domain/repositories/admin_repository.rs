@@ -31,6 +31,12 @@ pub trait AdminRepository: Send + Sync {
     /// Get last save timestamp (LASTSAVE command)
     async fn get_last_save(&self) -> Result<i64, CacheError>;
 
+    /// Get limited debug information for a key (DEBUG OBJECT command)
+    async fn debug_object(&self, key: &str) -> Result<String, CacheError>;
+
+    /// Shutdown the Redis server (SHUTDOWN command)
+    async fn shutdown(&self, save: bool, now: bool) -> Result<(), CacheError>;
+
     // ========================================================================
     // Memory Operations
     // ========================================================================
@@ -120,6 +126,9 @@ pub trait AdminRepository: Send + Sync {
     /// Get client ID (CLIENT ID command)
     async fn client_id(&self) -> Result<i64, CacheError>;
 
+    /// Get information about the current client (CLIENT INFO command)
+    async fn client_info(&self) -> Result<ClientInfo, CacheError>;
+
     // ========================================================================
     // Slowlog Operations
     // ========================================================================
@@ -148,6 +157,9 @@ pub trait AdminRepository: Send + Sync {
 
     /// Reset latency events (LATENCY RESET command)
     async fn latency_reset(&self, events: &[String]) -> Result<(), CacheError>;
+
+    /// Get latency graph output for an event (LATENCY GRAPH command)
+    async fn latency_graph(&self, event: &str) -> Result<String, CacheError>;
 
     // ========================================================================
     // ACL Operations
@@ -181,6 +193,18 @@ pub trait AdminRepository: Send + Sync {
         username: &str,
         command: &[String],
     ) -> Result<AclDryrunResult, CacheError>;
+
+    /// Set or update an ACL user (ACL SETUSER command)
+    async fn acl_setuser(&self, username: &str, rules: &[String]) -> Result<(), CacheError>;
+
+    /// Delete ACL users (ACL DELUSER command)
+    async fn acl_deluser(&self, usernames: &[String]) -> Result<i64, CacheError>;
+
+    /// Reload ACL rules from disk (ACL LOAD command)
+    async fn acl_load(&self) -> Result<(), CacheError>;
+
+    /// Save ACL rules to disk (ACL SAVE command)
+    async fn acl_save(&self) -> Result<(), CacheError>;
 
     // ========================================================================
     // Command Introspection Operations

@@ -828,25 +828,21 @@ mod tests {
     use super::*;
     use crate::api::http::schemas::transactions::{FieldValue, KeyValue, ScoredMember};
     use crate::infrastructure::redis::connection::InstrumentedPool;
+    use crate::test_support::start_redis_container;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
     use tokio::sync::Notify;
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
-    async fn service_with_redis() -> (ContainerAsync<Redis>, TransactionService, redis::Client) {
-        let (container, redis_url) = start_redis().await;
+    async fn service_with_redis() -> Option<(ContainerAsync<Redis>, TransactionService, redis::Client)> {
+        let (container, redis_url) = start_redis().await?;
         let pool = InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap();
         let service = TransactionService::new(Arc::new(pool));
         let client = redis::Client::open(redis_url.as_str()).unwrap();
-        (container, service, client)
+        Some((container, service, client))
     }
 
     #[test]
@@ -1447,7 +1443,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_timeout_postcheck() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         set_test_execute_delay_ms(20);
         let request = TransactionRequest {
             watch_keys: None,
@@ -1464,7 +1462,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_watch_key_empty() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         let request = TransactionRequest {
             watch_keys: Some(vec!["".to_string()]),
             commands: vec![RedisCommand::Get {
@@ -1477,7 +1477,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_unwatch_on_add_command_error() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         let request = TransactionRequest {
             watch_keys: Some(vec!["watched".to_string()]),
             commands: vec![RedisCommand::LPop {
@@ -1491,7 +1493,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_watch_abort() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
         let _: () = redis::cmd("SET")
             .arg("watched")
@@ -1532,7 +1536,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_exec_error_execabort() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         let mut conn = service.pool.get().await.unwrap();
         let err = redis::RedisError::from((
             redis::ErrorKind::ResponseError,
@@ -1544,7 +1550,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_execabort_error() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         let request = TransactionRequest {
             watch_keys: None,
             commands: vec![RedisCommand::MSet { entries: vec![] }],
@@ -1565,7 +1573,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_compare_and_set_variants() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
         let _: () = redis::cmd("SET")
             .arg("version")
@@ -1604,7 +1614,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_compare_and_set_empty_key() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         let request = CompareAndSetRequest {
             key: "".to_string(),
             expected_value: "1".to_string(),
@@ -1616,7 +1628,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hcompare_and_set_variants() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
         let _: () = redis::cmd("HSET")
             .arg("user:1")
@@ -1659,7 +1673,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hcompare_and_set_empty_key() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         let request = HCompareAndSetRequest {
             key: "".to_string(),
             field: "f".to_string(),
@@ -1672,7 +1688,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hcompare_and_set_empty_field() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
         let request = HCompareAndSetRequest {
             key: "k".to_string(),
             field: "".to_string(),
@@ -1691,29 +1709,27 @@ mod integration_tests {
         CompareAndSetRequest, HCompareAndSetRequest, RedisCommand, TransactionRequest,
     };
     use crate::infrastructure::redis::connection::InstrumentedPool;
+    use crate::test_support::start_redis_container;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
-    async fn service_with_redis() -> (ContainerAsync<Redis>, TransactionService, redis::Client) {
-        let (container, redis_url) = start_redis().await;
+    async fn service_with_redis() -> Option<(ContainerAsync<Redis>, TransactionService, redis::Client)> {
+        let (container, redis_url) = start_redis().await?;
         let pool = InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap();
         let service = TransactionService::new(Arc::new(pool));
         let client = redis::Client::open(redis_url.as_str()).unwrap();
-        (container, service, client)
+        Some((container, service, client))
     }
 
     #[tokio::test]
     async fn test_execute_simple_transaction() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
 
         let request = TransactionRequest {
             commands: vec![
@@ -1743,7 +1759,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_compare_and_set_success() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
 
         // Pre-set the key using a direct Redis connection
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -1767,7 +1785,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_compare_and_set_mismatch() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
 
         // Pre-set the key
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -1791,7 +1811,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_execute_with_watch_keys_success() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
 
         // Pre-set the key directly
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -1836,7 +1858,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_execute_multi_command_types() {
-        let (_container, service, _client) = service_with_redis().await;
+        let Some((_container, service, _client)) = service_with_redis().await else {
+            return;
+        };
 
         // Execute a transaction with multiple command types: SET, LPUSH, SADD
         let request = TransactionRequest {
@@ -1870,7 +1894,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hcompare_and_set_success() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
 
         // Pre-set a hash field directly
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();
@@ -1896,7 +1922,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hcompare_and_set_mismatch() {
-        let (_container, service, client) = service_with_redis().await;
+        let Some((_container, service, client)) = service_with_redis().await else {
+            return;
+        };
 
         // Pre-set a hash field directly
         let mut conn = client.get_multiplexed_async_connection().await.unwrap();

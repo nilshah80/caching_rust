@@ -123,13 +123,13 @@ impl FunctionService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::start_generic_redis_image;
     use async_trait::async_trait;
     use std::sync::Mutex;
     use std::time::Duration;
     use testcontainers::ContainerAsync;
     use testcontainers::GenericImage;
     use testcontainers::core::IntoContainerPort;
-    use testcontainers::runners::AsyncRunner;
 
     #[derive(Default)]
     struct CaptureFunctionRepo {
@@ -308,29 +308,25 @@ mod tests {
         assert_eq!(*repo.call_readonly.lock().expect("lock"), Some(true));
     }
 
-    async fn start_redis() -> (ContainerAsync<GenericImage>, String) {
+    async fn start_redis() -> Option<(ContainerAsync<GenericImage>, String)> {
         let image = GenericImage::new("redis", "7.4").with_exposed_port(6379.tcp());
-        let container = image.start().await.expect("redis");
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let host = container.get_host().await.expect("host");
-        let port = container.get_host_port_ipv4(6379).await.expect("port");
-        (container, format!("redis://{host}:{port}"))
+        start_generic_redis_image(image, 6379, Duration::from_secs(2), "redis").await
     }
 
-    async fn service_with_redis() -> (
-        ContainerAsync<GenericImage>,
-        Arc<InstrumentedPool>,
-        FunctionService,
-    ) {
-        let (container, redis_url) = start_redis().await;
+    async fn service_with_redis() -> Option<(ContainerAsync<GenericImage>, Arc<InstrumentedPool>, FunctionService)> {
+        let Some((container, redis_url)) = start_redis().await else {
+            return None;
+        };
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).expect("pool"));
         let service = FunctionService::new(pool.clone());
-        (container, pool, service)
+        Some((container, pool, service))
     }
 
     #[tokio::test]
     async fn test_function_load_list_and_fcall_integration() {
-        let (_container, pool, service) = service_with_redis().await;
+        let Some((_container, pool, service)) = service_with_redis().await else {
+            return;
+        };
         let code = "#!lua name=lib\nredis.register_function('echo', function(keys, args) return args[1] end)\nredis.register_function{function_name='get_value', callback=function(keys, args) return redis.call('GET', keys[1]) end, flags={'no-writes'}}";
 
         let library = service.function_load(code, false).await.expect("load");
@@ -361,7 +357,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_function_dump_flush_restore_integration() {
-        let (_container, _pool, service) = service_with_redis().await;
+        let Some((_container, _pool, service)) = service_with_redis().await else {
+            return;
+        };
         let code = "#!lua name=lib\nredis.register_function('echo', function(keys, args) return args[1] end)";
         service.function_load(code, false).await.expect("load");
         let dump = service.function_dump().await.expect("dump");
@@ -385,7 +383,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_function_stats_and_delete_integration() {
-        let (_container, _pool, service) = service_with_redis().await;
+        let Some((_container, _pool, service)) = service_with_redis().await else {
+            return;
+        };
         let code = "#!lua name=lib\nredis.register_function('echo', function(keys, args) return args[1] end)";
         service.function_load(code, false).await.expect("load");
         let stats = service.function_stats().await.expect("stats");

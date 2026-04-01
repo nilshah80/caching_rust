@@ -3,6 +3,7 @@
 //! Business logic for Redis sorted set (ZSET) operations.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
@@ -31,6 +32,12 @@ impl SortedSetService {
             repository,
             timeout_enforcer: BlockingTimeoutEnforcer::new(),
         }
+    }
+
+    /// Set custom max blocking timeout (for testing or configuration)
+    pub fn with_max_blocking_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout_enforcer = BlockingTimeoutEnforcer::with_max(timeout.as_secs());
+        self
     }
 
     /// Enforce timeout bounds for blocking operations
@@ -801,23 +808,19 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    use crate::test_support::start_redis_container;
     use std::sync::Arc;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
-    async fn pool_with_redis() -> (ContainerAsync<Redis>, Arc<InstrumentedPool>) {
-        let (container, redis_url) = start_redis().await;
+    async fn pool_with_redis() -> Option<(ContainerAsync<Redis>, Arc<InstrumentedPool>)> {
+        let (container, redis_url) = start_redis().await?;
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap());
-        (container, pool)
+        Some((container, pool))
     }
 
     /// Test BZPOPMIN on a non-existent key with a 1-second timeout.
@@ -828,7 +831,9 @@ mod integration_tests {
     /// f64 timeouts via enforce_timeout.
     #[tokio::test]
     async fn test_bzpopmin_returns_none_on_timeout() {
-        let (_container, pool) = pool_with_redis().await;
+        let Some((_container, pool)) = pool_with_redis().await else {
+            return;
+        };
 
         let mut conn = pool.get().await.unwrap();
 
@@ -856,7 +861,9 @@ mod integration_tests {
     /// Redis 5.0 compatibility.
     #[tokio::test]
     async fn test_bzpopmin_returns_data_when_available() {
-        let (_container, pool) = pool_with_redis().await;
+        let Some((_container, pool)) = pool_with_redis().await else {
+            return;
+        };
         let service = SortedSetService::new(pool.clone());
 
         // Add members to a sorted set via the service

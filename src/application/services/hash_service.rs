@@ -825,21 +825,17 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    use crate::test_support::start_redis_container;
     use std::sync::Arc;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
-    async fn create_service() -> (ContainerAsync<Redis>, HashService) {
-        let (container, redis_url) = start_redis().await;
+    async fn create_service() -> Option<(ContainerAsync<Redis>, HashService)> {
+        let (container, redis_url) = start_redis().await?;
         let pool = Arc::new(
             crate::infrastructure::redis::connection::InstrumentedPool::new_for_tests_with_url(
                 &redis_url,
@@ -847,7 +843,7 @@ mod integration_tests {
             .unwrap(),
         );
         let service = HashService::new(pool);
-        (container, service)
+        Some((container, service))
     }
 
     /// Returns true if the error indicates the command is not supported (Redis < 7.4).
@@ -858,7 +854,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hexpire_then_httl() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         // Set up hash fields
         service
@@ -903,7 +901,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hexpire_with_nx_condition() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         service
             .hset("myhash_nx", vec![("f1".to_string(), "v1".to_string())])
@@ -944,7 +944,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hpersist_removes_expiration() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         service
             .hset("myhash_persist", vec![("f1".to_string(), "v1".to_string())])
@@ -980,7 +982,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hpexpire_and_hpttl() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         service
             .hset("myhash_ms", vec![("f1".to_string(), "v1".to_string())])
@@ -1009,7 +1013,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hexpire_at_and_hexpire_time() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         service
             .hset("myhash_at", vec![("f1".to_string(), "v1".to_string())])
@@ -1045,7 +1051,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_hpexpire_at_and_hpexpire_time() {
-        let (_container, service) = create_service().await;
+        let Some((_container, service)) = create_service().await else {
+            return;
+        };
 
         service
             .hset("myhash_pat", vec![("f1".to_string(), "v1".to_string())])

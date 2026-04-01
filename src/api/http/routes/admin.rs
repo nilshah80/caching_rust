@@ -156,10 +156,49 @@ pub struct SaveResponse {
     pub mode: String,
 }
 
+/// Debug object request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DebugObjectRequest {
+    pub key: String,
+}
+
+/// Debug object response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DebugObjectResponse {
+    pub info: String,
+}
+
+/// Shutdown request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ShutdownRequest {
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
+    pub save: bool,
+    #[serde(default = "default_shutdown_now")]
+    pub now: bool,
+}
+
+fn default_shutdown_now() -> bool {
+    true
+}
+
+/// Shutdown response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ShutdownResponse {
+    pub success: bool,
+}
+
 /// Client list response (uses domain entity)
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ClientListResponse {
     pub clients: Vec<DomainClientInfo>,
+}
+
+/// Client info response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ClientInfoResponse {
+    pub client: DomainClientInfo,
 }
 
 /// Client kill request
@@ -290,6 +329,12 @@ pub struct LatencyResetResponse {
     pub success: bool,
 }
 
+/// Latency graph response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LatencyGraphResponse {
+    pub graph: String,
+}
+
 /// ACL list response
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AclListResponse {
@@ -370,6 +415,43 @@ pub struct AclDryrunResponse {
     pub reason: Option<String>,
 }
 
+/// ACL setuser request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AclSetUserRequest {
+    pub username: String,
+    pub rules: Vec<String>,
+}
+
+/// ACL setuser response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AclSetUserResponse {
+    pub success: bool,
+}
+
+/// ACL deluser request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AclDelUserRequest {
+    pub usernames: Vec<String>,
+}
+
+/// ACL deluser response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AclDelUserResponse {
+    pub deleted: i64,
+}
+
+/// ACL load response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AclLoadResponse {
+    pub success: bool,
+}
+
+/// ACL save response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AclSaveResponse {
+    pub success: bool,
+}
+
 /// Command list query parameters
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CommandListQuery {
@@ -424,6 +506,7 @@ pub struct CommandGetKeysResponse {
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
         // Public admin routes (no auth required)
+        .route("/api/v1/capabilities", get(get_capabilities))
         .route("/api/v1/admin/pool/stats", get(get_pool_stats))
         .route("/api/v1/admin/capabilities", get(get_capabilities))
         // Server info (protected)
@@ -431,6 +514,8 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/server/time", get(get_server_time))
         .route("/api/v1/admin/server/dbsize", get(get_db_size))
         .route("/api/v1/admin/server/lastsave", get(get_lastsave))
+        .route("/api/v1/admin/server/debug/object", post(debug_object))
+        .route("/api/v1/admin/server/shutdown", post(shutdown))
         // Memory operations (protected)
         .route("/api/v1/admin/server/memory/stats", get(get_memory_stats))
         .route("/api/v1/admin/server/memory/usage", post(get_memory_usage))
@@ -459,6 +544,7 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/client/setname", post(client_setname))
         .route("/api/v1/admin/client/getname", get(client_getname))
         .route("/api/v1/admin/client/id", get(client_id))
+        .route("/api/v1/admin/client/info", get(client_info))
         // Slowlog operations (protected)
         .route("/api/v1/admin/slowlog/get", post(slowlog_get))
         .route("/api/v1/admin/slowlog/len", get(slowlog_len))
@@ -468,6 +554,7 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/latency/history", post(latency_history))
         .route("/api/v1/admin/latency/doctor", get(latency_doctor))
         .route("/api/v1/admin/latency/reset", post(latency_reset))
+        .route("/api/v1/admin/latency/graph", post(latency_graph))
         // ACL operations (protected)
         .route("/api/v1/admin/acl/list", get(acl_list))
         .route("/api/v1/admin/acl/users", get(acl_users))
@@ -476,6 +563,10 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/acl/genpass", post(acl_genpass))
         .route("/api/v1/admin/acl/log", post(acl_log))
         .route("/api/v1/admin/acl/dryrun", post(acl_dryrun))
+        .route("/api/v1/admin/acl/setuser", post(acl_setuser))
+        .route("/api/v1/admin/acl/deluser", delete(acl_deluser))
+        .route("/api/v1/admin/acl/load", post(acl_load))
+        .route("/api/v1/admin/acl/save", post(acl_save))
         // Command introspection operations (protected)
         .route("/api/v1/admin/commands", get(command_list))
         .route("/api/v1/admin/commands/count", get(command_count))
@@ -637,6 +728,62 @@ pub async fn get_lastsave(
         .get_last_save()
         .await
         .map(|timestamp| ApiResponse::success(LastSaveResponse { timestamp }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/server/debug/object
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/server/debug/object",
+    request_body = DebugObjectRequest,
+    responses(
+        (status = 200, description = "Debug object information", body = DebugObjectResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn debug_object(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<DebugObjectRequest>,
+) -> Result<ApiResponse<DebugObjectResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .debug_object(&request.key)
+        .await
+        .map(|info| ApiResponse::success(DebugObjectResponse { info }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/server/shutdown
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/server/shutdown",
+    request_body = ShutdownRequest,
+    responses(
+        (status = 200, description = "Redis server shutdown initiated", body = ShutdownResponse),
+        (status = 400, description = "Force flag missing"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn shutdown(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ShutdownRequest>,
+) -> Result<ApiResponse<ShutdownResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    if !request.force {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    state
+        .admin_service
+        .shutdown(request.save, request.now)
+        .await
+        .map(|_| ApiResponse::success(ShutdownResponse { success: true }))
         .map_err(to_status_code)
 }
 
@@ -1244,6 +1391,30 @@ pub async fn client_id(
         .map_err(to_status_code)
 }
 
+/// GET /api/v1/admin/client/info
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/client/info",
+    responses(
+        (status = 200, description = "Current client info", body = ClientInfoResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn client_info(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<ClientInfoResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .client_info()
+        .await
+        .map(|client| ApiResponse::success(ClientInfoResponse { client }))
+        .map_err(to_status_code)
+}
+
 // ============================================================================
 // Slowlog Operations
 // ============================================================================
@@ -1423,6 +1594,32 @@ pub async fn latency_reset(
         .latency_reset(request.events)
         .await
         .map(|_| ApiResponse::success(LatencyResetResponse { success: true }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/latency/graph
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/latency/graph",
+    request_body = LatencyHistoryRequest,
+    responses(
+        (status = 200, description = "Latency graph output", body = LatencyGraphResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn latency_graph(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<LatencyHistoryRequest>,
+) -> Result<ApiResponse<LatencyGraphResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .latency_graph(&request.event)
+        .await
+        .map(|graph| ApiResponse::success(LatencyGraphResponse { graph }))
         .map_err(to_status_code)
 }
 
@@ -1609,6 +1806,106 @@ pub async fn acl_dryrun(
                 reason: result.reason,
             })
         })
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/acl/setuser
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/acl/setuser",
+    request_body = AclSetUserRequest,
+    responses(
+        (status = 200, description = "ACL user updated", body = AclSetUserResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn acl_setuser(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<AclSetUserRequest>,
+) -> Result<ApiResponse<AclSetUserResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .acl_setuser(&request.username, &request.rules)
+        .await
+        .map(|_| ApiResponse::success(AclSetUserResponse { success: true }))
+        .map_err(to_status_code)
+}
+
+/// DELETE /api/v1/admin/acl/deluser
+#[utoipa::path(
+    delete,
+    path = "/api/v1/admin/acl/deluser",
+    request_body = AclDelUserRequest,
+    responses(
+        (status = 200, description = "ACL users deleted", body = AclDelUserResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn acl_deluser(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<AclDelUserRequest>,
+) -> Result<ApiResponse<AclDelUserResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .acl_deluser(&request.usernames)
+        .await
+        .map(|deleted| ApiResponse::success(AclDelUserResponse { deleted }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/acl/load
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/acl/load",
+    responses(
+        (status = 200, description = "ACL rules reloaded", body = AclLoadResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn acl_load(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<AclLoadResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .acl_load()
+        .await
+        .map(|_| ApiResponse::success(AclLoadResponse { success: true }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/acl/save
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/acl/save",
+    responses(
+        (status = 200, description = "ACL rules saved", body = AclSaveResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn acl_save(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<AclSaveResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .acl_save()
+        .await
+        .map(|_| ApiResponse::success(AclSaveResponse { success: true }))
         .map_err(to_status_code)
 }
 

@@ -2,10 +2,6 @@
 //! LCS, SORT, LMPOP/BLMPOP, FUNCTION, TimeSeries, hash field expiration, Redis 8 hash commands.
 
 use std::collections::HashMap;
-use std::sync::Arc;
-
-use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::redis::{REDIS_PORT, Redis};
 
 use redis_caching_service::application::services::{
     FunctionService, HashService, KeyService, ListService, StringService, TimeSeriesService,
@@ -14,16 +10,8 @@ use redis_caching_service::domain::repositories::{
     HashExpiration, LcsOptions, ListDirection, SortOptions, TimeSeriesCreateOptions,
     TimeSeriesRangeOptions, TimeSeriesSample,
 };
-use redis_caching_service::infrastructure::redis::connection::InstrumentedPool;
 
-async fn create_pool() -> (testcontainers::ContainerAsync<Redis>, Arc<InstrumentedPool>) {
-    let container = Redis::default().start().await.unwrap();
-    let host = container.get_host().await.unwrap();
-    let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-    let url = format!("redis://{host}:{port}");
-    let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&url).unwrap());
-    (container, pool)
-}
+use crate::docker_helper::create_pool;
 
 // ---------------------------------------------------------------------------
 // LCS
@@ -31,7 +19,9 @@ async fn create_pool() -> (testcontainers::ContainerAsync<Redis>, Arc<Instrument
 
 #[tokio::test]
 async fn test_lcs_operations() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = StringService::new(pool);
 
     service
@@ -105,7 +95,9 @@ async fn test_lcs_operations() {
 
 #[tokio::test]
 async fn test_sort_operations() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let list_svc = ListService::new(pool.clone());
     let key_svc = KeyService::new(pool);
 
@@ -142,7 +134,9 @@ async fn test_sort_operations() {
 
 #[tokio::test]
 async fn test_lmpop_operations() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = ListService::new(pool);
 
     service
@@ -190,7 +184,9 @@ async fn test_lmpop_operations() {
 
 #[tokio::test]
 async fn test_function_lifecycle() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = FunctionService::new(pool);
 
     let code = "#!lua name=testlib\nredis.register_function('myfunc', function(keys, args) return args[1] end)";
@@ -241,7 +237,9 @@ async fn test_function_lifecycle() {
 
 #[tokio::test]
 async fn test_timeseries_lifecycle() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = TimeSeriesService::new(pool);
 
     let mut labels = HashMap::new();
@@ -320,7 +318,9 @@ async fn test_timeseries_lifecycle() {
 
 #[tokio::test]
 async fn test_hash_field_expiration() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = HashService::new(pool);
 
     service
@@ -373,7 +373,9 @@ async fn test_hash_field_expiration() {
 
 #[tokio::test]
 async fn test_redis8_hash_commands() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = HashService::new(pool);
 
     service

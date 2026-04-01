@@ -5,6 +5,8 @@
 use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
 use uuid::Uuid;
 
+use crate::shared::request_context;
+
 /// Header name for request ID
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
@@ -22,8 +24,9 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
         .extensions_mut()
         .insert(RequestId(request_id.clone()));
 
-    // Process request
-    let mut response = next.run(request).await;
+    // Process request inside a request-scoped context so response builders
+    // and error conversion can access the active request ID.
+    let mut response = request_context::scope_request_id(request_id.clone(), next.run(request)).await;
 
     // Add request ID to response headers - UUID strings are always valid ASCII
     if let Ok(header_value) = HeaderValue::from_str(&request_id) {

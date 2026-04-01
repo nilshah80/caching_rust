@@ -8,20 +8,29 @@
 //!
 //! The old pool's connections drain naturally as they're returned and discarded.
 
-use crate::infrastructure::config::{PoolConfig, RedisConfig};
+use crate::infrastructure::config::RedisConfig;
+#[cfg(not(test))]
+use crate::infrastructure::config::PoolConfig;
+#[cfg(not(test))]
 use crate::infrastructure::redis::connection::InstrumentedPool;
-use deadpool_redis::{Config, Runtime};
+#[cfg(not(test))]
 use std::sync::Arc;
+#[cfg(not(test))]
 use std::time::Duration;
+#[cfg(not(test))]
 use tokio::time::interval;
-use tracing::{error, info, warn};
+use tracing::warn;
+#[cfg(not(test))]
+use tracing::{error, info};
 
 /// How often to poll sentinel (seconds)
+#[cfg(not(test))]
 const POLL_INTERVAL_SECS: u64 = 10;
 
 /// Start the sentinel watcher as a background task.
 ///
 /// Returns a `JoinHandle` that runs until the process exits.
+#[cfg(not(test))]
 pub fn spawn_sentinel_watcher(
     pool: Arc<InstrumentedPool>,
     redis_config: RedisConfig,
@@ -47,7 +56,7 @@ pub fn spawn_sentinel_watcher(
                             "Sentinel detected master change — initiating pool swap"
                         );
 
-                        match create_verified_pool(&new_url, &pool_config).await {
+                        match pool.build_replacement_pool(&new_url, &pool_config).await {
                             Ok(new_pool) => {
                                 pool.swap_pool(new_pool, new_url.clone());
                                 info!(
@@ -141,33 +150,6 @@ async fn resolve_current_master(config: &RedisConfig) -> Result<String, String> 
     Err(format!("no sentinel could resolve master '{master_name}'"))
 }
 
-/// Create a new deadpool-redis Pool from a URL and verify it with PING.
-async fn create_verified_pool(
-    url: &str,
-    pool_config: &PoolConfig,
-) -> Result<deadpool_redis::Pool, String> {
-    let cfg = Config::from_url(url);
-    let pool = cfg
-        .builder()
-        .map_err(|e| format!("pool builder: {e}"))?
-        .max_size(pool_config.max_size as usize)
-        .runtime(Runtime::Tokio1)
-        .build()
-        .map_err(|e| format!("pool build: {e}"))?;
-
-    // Verify the new master is actually reachable before returning
-    let mut conn = pool
-        .get()
-        .await
-        .map_err(|e| format!("new master unreachable: {e}"))?;
-    let _: String = redis::cmd("PING")
-        .query_async(&mut conn)
-        .await
-        .map_err(|e| format!("new master PING failed: {e}"))?;
-
-    Ok(pool)
-}
-
 fn mask_password(url: &str) -> String {
     if let Some(at_pos) = url.find('@')
         && let Some(colon_pos) = url[..at_pos].rfind(':')
@@ -188,18 +170,6 @@ mod tests {
             "redis://:***@host:6379"
         );
         assert_eq!(mask_password("redis://host:6379"), "redis://host:6379");
-    }
-
-    #[test]
-    fn test_pool_builder_valid_url() {
-        let cfg = Config::from_url("redis://127.0.0.1:6379");
-        let result = cfg
-            .builder()
-            .unwrap()
-            .max_size(4)
-            .runtime(Runtime::Tokio1)
-            .build();
-        assert!(result.is_ok());
     }
 
     #[test]
@@ -228,11 +198,7 @@ mod tests {
         assert!(result.unwrap_err().contains("no sentinel could resolve"));
     }
 
-    #[tokio::test]
-    async fn test_create_verified_pool_unreachable() {
-        let config = PoolConfig::default();
-        let result = create_verified_pool("redis://127.0.0.1:1", &config).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unreachable"));
-    }
+    // build_replacement_pool is #[cfg(not(test))] because it depends on
+    // InstrumentedPool::build_pool which is also test-gated. Integration
+    // testing of sentinel failover is done via the sentinel E2E test suite.
 }

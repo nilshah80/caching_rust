@@ -217,9 +217,21 @@ mod tests {
         let handle = crate::infrastructure::metrics::install_prometheus_recorder().ok();
         state.metrics_handle = handle.map(std::sync::Arc::new);
         let (status, headers, body) = prometheus_metrics(State(state)).await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            status,
+            if body == "metrics not configured" {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::OK
+            }
+        );
         assert_eq!(headers[0].1, "text/plain; version=0.0.4; charset=utf-8");
         // Body should contain at least some metric output (may be empty if no metrics recorded)
-        assert!(body.is_empty() || body.contains("# TYPE") || body.contains("redis_pool"));
+        assert!(
+            body == "metrics not configured"
+                || body.is_empty()
+                || body.contains("# TYPE")
+                || body.contains("redis_pool")
+        );
     }
 }

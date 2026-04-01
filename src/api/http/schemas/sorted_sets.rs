@@ -231,12 +231,8 @@ pub struct ZBPopRequest {
     /// Keys to pop from
     #[validate(length(min = 1, message = "At least one key is required"))]
     pub keys: Vec<String>,
-    /// Timeout in seconds (server-enforced max 30s)
-    #[validate(range(
-        min = 1,
-        max = 30,
-        message = "Timeout must be between 1 and 30 seconds"
-    ))]
+    /// Timeout in seconds (server-enforced max from configuration)
+    #[validate(range(min = 1, message = "Timeout must be at least 1 second"))]
     pub timeout_seconds: u32,
 }
 
@@ -260,12 +256,8 @@ pub struct ZBMPopRequest {
     pub keys: Vec<String>,
     /// Direction: "min" or "max"
     pub direction: String,
-    /// Timeout in seconds (server-enforced max 30s)
-    #[validate(range(
-        min = 1,
-        max = 30,
-        message = "Timeout must be between 1 and 30 seconds"
-    ))]
+    /// Timeout in seconds (server-enforced max from configuration)
+    #[validate(range(min = 1, message = "Timeout must be at least 1 second"))]
     pub timeout_seconds: u32,
     /// Number of elements to pop
     pub count: Option<i64>,
@@ -659,12 +651,12 @@ mod validation_tests {
     }
 
     #[test]
-    fn zbpop_timeout_31_fails() {
+    fn zbpop_timeout_31_passes_server_clamps_later() {
         let req = ZBPopRequest {
             keys: vec!["k1".into()],
             timeout_seconds: 31,
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate().is_ok());
     }
 
     #[test]
@@ -699,14 +691,14 @@ mod validation_tests {
     }
 
     #[test]
-    fn zbmpop_timeout_31_fails() {
+    fn zbmpop_timeout_31_passes_server_clamps_later() {
         let req = ZBMPopRequest {
             keys: vec!["k1".into()],
             direction: "min".into(),
             timeout_seconds: 31,
             count: None,
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate().is_ok());
     }
 
     #[test]

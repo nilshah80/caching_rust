@@ -260,8 +260,8 @@ pub struct StreamReadBlockingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
 
-    /// Timeout in seconds (max 30)
-    #[validate(range(min = 1, max = 30))]
+    /// Timeout in seconds (server-enforced max from configuration)
+    #[validate(range(min = 1))]
     pub timeout_seconds: u32,
 }
 
@@ -354,9 +354,8 @@ pub struct StreamReadGroupRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
 
-    /// Block for this many milliseconds (max 30000)
+    /// Block for this many milliseconds (server-enforced max from configuration)
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(max = 30000))]
     pub block_ms: Option<i64>,
 
     /// Don't add entries to pending list
@@ -389,8 +388,8 @@ pub struct StreamReadGroupBlockingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
 
-    /// Timeout in seconds (max 30)
-    #[validate(range(min = 1, max = 30))]
+    /// Timeout in seconds (server-enforced max from configuration)
+    #[validate(range(min = 1))]
     pub timeout_seconds: u32,
 
     /// Don't add entries to pending list
@@ -876,7 +875,7 @@ mod validation_tests {
     }
 
     #[test]
-    fn stream_read_blocking_timeout_31_fails() {
+    fn stream_read_blocking_timeout_31_passes_server_clamps_later() {
         let req = StreamReadBlockingRequest {
             streams: vec![StreamIdPair {
                 key: "s1".into(),
@@ -885,7 +884,7 @@ mod validation_tests {
             count: None,
             timeout_seconds: 31,
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate().is_ok());
     }
 
     #[test]
@@ -929,7 +928,7 @@ mod validation_tests {
     }
 
     #[test]
-    fn stream_read_group_blocking_timeout_31_fails() {
+    fn stream_read_group_blocking_timeout_31_passes_server_clamps_later() {
         let req = StreamReadGroupBlockingRequest {
             consumer: "c1".into(),
             streams: vec![StreamIdPair {
@@ -940,7 +939,7 @@ mod validation_tests {
             timeout_seconds: 31,
             no_ack: false,
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate().is_ok());
     }
 
     #[test]

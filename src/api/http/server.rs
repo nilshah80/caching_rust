@@ -34,7 +34,9 @@ use tracing::{info, warn};
 use axum::middleware as axum_mw;
 
 #[cfg(not(test))]
-use crate::api::http::middleware::metrics_middleware;
+use crate::api::http::middleware::{
+    logging_middleware, metrics_middleware, request_id_middleware,
+};
 #[cfg(not(test))]
 use crate::api::http::middleware::rate_limit::{create_rate_limiter, rate_limit_middleware};
 #[cfg(not(test))]
@@ -66,8 +68,12 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
         .merge(api_router);
 
     // Add middleware
-    let app = app.layer(axum_mw::from_fn(metrics_middleware)).layer(
-        ServiceBuilder::new()
+    let app = app
+        .layer(axum_mw::from_fn(metrics_middleware))
+        .layer(axum_mw::from_fn(logging_middleware))
+        .layer(axum_mw::from_fn(request_id_middleware))
+        .layer(
+            ServiceBuilder::new()
             // Add request body size limit (prevents OOM from large payloads)
             .layer(DefaultBodyLimit::max(config.max_body_size_bytes))
             // Add tracing
@@ -124,7 +130,7 @@ pub async fn run(state: AppState, config: &ServerConfig) -> anyhow::Result<()> {
                 header::CACHE_CONTROL,
                 HeaderValue::from_static("no-store"),
             )),
-    );
+        );
 
     if config.cors_origins == "*" {
         warn!("CORS allows any origin — set SERVER__CORS_ORIGINS for production");

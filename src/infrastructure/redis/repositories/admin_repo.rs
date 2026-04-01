@@ -68,6 +68,35 @@ impl AdminRepository for RedisAdminRepository {
         Ok(timestamp)
     }
 
+    async fn debug_object(&self, key: &str) -> Result<String, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let output: String = redis::cmd("DEBUG")
+            .arg("OBJECT")
+            .arg(key)
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(output)
+    }
+
+    async fn shutdown(&self, save: bool, now: bool) -> Result<(), CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let mut cmd = redis::cmd("SHUTDOWN");
+        cmd.arg(if save { "SAVE" } else { "NOSAVE" });
+        if now {
+            cmd.arg("NOW");
+        }
+
+        match cmd.query_async::<()>(&mut conn).await {
+            Ok(()) => Ok(()),
+            // Redis usually closes the connection before replying; treat that as success.
+            Err(redis_err) if redis_err.is_connection_dropped() => Ok(()),
+            Err(redis_err) => Err(CacheError::RedisError(redis_err)),
+        }
+    }
+
     // ========================================================================
     // Memory Operations
     // ========================================================================
@@ -390,6 +419,17 @@ impl AdminRepository for RedisAdminRepository {
         Ok(id)
     }
 
+    async fn client_info(&self) -> Result<ClientInfo, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let result: String = redis::cmd("CLIENT")
+            .arg("INFO")
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(parse_client_list(&result).into_iter().next().unwrap_or_default())
+    }
+
     // ========================================================================
     // Slowlog Operations
     // ========================================================================
@@ -503,6 +543,18 @@ impl AdminRepository for RedisAdminRepository {
         Ok(())
     }
 
+    async fn latency_graph(&self, event: &str) -> Result<String, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let graph: String = redis::cmd("LATENCY")
+            .arg("GRAPH")
+            .arg(event)
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(graph)
+    }
+
     // ========================================================================
     // ACL Operations
     // ========================================================================
@@ -610,6 +662,54 @@ impl AdminRepository for RedisAdminRepository {
                 reason: Some(result),
             })
         }
+    }
+
+    async fn acl_setuser(&self, username: &str, rules: &[String]) -> Result<(), CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let mut cmd = redis::cmd("ACL");
+        cmd.arg("SETUSER").arg(username);
+        for rule in rules {
+            cmd.arg(rule.as_str());
+        }
+        let _: () = cmd.query_async(&mut conn).await?;
+
+        Ok(())
+    }
+
+    async fn acl_deluser(&self, usernames: &[String]) -> Result<i64, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let mut cmd = redis::cmd("ACL");
+        cmd.arg("DELUSER");
+        for username in usernames {
+            cmd.arg(username.as_str());
+        }
+        let deleted: i64 = cmd.query_async(&mut conn).await?;
+
+        Ok(deleted)
+    }
+
+    async fn acl_load(&self) -> Result<(), CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let _: () = redis::cmd("ACL")
+            .arg("LOAD")
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn acl_save(&self) -> Result<(), CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let _: () = redis::cmd("ACL")
+            .arg("SAVE")
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(())
     }
 
     // ========================================================================

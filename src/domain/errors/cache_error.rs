@@ -10,6 +10,8 @@ use serde::Serialize;
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use crate::shared::request_context;
+
 /// Domain error type for caching operations
 #[derive(Debug, Error)]
 pub enum CacheError {
@@ -149,7 +151,7 @@ impl IntoResponse for CacheError {
             return status.into_response();
         }
 
-        let body = ErrorResponse::from_error(&self, None);
+        let body = ErrorResponse::from_error(&self, request_context::current_request_id());
         (status, Json(body)).into_response()
     }
 }

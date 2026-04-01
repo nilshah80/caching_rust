@@ -8,6 +8,8 @@ use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::shared::request_context;
+
 /// Standard API success response wrapper
 #[derive(Debug, Serialize)]
 pub struct ApiResponse<T: Serialize> {
@@ -31,12 +33,17 @@ pub struct ApiResponse<T: Serialize> {
 }
 
 impl<T: Serialize> ApiResponse<T> {
-    /// Create a success response with data
+    /// Create a success response with data.
+    ///
+    /// Eagerly reads the request ID from the task-local context so that the
+    /// value is present regardless of whether the response is returned as
+    /// `ApiResponse<T>` (triggering `IntoResponse`) or wrapped in
+    /// `Json<ApiResponse<T>>` (which bypasses it).
     pub fn success(data: T) -> Self {
         Self {
             success: true,
             timestamp: Utc::now(),
-            request_id: None,
+            request_id: request_context::current_request_id(),
             data: Some(data),
             meta: None,
         }
@@ -47,7 +54,7 @@ impl<T: Serialize> ApiResponse<T> {
         Self {
             success: true,
             timestamp: Utc::now(),
-            request_id: None,
+            request_id: request_context::current_request_id(),
             data: Some(data),
             meta: Some(meta),
         }
@@ -66,7 +73,10 @@ impl<T: Serialize> ApiResponse<T> {
 }
 
 impl<T: Serialize> IntoResponse for ApiResponse<T> {
-    fn into_response(self) -> Response {
+    fn into_response(mut self) -> Response {
+        if self.request_id.is_none() {
+            self.request_id = request_context::current_request_id();
+        }
         (StatusCode::OK, Json(self)).into_response()
     }
 }

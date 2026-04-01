@@ -48,6 +48,8 @@ pub use strings::string_routes;
 pub use timeseries::timeseries_routes;
 pub use transactions::transaction_routes;
 
+use axum::routing::any;
+use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
 use axum::Router;
 
@@ -80,22 +82,40 @@ pub fn build_router(state: AppState) -> Router {
         .merge(key_routes())
         // Admin endpoints
         .merge(admin_routes())
-        // OpenAPI documentation
-        .merge(openapi_routes());
+        // OpenAPI documentation (filtered by detected capabilities)
+        .merge(openapi_routes(&capabilities));
 
     // Conditionally add stream routes (Redis 5.0+)
     if capabilities.features.streams {
         router = router.merge(stream_routes()).merge(stream_admin_routes());
+    } else {
+        router = router.merge(unavailable_feature_routes(
+            "/api/v1/streams",
+            "/api/v1/streams/{*path}",
+            "Redis Streams require Redis 5.0+",
+        ));
     }
 
     // Conditionally add JSON routes (requires RedisJSON module)
     if capabilities.modules.json {
         router = router.merge(json_routes());
+    } else {
+        router = router.merge(unavailable_feature_routes(
+            "/api/v1/json",
+            "/api/v1/json/{*path}",
+            "RedisJSON module is not available",
+        ));
     }
 
     // Conditionally add Search routes (requires RediSearch module)
     if capabilities.modules.search {
         router = router.merge(search_routes());
+    } else {
+        router = router.merge(unavailable_feature_routes(
+            "/api/v1/search",
+            "/api/v1/search/{*path}",
+            "RediSearch module is not available",
+        ));
     }
 
     // Conditionally add Bloom routes (requires RedisBloom module)
@@ -105,6 +125,23 @@ pub fn build_router(state: AppState) -> Router {
             // CMS and Top-K are part of RedisBloom module
             .merge(cms_routes())
             .merge(topk_routes());
+    } else {
+        router = router
+            .merge(unavailable_feature_routes(
+                "/api/v1/bloom",
+                "/api/v1/bloom/{*path}",
+                "RedisBloom module is not available",
+            ))
+            .merge(unavailable_feature_routes(
+                "/api/v1/cms",
+                "/api/v1/cms/{*path}",
+                "RedisBloom Count-Min Sketch commands are not available",
+            ))
+            .merge(unavailable_feature_routes(
+                "/api/v1/topk",
+                "/api/v1/topk/{*path}",
+                "RedisBloom Top-K commands are not available",
+            ));
     }
 
     // HyperLogLog is always available (core Redis)
@@ -121,18 +158,53 @@ pub fn build_router(state: AppState) -> Router {
 
     if capabilities.features.functions {
         router = router.merge(functions_routes());
+    } else {
+        router = router.merge(unavailable_feature_routes(
+            "/api/v1/functions",
+            "/api/v1/functions/{*path}",
+            "Redis Functions require Redis 7.0+",
+        ));
     }
 
     if capabilities.modules.timeseries {
         router = router.merge(timeseries_routes());
+    } else {
+        router = router.merge(unavailable_feature_routes(
+            "/api/v1/timeseries",
+            "/api/v1/timeseries/{*path}",
+            "RedisTimeSeries module is not available",
+        ));
     }
 
     // Cluster info endpoints (only when connected to a cluster)
     if capabilities.features.cluster {
         router = router.merge(cluster_routes());
+    } else {
+        router = router.merge(unavailable_feature_routes(
+            "/api/v1/cluster",
+            "/api/v1/cluster/{*path}",
+            "Redis Cluster mode is not available",
+        ));
     }
 
     router.with_state(state)
+}
+
+fn unavailable_feature_routes(
+    base_path: &'static str,
+    wildcard_path: &'static str,
+    message: &'static str,
+) -> Router<AppState> {
+    Router::new()
+        .route(base_path, any(move || async move {
+            Err::<(), CacheError>(CacheError::ModuleNotAvailable(message.to_string()))
+        }))
+        .route(
+            wildcard_path,
+            any(move || async move {
+                Err::<(), CacheError>(CacheError::ModuleNotAvailable(message.to_string()))
+            }),
+        )
 }
 
 #[cfg(test)]
@@ -182,6 +254,29 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_returns_501_for_unavailable_json_module() {
+        let (mut state, _) = test_state_with_json_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.modules.json = false;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/json/key?path=$")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_IMPLEMENTED
+        );
     }
 
     #[tokio::test]
@@ -262,5 +357,21 @@ mod tests {
             .await
             .expect("response");
         assert_ne!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_public_capabilities_alias() {
+        let (state, _) = test_state_with_json_repo();
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/capabilities")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
     }
 }

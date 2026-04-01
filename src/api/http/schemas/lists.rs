@@ -151,8 +151,8 @@ pub struct BlockingPopRequest {
     /// Keys to pop from (checked in order)
     #[validate(length(min = 1, message = "At least one key is required"))]
     pub keys: Vec<String>,
-    /// Timeout in seconds (max 30)
-    #[validate(range(min = 1, max = 30))]
+    /// Timeout in seconds (server-enforced max from configuration)
+    #[validate(range(min = 1))]
     pub timeout_seconds: u32,
 }
 
@@ -169,8 +169,8 @@ pub struct BlockingMoveRequest {
     pub src_direction: ListDirectionParam,
     /// Direction to push to destination (left or right)
     pub dst_direction: ListDirectionParam,
-    /// Timeout in seconds (max 30)
-    #[validate(range(min = 1, max = 30))]
+    /// Timeout in seconds (server-enforced max from configuration)
+    #[validate(range(min = 1))]
     pub timeout_seconds: u32,
 }
 
@@ -263,8 +263,8 @@ pub struct BLMPopRequest {
     pub keys: Vec<String>,
     /// Direction to pop from (left or right)
     pub direction: ListDirectionParam,
-    /// Timeout in seconds (max 30)
-    #[validate(range(min = 1, max = 30))]
+    /// Timeout in seconds (server-enforced max from configuration)
+    #[validate(range(min = 1))]
     pub timeout_seconds: u32,
     /// Number of elements to pop (default: 1, must be >= 1)
     #[serde(default)]
@@ -396,12 +396,12 @@ mod validation_tests {
     }
 
     #[test]
-    fn blocking_pop_timeout_31_fails() {
+    fn blocking_pop_timeout_31_passes_server_clamps_later() {
         let req = BlockingPopRequest {
             keys: vec!["k1".into()],
             timeout_seconds: 31,
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate().is_ok());
     }
 
     #[test]
@@ -516,14 +516,14 @@ mod validation_tests {
     }
 
     #[test]
-    fn blmpop_timeout_31_fails() {
+    fn blmpop_timeout_31_passes_server_clamps_later() {
         let req = BLMPopRequest {
             keys: vec!["k".into()],
             direction: ListDirectionParam::Left,
             timeout_seconds: 31,
             count: None,
         };
-        assert!(req.validate().is_err());
+        assert!(req.validate().is_ok());
     }
 
     #[test]

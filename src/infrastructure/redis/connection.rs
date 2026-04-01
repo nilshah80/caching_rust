@@ -5,11 +5,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 #[cfg(not(test))]
-use std::time::Instant;
-#[cfg(test)]
+use std::time::Duration;
 use std::time::Instant;
 
 use deadpool_redis::{Config, Connection, Pool, Runtime};
+#[cfg(not(test))]
+use deadpool_redis::Hook;
 use serde::Serialize;
 #[cfg(not(test))]
 use tracing::{debug, info, warn};
@@ -129,29 +130,25 @@ impl InstrumentedPool {
             "Creating Redis connection pool"
         );
 
-        let cfg = Config::from_url(&connection_url);
-        let pool = cfg
-            .builder()
-            .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?
-            .max_size(pool_config.max_size as usize)
-            .runtime(Runtime::Tokio1)
-            .build()
-            .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?;
+        if pool_config.idle_timeout_ms > 0 {
+            warn!(
+                idle_timeout_ms = pool_config.idle_timeout_ms,
+                "deadpool-redis does not support idle eviction; idle timeout is documented but not enforced by the pool"
+            );
+        }
+
+        let metrics = Arc::new(PoolMetrics::default());
+        let pool = Self::build_pool(&connection_url, pool_config, metrics.clone())?;
 
         // Test connection
-        let mut conn = pool.get().await.map_err(|e| {
-            CacheError::ConnectionFailed(format!("Failed to connect to Redis: {}", e))
-        })?;
-
-        // Verify connection with PING
-        let _: String = redis::cmd("PING")
-            .query_async(&mut conn)
-            .await
-            .map_err(|e| CacheError::ConnectionFailed(format!("Redis PING failed: {}", e)))?;
+        Self::verify_connection(&pool).await?;
+        Self::prewarm_pool(&pool, pool_config.min_size as usize).await?;
 
         info!(
             mode,
             tls_enabled = redis_config.tls_enabled,
+            min_size = pool_config.min_size,
+            max_size = pool_config.max_size,
             "Redis connection pool created successfully"
         );
 
@@ -160,11 +157,73 @@ impl InstrumentedPool {
                 pool,
                 url: connection_url,
             }),
-            metrics: Arc::new(PoolMetrics::default()),
+            metrics,
             max_size: pool_config.max_size as usize,
             allow_get: true,
             cluster_pool: None,
         })
+    }
+
+    #[cfg(not(test))]
+    fn build_pool(
+        connection_url: &str,
+        pool_config: &PoolConfig,
+        metrics: Arc<PoolMetrics>,
+    ) -> Result<Pool, CacheError> {
+        let mut cfg = Config::from_url(connection_url);
+        let mut managed_pool = deadpool_redis::PoolConfig::new(pool_config.max_size as usize);
+        managed_pool.timeouts.wait = Some(Duration::from_millis(pool_config.connect_timeout_ms));
+        managed_pool.timeouts.create = Some(Duration::from_millis(pool_config.connect_timeout_ms));
+        managed_pool.timeouts.recycle =
+            Some(Duration::from_millis(pool_config.command_timeout_ms));
+        cfg.pool = Some(managed_pool);
+
+        let command_timeout = Duration::from_millis(pool_config.command_timeout_ms);
+        cfg.builder()
+            .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?
+            .runtime(Runtime::Tokio1)
+            .post_create(Hook::sync_fn(move |conn, _metrics| {
+                metrics
+                    .total_connections_created
+                    .fetch_add(1, Ordering::Relaxed);
+                conn.set_response_timeout(command_timeout);
+                Ok(())
+            }))
+            .build()
+            .map_err(|e| CacheError::ConnectionFailed(e.to_string()))
+    }
+
+    #[cfg(not(test))]
+    async fn verify_connection(pool: &Pool) -> Result<(), CacheError> {
+        let mut conn = pool.get().await.map_err(|e| {
+            CacheError::ConnectionFailed(format!("Failed to connect to Redis: {}", e))
+        })?;
+
+        let _: String = redis::cmd("PING")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| CacheError::ConnectionFailed(format!("Redis PING failed: {}", e)))?;
+
+        Ok(())
+    }
+
+    #[cfg(not(test))]
+    async fn prewarm_pool(pool: &Pool, min_size: usize) -> Result<(), CacheError> {
+        if min_size == 0 {
+            return Ok(());
+        }
+
+        let mut connections = Vec::with_capacity(min_size);
+        for _ in 0..min_size {
+            let conn = pool.get().await.map_err(|e| {
+                CacheError::ConnectionFailed(format!("Failed to prewarm Redis pool: {}", e))
+            })?;
+            connections.push(conn);
+        }
+
+        drop(connections);
+        info!(prewarmed_connections = min_size, "Redis pool prewarmed");
+        Ok(())
     }
 
     /// Resolve the master URL from Sentinel nodes.
@@ -536,6 +595,23 @@ impl InstrumentedPool {
             state.pool = new_pool;
             state.url = new_url;
         }
+    }
+
+    /// Build a fully-configured replacement pool for a new URL.
+    ///
+    /// Applies the same timeouts, metrics hooks, and prewarming as the initial
+    /// pool creation so that sentinel-failover pools behave identically to the
+    /// pool created at startup.
+    #[cfg(not(test))]
+    pub async fn build_replacement_pool(
+        &self,
+        url: &str,
+        pool_config: &PoolConfig,
+    ) -> Result<Pool, CacheError> {
+        let pool = Self::build_pool(url, pool_config, self.metrics.clone())?;
+        Self::verify_connection(&pool).await?;
+        Self::prewarm_pool(&pool, pool_config.min_size as usize).await?;
+        Ok(pool)
     }
 
     /// Get pool statistics

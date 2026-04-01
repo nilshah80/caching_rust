@@ -5,6 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use testcontainers::ContainerAsync;
+use testcontainers::GenericImage;
+use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::redis::{REDIS_PORT, Redis};
 
 use crate::application::services::{
     AdminService, BitMapService, BloomService, ClusterService, FunctionService, GeoService,
@@ -177,6 +181,85 @@ use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::pubsub_manager::PubSubManager;
 use crate::shared::app_state::AppState;
 use serde_json::Value;
+
+/// Start a Redis container for integration testing.
+///
+/// Returns `None` when Docker is unavailable **unless** `REQUIRE_DOCKER=1` is
+/// set, in which case the test panics so CI pipelines don't silently skip
+/// Redis integration tests.
+pub async fn start_redis_container() -> Option<(ContainerAsync<Redis>, String)> {
+    let container = match Redis::default().start().await {
+        Ok(container) => container,
+        Err(err) => {
+            return handle_docker_unavailable("Redis", &err);
+        }
+    };
+    let host = match container.get_host().await {
+        Ok(host) => host,
+        Err(err) => {
+            return handle_docker_unavailable("Redis", &err);
+        }
+    };
+    let port = match container.get_host_port_ipv4(REDIS_PORT).await {
+        Ok(port) => port,
+        Err(err) => {
+            return handle_docker_unavailable("Redis", &err);
+        }
+    };
+    Some((container, format!("redis://{host}:{port}")))
+}
+
+/// Start a generic Redis image for integration testing.
+///
+/// Same Docker-availability semantics as [`start_redis_container`].
+pub async fn start_generic_redis_image(
+    image: GenericImage,
+    port: u16,
+    ready_delay: Duration,
+    label: &str,
+) -> Option<(ContainerAsync<GenericImage>, String)> {
+    let container = match image.start().await {
+        Ok(container) => container,
+        Err(err) => {
+            return handle_docker_unavailable(label, &err);
+        }
+    };
+    tokio::time::sleep(ready_delay).await;
+    let host = match container.get_host().await {
+        Ok(host) => host,
+        Err(err) => {
+            return handle_docker_unavailable(label, &err);
+        }
+    };
+    let mapped_port = match container.get_host_port_ipv4(port).await {
+        Ok(port) => port,
+        Err(err) => {
+            return handle_docker_unavailable(label, &err);
+        }
+    };
+    Some((container, format!("redis://{host}:{mapped_port}")))
+}
+
+/// Central handler for Docker unavailability in test helpers.
+///
+/// - When `REQUIRE_DOCKER=1`: panics so the test fails visibly (use in CI).
+/// - Otherwise: prints a warning to stderr and returns `None` to skip the test.
+fn handle_docker_unavailable<T>(label: &str, err: &dyn std::fmt::Display) -> Option<T> {
+    if std::env::var("REQUIRE_DOCKER").as_deref() == Ok("1") {
+        panic!(
+            "Docker-dependent {label} test failed and REQUIRE_DOCKER=1 is set: {err}"
+        );
+    }
+    // Write directly to the stderr fd via std::io::Write, bypassing the test
+    // harness's macro-level capture so the warning is visible even for passing
+    // tests (eprintln! is swallowed by default).
+    use std::io::Write;
+    let _ = writeln!(
+        std::io::stderr(),
+        "WARNING: Skipping Docker-dependent {label} test (set REQUIRE_DOCKER=1 to fail instead): {err}"
+    );
+    None
+}
 
 #[derive(Default)]
 pub struct MockStringRepository {
@@ -548,6 +631,14 @@ impl AdminRepository for MockAdminRepository {
         Ok(123)
     }
 
+    async fn debug_object(&self, key: &str) -> Result<String, CacheError> {
+        Ok(format!("debug:{key}"))
+    }
+
+    async fn shutdown(&self, _save: bool, _now: bool) -> Result<(), CacheError> {
+        Ok(())
+    }
+
     async fn get_memory_stats(&self) -> Result<MemoryStats, CacheError> {
         Ok(MemoryStats::default())
     }
@@ -659,6 +750,10 @@ impl AdminRepository for MockAdminRepository {
         Ok(99)
     }
 
+    async fn client_info(&self) -> Result<ClientInfo, CacheError> {
+        Ok(ClientInfo::default())
+    }
+
     async fn slowlog_get(&self, _count: i64) -> Result<Vec<SlowlogEntry>, CacheError> {
         Ok(vec![])
     }
@@ -693,6 +788,10 @@ impl AdminRepository for MockAdminRepository {
 
     async fn latency_reset(&self, _events: &[String]) -> Result<(), CacheError> {
         Ok(())
+    }
+
+    async fn latency_graph(&self, event: &str) -> Result<String, CacheError> {
+        Ok(format!("graph:{event}"))
     }
 
     async fn acl_list(&self) -> Result<Vec<String>, CacheError> {
@@ -732,6 +831,22 @@ impl AdminRepository for MockAdminRepository {
             allowed: true,
             reason: None,
         })
+    }
+
+    async fn acl_setuser(&self, _username: &str, _rules: &[String]) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn acl_deluser(&self, usernames: &[String]) -> Result<i64, CacheError> {
+        Ok(usernames.len() as i64)
+    }
+
+    async fn acl_load(&self) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn acl_save(&self) -> Result<(), CacheError> {
+        Ok(())
     }
 
     async fn command_list(&self, _filter: Option<&str>) -> Result<Vec<String>, CacheError> {

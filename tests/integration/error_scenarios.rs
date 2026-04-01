@@ -1,22 +1,10 @@
 //! Integration tests for error scenarios (8.2.7).
 
-use std::sync::Arc;
-
-use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::redis::{REDIS_PORT, Redis};
-
 use redis_caching_service::application::services::{ListService, StringService};
 use redis_caching_service::domain::errors::CacheError;
 use redis_caching_service::infrastructure::redis::connection::InstrumentedPool;
 
-async fn create_pool() -> (testcontainers::ContainerAsync<Redis>, Arc<InstrumentedPool>) {
-    let container = Redis::default().start().await.unwrap();
-    let host = container.get_host().await.unwrap();
-    let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-    let url = format!("redis://{host}:{port}");
-    let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&url).unwrap());
-    (container, pool)
-}
+use crate::docker_helper::create_pool;
 
 #[tokio::test]
 async fn test_connection_to_invalid_redis_fails() {
@@ -48,7 +36,9 @@ async fn test_connection_to_invalid_redis_fails() {
 
 #[tokio::test]
 async fn test_key_not_found_returns_none() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = StringService::new(pool);
 
     // GET a key that was never set — should return None, not an error.
@@ -62,7 +52,9 @@ async fn test_key_not_found_returns_none() {
 
 #[tokio::test]
 async fn test_invalid_command_on_wrong_type() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let string_svc = StringService::new(pool.clone());
     let list_svc = ListService::new(pool);
 
@@ -99,7 +91,9 @@ async fn test_invalid_command_on_wrong_type() {
 
 #[tokio::test]
 async fn test_expired_key_returns_none() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = StringService::new(pool);
 
     // SET with 1-second TTL

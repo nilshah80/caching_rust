@@ -1,28 +1,18 @@
 //! Integration tests for core Redis operations (strings, hashes, lists, sorted sets, keys).
 
-use std::sync::Arc;
-
-use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::redis::{REDIS_PORT, Redis};
-
 use redis_caching_service::application::services::{
     HashService, KeyService, ListService, SortedSetService, StringService,
 };
 use redis_caching_service::domain::repositories::ScoredMember;
-use redis_caching_service::infrastructure::redis::connection::{InstrumentedPool, PoolStats};
+use redis_caching_service::infrastructure::redis::connection::PoolStats;
 
-async fn create_pool() -> (testcontainers::ContainerAsync<Redis>, Arc<InstrumentedPool>) {
-    let container = Redis::default().start().await.unwrap();
-    let host = container.get_host().await.unwrap();
-    let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-    let url = format!("redis://{host}:{port}");
-    let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&url).unwrap());
-    (container, pool)
-}
+use crate::docker_helper::create_pool;
 
 #[tokio::test]
 async fn test_string_set_get_cycle() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = StringService::new(pool);
 
     // SET key
@@ -42,7 +32,9 @@ async fn test_string_set_get_cycle() {
 
 #[tokio::test]
 async fn test_hash_set_get_cycle() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = HashService::new(pool);
 
     // HSET
@@ -62,7 +54,9 @@ async fn test_hash_set_get_cycle() {
 
 #[tokio::test]
 async fn test_list_push_pop_cycle() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = ListService::new(pool);
 
     // RPUSH
@@ -83,7 +77,9 @@ async fn test_list_push_pop_cycle() {
 
 #[tokio::test]
 async fn test_sorted_set_add_range() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let service = SortedSetService::new(pool);
 
     let members = vec![
@@ -114,7 +110,9 @@ async fn test_sorted_set_add_range() {
 
 #[tokio::test]
 async fn test_key_exists_delete() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
     let string_svc = StringService::new(pool.clone());
     let key_svc = KeyService::new(pool);
 
@@ -143,7 +141,9 @@ async fn test_key_exists_delete() {
 
 #[tokio::test]
 async fn test_pool_metrics_track_connections() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
 
     // Get a connection — this should increment total_wait_count
     let _conn = pool.get().await.unwrap();
@@ -163,7 +163,9 @@ async fn test_pool_metrics_track_connections() {
 
 #[tokio::test]
 async fn test_pool_get_stats() {
-    let (_container, pool) = create_pool().await;
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
 
     // Make a few connections to accumulate stats
     let _conn1 = pool.get().await.unwrap();

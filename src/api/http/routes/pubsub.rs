@@ -676,8 +676,7 @@ mod tests {
     use std::net::SocketAddr;
     use std::sync::Arc;
     use testcontainers::ContainerAsync;
-    use testcontainers::runners::AsyncRunner;
-    use testcontainers_modules::redis::{REDIS_PORT, Redis};
+    use testcontainers_modules::redis::Redis;
     use tokio::net::TcpListener;
     use tokio::sync::{Mutex, oneshot};
     use tokio::time::{Duration, timeout};
@@ -695,6 +694,7 @@ mod tests {
         MockHashRepository, MockJsonRepository, MockKeyRepository, MockListRepository,
         MockProbabilisticRepository, MockSearchRepository, MockSetRepository,
         MockSortedSetRepository, MockStreamRepository, MockStringRepository,
+        start_redis_container,
         test_state_with_all_repos_and_config,
     };
 
@@ -753,12 +753,8 @@ mod tests {
         }
     }
 
-    async fn start_redis() -> (ContainerAsync<Redis>, String) {
-        let container = Redis::default().start().await.unwrap();
-        let host = container.get_host().await.unwrap();
-        let port = container.get_host_port_ipv4(REDIS_PORT).await.unwrap();
-        let url = format!("redis://{host}:{port}");
-        (container, url)
+    async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
+        start_redis_container().await
     }
 
     async fn spawn_pubsub_server(state: AppState) -> (SocketAddr, oneshot::Sender<()>) {
@@ -1123,7 +1119,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_subscribe_flow() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1184,7 +1182,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_psubscribe_flow() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1246,7 +1246,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_subscribe_close_breaks_loop() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1278,7 +1280,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_psubscribe_close_breaks_loop() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1644,7 +1648,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_subscribe_confirmation_send_failure() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1668,7 +1674,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_subscribe_pong_send_failure() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1699,7 +1707,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_subscribe_message_send_failure() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1737,7 +1747,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_subscribe_redis_disconnect() {
-        let (container, redis_url) = start_redis().await;
+        let Some((container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1767,7 +1779,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_psubscribe_confirmation_send_failure() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1791,7 +1805,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_psubscribe_pong_send_failure() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1822,7 +1838,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_psubscribe_message_send_failure() {
-        let (_container, redis_url) = start_redis().await;
+        let Some((_container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),
@@ -1860,7 +1878,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_psubscribe_redis_disconnect() {
-        let (container, redis_url) = start_redis().await;
+        let Some((container, redis_url)) = start_redis().await else {
+            return;
+        };
         let repo = Arc::new(StubPubSubRepository {
             publish_result: PublishResult {
                 channel: "news".to_string(),

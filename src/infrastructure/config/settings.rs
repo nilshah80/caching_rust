@@ -479,6 +479,23 @@ impl Settings {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.blocking.max_timeout_seconds > 0,
+            "blocking.max_timeout_seconds must be greater than 0"
+        );
+        anyhow::ensure!(
+            self.blocking.default_timeout_seconds > 0,
+            "blocking.default_timeout_seconds must be greater than 0"
+        );
+        anyhow::ensure!(
+            self.blocking.default_timeout_seconds <= self.blocking.max_timeout_seconds,
+            "blocking.default_timeout_seconds must be less than or equal to blocking.max_timeout_seconds"
+        );
+        anyhow::ensure!(
+            self.blocking.max_sse_connections > 0,
+            "blocking.max_sse_connections must be greater than 0"
+        );
+
         if self.rate_limit.enabled {
             anyhow::ensure!(
                 self.rate_limit.requests_per_second > 0,

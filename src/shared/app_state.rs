@@ -3,6 +3,7 @@
 //! Shared state passed to all request handlers.
 
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Semaphore;
 
 use crate::application::services::{
@@ -112,16 +113,23 @@ impl AppState {
         config: Arc<Settings>,
         capabilities: Arc<RedisCapabilities>,
     ) -> Self {
+        let max_blocking_timeout = Duration::from_secs(config.blocking.max_timeout_seconds as u64);
         let sse_semaphore = Arc::new(Semaphore::new(config.blocking.max_sse_connections));
         let string_service = Arc::new(StringService::new(pool.clone()));
         let hash_service = Arc::new(HashService::new(pool.clone()));
-        let list_service = Arc::new(ListService::new(pool.clone()));
+        let list_service = Arc::new(
+            ListService::new(pool.clone()).with_max_blocking_timeout(max_blocking_timeout),
+        );
         let set_service = Arc::new(SetService::new(pool.clone()));
-        let sorted_set_service = Arc::new(SortedSetService::new(pool.clone()));
+        let sorted_set_service = Arc::new(
+            SortedSetService::new(pool.clone()).with_max_blocking_timeout(max_blocking_timeout),
+        );
         let bitmap_service = Arc::new(BitMapService::new(pool.clone()));
         let key_service = Arc::new(KeyService::new(pool.clone()));
         let admin_service = Arc::new(AdminService::new(pool.clone()));
-        let stream_service = Arc::new(StreamService::new(pool.clone()));
+        let stream_service = Arc::new(
+            StreamService::new(pool.clone()).with_max_blocking_timeout(max_blocking_timeout),
+        );
         let json_service = Arc::new(JsonService::new(pool.clone()));
         let search_service = Arc::new(SearchService::new(pool.clone()));
         let bloom_service = Arc::new(BloomService::new(pool.clone()));

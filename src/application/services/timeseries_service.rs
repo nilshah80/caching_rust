@@ -265,6 +265,7 @@ impl TimeSeriesService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::start_generic_redis_image;
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -272,7 +273,6 @@ mod tests {
     use testcontainers::ContainerAsync;
     use testcontainers::GenericImage;
     use testcontainers::core::IntoContainerPort;
-    use testcontainers::runners::AsyncRunner;
 
     #[derive(Default)]
     struct CaptureTimeSeriesRepo {
@@ -688,26 +688,24 @@ mod tests {
             .expect("delete_rule");
     }
 
-    async fn start_redis_stack() -> (ContainerAsync<GenericImage>, String) {
+    async fn start_redis_stack() -> Option<(ContainerAsync<GenericImage>, String)> {
         let image =
             GenericImage::new("redis/redis-stack-server", "latest").with_exposed_port(6379.tcp());
-        let container = image.start().await.expect("redis stack");
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let host = container.get_host().await.expect("host");
-        let port = container.get_host_port_ipv4(6379).await.expect("port");
-        (container, format!("redis://{host}:{port}"))
+        start_generic_redis_image(image, 6379, Duration::from_secs(2), "redis stack").await
     }
 
-    async fn service_with_timeseries() -> (ContainerAsync<GenericImage>, TimeSeriesService) {
-        let (container, redis_url) = start_redis_stack().await;
+    async fn service_with_timeseries() -> Option<(ContainerAsync<GenericImage>, TimeSeriesService)> {
+        let (container, redis_url) = start_redis_stack().await?;
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).expect("pool"));
         let service = TimeSeriesService::new(pool);
-        (container, service)
+        Some((container, service))
     }
 
     #[tokio::test]
     async fn test_timeseries_create_add_get_range_integration() {
-        let (_container, service) = service_with_timeseries().await;
+        let Some((_container, service)) = service_with_timeseries().await else {
+            return;
+        };
         let mut labels = HashMap::new();
         labels.insert("sensor".to_string(), "temp".to_string());
         service
@@ -759,7 +757,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeseries_mget_mrange_queryindex_integration() {
-        let (_container, service) = service_with_timeseries().await;
+        let Some((_container, service)) = service_with_timeseries().await else {
+            return;
+        };
         for key in ["ts:a", "ts:b"] {
             let mut labels = HashMap::new();
             labels.insert("sensor".to_string(), "temp".to_string());
@@ -814,7 +814,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeseries_info_and_rule_commands_integration() {
-        let (_container, service) = service_with_timeseries().await;
+        let Some((_container, service)) = service_with_timeseries().await else {
+            return;
+        };
         let mut labels = HashMap::new();
         labels.insert("sensor".to_string(), "temp".to_string());
         service

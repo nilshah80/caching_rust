@@ -15,12 +15,19 @@ use crate::api::http::routes::admin::{
     AclGenPassRequest,
     AclGenPassResponse,
     // ACL operations
+    AclDelUserRequest,
+    AclDelUserResponse,
     AclListResponse,
+    AclLoadResponse,
     AclLogRequest,
     AclLogResponse,
+    AclSaveResponse,
+    AclSetUserRequest,
+    AclSetUserResponse,
     AclUsersResponse,
     AclWhoamiResponse,
     ClientGetNameResponse,
+    ClientInfoResponse,
     ClientIdResponse,
     ClientKillRequest,
     ClientKillResponse,
@@ -50,10 +57,13 @@ use crate::api::http::routes::admin::{
     CopyKeyRequest,
     CopyKeyResponse,
     DbSizeResponse,
+    DebugObjectRequest,
+    DebugObjectResponse,
     FlushDbRequest,
     // Server info
     LastSaveResponse,
     LatencyDoctorResponse,
+    LatencyGraphResponse,
     LatencyHistoryRequest,
     LatencyHistoryResponse,
     LatencyLatestResponse,
@@ -67,6 +77,8 @@ use crate::api::http::routes::admin::{
     MoveKeyResponse,
     // Persistence operations
     SaveResponse,
+    ShutdownRequest,
+    ShutdownResponse,
     // Monitoring operations
     SlowlogGetRequest,
     SlowlogGetResponse,
@@ -639,6 +651,8 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::get_server_time,
         crate::api::http::routes::admin::get_db_size,
         crate::api::http::routes::admin::get_lastsave,
+        crate::api::http::routes::admin::debug_object,
+        crate::api::http::routes::admin::shutdown,
         // Admin - Memory
         crate::api::http::routes::admin::get_memory_stats,
         crate::api::http::routes::admin::get_memory_usage,
@@ -667,6 +681,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::client_setname,
         crate::api::http::routes::admin::client_getname,
         crate::api::http::routes::admin::client_id,
+        crate::api::http::routes::admin::client_info,
         // Admin - Slowlog
         crate::api::http::routes::admin::slowlog_get,
         crate::api::http::routes::admin::slowlog_len,
@@ -676,6 +691,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::latency_history,
         crate::api::http::routes::admin::latency_doctor,
         crate::api::http::routes::admin::latency_reset,
+        crate::api::http::routes::admin::latency_graph,
         // Admin - ACL
         crate::api::http::routes::admin::acl_list,
         crate::api::http::routes::admin::acl_users,
@@ -684,6 +700,10 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::acl_genpass,
         crate::api::http::routes::admin::acl_log,
         crate::api::http::routes::admin::acl_dryrun,
+        crate::api::http::routes::admin::acl_setuser,
+        crate::api::http::routes::admin::acl_deluser,
+        crate::api::http::routes::admin::acl_load,
+        crate::api::http::routes::admin::acl_save,
         // Admin - Command Introspection
         crate::api::http::routes::admin::command_list,
         crate::api::http::routes::admin::command_count,
@@ -1025,6 +1045,7 @@ use crate::shared::app_state::AppState;
             LatencyDoctorResponse,
             LatencyResetRequest,
             LatencyResetResponse,
+            LatencyGraphResponse,
             // Admin - ACL
             AclListResponse,
             AclUsersResponse,
@@ -1038,6 +1059,19 @@ use crate::shared::app_state::AppState;
             AclLogResponse,
             AclDryrunRequest,
             AclDryrunResponse,
+            AclSetUserRequest,
+            AclSetUserResponse,
+            AclDelUserRequest,
+            AclDelUserResponse,
+            AclLoadResponse,
+            AclSaveResponse,
+            // Admin - Server
+            DebugObjectRequest,
+            DebugObjectResponse,
+            ShutdownRequest,
+            ShutdownResponse,
+            // Admin - Client
+            ClientInfoResponse,
             // Admin - Command Introspection
             CommandListQuery,
             CommandListResponse,
@@ -1363,20 +1397,145 @@ impl Modify for SecurityAddon {
     }
 }
 
-/// Create OpenAPI routes with Swagger UI
-pub fn openapi_routes() -> Router<AppState> {
-    Router::new()
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+/// Path prefixes that belong to each capability-gated feature/module.
+/// When a capability is disabled at runtime, all matching paths are stripped
+/// from the served OpenAPI spec so the documentation stays in sync with the
+/// live router (which returns 501 for unavailable features).
+const STREAM_PREFIXES: &[&str] = &["/api/v1/streams"];
+const JSON_PREFIXES: &[&str] = &["/api/v1/json"];
+const SEARCH_PREFIXES: &[&str] = &["/api/v1/search"];
+const BLOOM_PREFIXES: &[&str] = &["/api/v1/bloom", "/api/v1/cms", "/api/v1/topk"];
+const TIMESERIES_PREFIXES: &[&str] = &["/api/v1/timeseries"];
+const FUNCTIONS_PREFIXES: &[&str] = &["/api/v1/functions"];
+const CLUSTER_PREFIXES: &[&str] = &["/api/v1/cluster"];
+
+/// Tags removed together with their paths so the Swagger sidebar stays clean.
+const STREAM_TAGS: &[&str] = &["Streams", "Streams (Admin)"];
+const JSON_TAGS: &[&str] = &["JSON"];
+const SEARCH_TAGS: &[&str] = &["Search"];
+const BLOOM_TAGS: &[&str] = &["Bloom Filters", "Cuckoo Filters", "Count-Min Sketch", "Top-K"];
+const TIMESERIES_TAGS: &[&str] = &["TimeSeries"];
+const FUNCTIONS_TAGS: &[&str] = &["Functions"];
+const CLUSTER_TAGS: &[&str] = &["Cluster"];
+
+/// Build an OpenAPI spec filtered to only include routes that are actually
+/// available given the detected Redis capabilities.
+pub fn filtered_openapi(
+    capabilities: &crate::infrastructure::redis::capabilities::RedisCapabilities,
+) -> utoipa::openapi::OpenApi {
+    let mut spec = ApiDoc::openapi();
+
+    // Collect prefixes and tags to remove for disabled capabilities
+    let mut remove_prefixes: Vec<&str> = Vec::new();
+    let mut remove_tags: Vec<&str> = Vec::new();
+
+    if !capabilities.features.streams {
+        remove_prefixes.extend(STREAM_PREFIXES);
+        remove_tags.extend(STREAM_TAGS);
+    }
+    if !capabilities.modules.json {
+        remove_prefixes.extend(JSON_PREFIXES);
+        remove_tags.extend(JSON_TAGS);
+    }
+    if !capabilities.modules.search {
+        remove_prefixes.extend(SEARCH_PREFIXES);
+        remove_tags.extend(SEARCH_TAGS);
+    }
+    if !capabilities.modules.bloom {
+        remove_prefixes.extend(BLOOM_PREFIXES);
+        remove_tags.extend(BLOOM_TAGS);
+    }
+    if !capabilities.modules.timeseries {
+        remove_prefixes.extend(TIMESERIES_PREFIXES);
+        remove_tags.extend(TIMESERIES_TAGS);
+    }
+    if !capabilities.features.functions {
+        remove_prefixes.extend(FUNCTIONS_PREFIXES);
+        remove_tags.extend(FUNCTIONS_TAGS);
+    }
+    if !capabilities.features.cluster {
+        remove_prefixes.extend(CLUSTER_PREFIXES);
+        remove_tags.extend(CLUSTER_TAGS);
+    }
+
+    if !remove_prefixes.is_empty() {
+        // Filter paths
+        spec.paths.paths.retain(|path, _| {
+            !remove_prefixes.iter().any(|prefix| path.starts_with(prefix))
+        });
+
+        // Filter tags
+        if let Some(ref mut tags) = spec.tags {
+            tags.retain(|tag| !remove_tags.contains(&tag.name.as_str()));
+        }
+    }
+
+    spec
+}
+
+/// Create OpenAPI routes with Swagger UI.
+///
+/// Accepts capabilities so the served spec only advertises routes that are
+/// actually mounted on the live router.
+pub fn openapi_routes(
+    capabilities: &crate::infrastructure::redis::capabilities::RedisCapabilities,
+) -> Router<AppState> {
+    let spec = filtered_openapi(capabilities);
+    Router::new().merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", spec))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infrastructure::redis::capabilities::RedisCapabilities;
 
     #[test]
     fn test_openapi_security_scheme() {
         let spec = ApiDoc::openapi();
         let components = spec.components.expect("components");
         assert!(components.security_schemes.contains_key("api_key"));
+    }
+
+    #[test]
+    fn test_filtered_openapi_removes_json_paths_when_module_disabled() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.modules.json = false;
+        let spec = filtered_openapi(&caps);
+        let has_json_path = spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/json"));
+        assert!(!has_json_path, "JSON paths should be removed when module is disabled");
+    }
+
+    #[test]
+    fn test_filtered_openapi_keeps_json_paths_when_module_enabled() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.modules.json = true;
+        let spec = filtered_openapi(&caps);
+        let has_json_path = spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/json"));
+        assert!(has_json_path, "JSON paths should be present when module is enabled");
+    }
+
+    #[test]
+    fn test_filtered_openapi_removes_bloom_paths_when_module_disabled() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.modules.bloom = false;
+        let spec = filtered_openapi(&caps);
+        assert!(!spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/bloom")));
+        assert!(!spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/cms")));
+        assert!(!spec.paths.paths.keys().any(|p| p.starts_with("/api/v1/topk")));
+    }
+
+    #[test]
+    fn test_filtered_openapi_all_enabled_retains_all_paths() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.modules.json = true;
+        caps.modules.search = true;
+        caps.modules.bloom = true;
+        caps.modules.timeseries = true;
+        caps.features.streams = true;
+        caps.features.functions = true;
+        caps.features.cluster = true;
+        let full_spec = ApiDoc::openapi();
+        let filtered = filtered_openapi(&caps);
+        assert_eq!(full_spec.paths.paths.len(), filtered.paths.paths.len());
     }
 }
