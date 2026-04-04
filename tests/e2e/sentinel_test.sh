@@ -81,7 +81,9 @@ assert_contains "Pool stats has max_size" "$body" '"max_size"'
 
 echo ""
 echo "--- Cleanup ---"
-curl -sf -X DELETE "$BASE_URL/api/v1/strings/sentinel-e2e-test" > /dev/null 2>&1 || true
+curl -sf -X DELETE "$BASE_URL/api/v1/keys/sentinel-e2e-test" > /dev/null 2>&1 || true
+curl -sf -X DELETE "$BASE_URL/api/v1/keys/sentinel-e2e-hash" > /dev/null 2>&1 || true
+curl -sf -X DELETE "$BASE_URL/api/v1/keys/sentinel-e2e-list" > /dev/null 2>&1 || true
 echo "  Cleanup done"
 
 echo ""

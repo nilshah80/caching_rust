@@ -123,8 +123,9 @@ assert_contains "Admin INFO has redis_version" "$body" '"redis_version"'
 
 echo ""
 echo "--- Cleanup ---"
-curl -sf -X DELETE "$BASE_URL/api/v1/strings/cluster-e2e-test" > /dev/null 2>&1 || true
-curl -sf -X DELETE "$BASE_URL/api/v1/strings/cluster-e2e-hash" > /dev/null 2>&1 || true
+curl -sf -X DELETE "$BASE_URL/api/v1/keys/cluster-e2e-test" > /dev/null 2>&1 || true
+curl -sf -X DELETE "$BASE_URL/api/v1/keys/cluster-e2e-hash" > /dev/null 2>&1 || true
+curl -sf -X DELETE "$BASE_URL/api/v1/keys/cluster-e2e-list" > /dev/null 2>&1 || true
 echo "  Cleanup done"
 
 echo ""
