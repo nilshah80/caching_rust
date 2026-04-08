@@ -189,18 +189,18 @@ echo ""
 # ==========================================================================
 echo "--- 5.5 Scripting ---"
 
-IFS='|' read -r status body < <(do_request POST "/api/v1/scripts/eval" \
+IFS='|' read -r status body < <(admin_request POST "/api/v1/scripts/eval" \
     '{"script":"return 42","keys":[],"args":[]}')
 check "EVAL" "200" "$status" "$body"
 
-IFS='|' read -r status body < <(do_request POST "/api/v1/scripts/load" \
+IFS='|' read -r status body < <(admin_request POST "/api/v1/scripts/load" \
     '{"script":"return 42"}')
 check "SCRIPT LOAD" "200" "$status" "$body"
 # Extract SHA from response
 SHA=$(echo "$body" | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
 if [[ -n "$SHA" ]]; then
-    IFS='|' read -r status body < <(do_request POST "/api/v1/scripts/exists" \
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/scripts/exists" \
         "{\"shas\":[\"$SHA\"]}")
     check "SCRIPT EXISTS" "200" "$status" "$body"
 else
@@ -217,31 +217,31 @@ echo "--- 5.6 Functions ---"
 
 FUNC_BODY='{"code":"#!lua name=testlib\nredis.register_function{function_name=\"testfn\",callback=function(keys,args) return \"hello\" end,flags={\"no-writes\"}}","replace":true}'
 
-IFS='|' read -r status body < <(do_request POST "/api/v1/functions/load" \
+IFS='|' read -r status body < <(admin_request POST "/api/v1/functions/load" \
     "$FUNC_BODY")
 check "FUNCTION LOAD" "200" "$status" "$body"
 
-IFS='|' read -r status body < <(do_request GET "/api/v1/functions")
+IFS='|' read -r status body < <(admin_request GET "/api/v1/functions")
 check "FUNCTION LIST" "200" "$status" "$body"
 
-IFS='|' read -r status body < <(do_request POST "/api/v1/functions/call" \
+IFS='|' read -r status body < <(admin_request POST "/api/v1/functions/call" \
     '{"function":"testfn","keys":[],"args":[],"readonly":true}')
 check "FCALL_RO (readonly:true)" "200" "$status" "$body"
 
-IFS='|' read -r status body < <(do_request GET "/api/v1/functions/stats")
+IFS='|' read -r status body < <(admin_request GET "/api/v1/functions/stats")
 check "FUNCTION STATS" "200" "$status" "$body"
 
-IFS='|' read -r status body < <(do_request GET "/api/v1/functions/dump")
+IFS='|' read -r status body < <(admin_request GET "/api/v1/functions/dump")
 check "FUNCTION DUMP" "200" "$status" "$body"
 
-IFS='|' read -r status body < <(do_request DELETE "/api/v1/functions/testlib")
+IFS='|' read -r status body < <(admin_request DELETE "/api/v1/functions/testlib")
 check "FUNCTION DELETE" "200" "$status" "$body"
 
 # Re-load for flush test
-IFS='|' read -r status body < <(do_request POST "/api/v1/functions/load" \
+IFS='|' read -r status body < <(admin_request POST "/api/v1/functions/load" \
     "$FUNC_BODY")
 
-IFS='|' read -r status body < <(do_request POST "/api/v1/functions/flush" '{}')
+IFS='|' read -r status body < <(admin_request POST "/api/v1/functions/flush" '{}')
 check "FUNCTION FLUSH" "200" "$status" "$body"
 
 echo ""

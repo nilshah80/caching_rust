@@ -1,7 +1,7 @@
 services:
   # Redis 8 (includes all modules built-in: JSON, Search, Bloom, TimeSeries, and all core types)
   redis:
-    image: redis:8.0-M04
+    image: redis:8
     container_name: redis-server
     ports:
       - "6379:6379"

@@ -20,6 +20,7 @@ mod sorted_set_repo;
 mod stream_repo;
 mod string_repo;
 mod timeseries_repo;
+mod vector_repo;
 
 pub use admin_repo::RedisAdminRepository;
 pub use bitmap_repo::RedisBitMapRepository;
@@ -39,3 +40,4 @@ pub use sorted_set_repo::RedisSortedSetRepository;
 pub use stream_repo::RedisStreamRepository;
 pub use string_repo::RedisStringRepository;
 pub use timeseries_repo::RedisTimeSeriesRepository;
+pub use vector_repo::RedisVectorRepository;

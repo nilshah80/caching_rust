@@ -22,8 +22,9 @@ mod sets;
 mod sorted_sets;
 mod streams;
 mod strings;
-mod timeseries;
-mod transactions;
+pub mod timeseries;
+pub mod transactions;
+pub mod vectors;
 
 pub use admin::admin_routes;
 pub use bitmaps::bitmap_routes;
@@ -184,6 +185,30 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/cluster",
             "/api/v1/cluster/{*path}",
             "Redis Cluster mode is not available",
+        ));
+    }
+
+    if capabilities.features.vectors {
+        router = router.merge(vectors::router());
+        // VRANGE is gated separately — absent on some early 8.x builds
+        if capabilities.features.vector_range {
+            router = router.merge(vectors::vector_range_router());
+        } else {
+            // Return 501 instead of 404 for consistent capability error
+            router = router.route(
+                "/api/v1/vectors/{key}/range",
+                any(|| async {
+                    Err::<(), CacheError>(CacheError::ModuleNotAvailable(
+                        "VRANGE command is not available on this Redis build".to_string(),
+                    ))
+                }),
+            );
+        }
+    } else {
+        router = router.merge(unavailable_feature_routes(
+            "/api/v1/vectors",
+            "/api/v1/vectors/{*path}",
+            "Vector Sets require Redis 8.0+",
         ));
     }
 

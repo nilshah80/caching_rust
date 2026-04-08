@@ -20,8 +20,9 @@ mod set_service;
 mod sorted_set_service;
 mod stream_service;
 mod string_service;
-mod timeseries_service;
-mod transaction_service;
+pub mod timeseries_service;
+pub mod transaction_service;
+pub mod vector_service;
 
 pub use admin_service::AdminService;
 pub use bitmap_service::BitMapService;
@@ -43,3 +44,4 @@ pub use stream_service::StreamService;
 pub use string_service::StringService;
 pub use timeseries_service::TimeSeriesService;
 pub use transaction_service::TransactionService;
+pub use vector_service::VectorService;

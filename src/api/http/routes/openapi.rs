@@ -231,6 +231,14 @@ use crate::api::http::schemas::transactions::{
     KeyValue, RedisCommand, ScoredMember as TransactionScoredMember, TransactionRequest,
     TransactionResponse,
 };
+use crate::api::http::schemas::vectors::{
+    VectorAddRequest, VectorAddResponse, VectorCardResponse, VectorDimResponse, VectorEmbRequest,
+    VectorEmbResponse, VectorGetAttrResponse, VectorInfoResponse, VectorIsMemberRequest,
+    VectorIsMemberResponse, VectorLinksLayer, VectorLinksResponse, VectorRandMemberRequest,
+    VectorRandMemberResponse, VectorRangeItemResponse, VectorRangeRequest, VectorRangeResponse,
+    VectorRemRequest, VectorRemResponse, VectorSetAttrRequest, VectorSetAttrResponse,
+    VectorSimItemResponse, VectorSimRequest, VectorSimResponse,
+};
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, FlushResult, LatencyEvent,
     MemoryStats, MemoryUsage, ServerInfo, ServerTime, SlowlogEntry,
@@ -325,6 +333,7 @@ use crate::shared::app_state::AppState;
         (name = "Pub/Sub", description = "Redis Pub/Sub operations (PUBLISH, SUBSCRIBE, PSUBSCRIBE, PUBSUB CHANNELS/NUMSUB/NUMPAT). HTTP endpoints for publish and info commands, WebSocket endpoints for subscriptions - core Redis feature"),
         (name = "Transactions", description = "Redis transaction operations (MULTI/EXEC bundled in single request, compare-and-set operations using Lua scripts). Supports WATCH for optimistic locking - core Redis feature"),
         (name = "Scripting", description = "Redis Lua scripting operations (EVAL, EVALSHA, SCRIPT LOAD/EXISTS/FLUSH/KILL/DEBUG). Execute custom Lua scripts with keys and arguments, manage script cache - core Redis feature"),
+        (name = "Vectors", description = "Redis Vector Sets operations (VADD, VREM, VSIM, VCARD, VDIM, VEMB, VISMEMBER, VLINKS, VRANDMEMBER, VRANGE, VINFO, VGETATTR, VSETATTR) - requires Redis 8.0+"),
         (name = "Admin", description = "Administrative endpoints (pool stats, capabilities, server info, database ops, config, persistence, client management, monitoring, ACL)")
     ),
     paths(
@@ -728,6 +737,20 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::timeseries::ts_info,
         crate::api::http::routes::timeseries::ts_create_rule,
         crate::api::http::routes::timeseries::ts_delete_rule,
+        // Vector Sets endpoints
+        crate::api::http::routes::vectors::vadd,
+        crate::api::http::routes::vectors::vrem,
+        crate::api::http::routes::vectors::vsim,
+        crate::api::http::routes::vectors::vcard,
+        crate::api::http::routes::vectors::vdim,
+        crate::api::http::routes::vectors::vemb,
+        crate::api::http::routes::vectors::vismember,
+        crate::api::http::routes::vectors::vlinks,
+        crate::api::http::routes::vectors::vrandmember,
+        crate::api::http::routes::vectors::vrange,
+        crate::api::http::routes::vectors::vinfo,
+        crate::api::http::routes::vectors::vgetattr,
+        crate::api::http::routes::vectors::vsetattr,
     ),
     components(
         schemas(
@@ -1377,6 +1400,31 @@ use crate::shared::app_state::AppState;
             TsQueryIndexResponse,
             TsInfoResponse,
             TsCreateRuleRequest,
+            // Vector Sets schemas
+            VectorAddRequest,
+            VectorAddResponse,
+            VectorRemRequest,
+            VectorRemResponse,
+            VectorSimRequest,
+            VectorSimItemResponse,
+            VectorSimResponse,
+            VectorCardResponse,
+            VectorDimResponse,
+            VectorEmbRequest,
+            VectorEmbResponse,
+            VectorIsMemberRequest,
+            VectorIsMemberResponse,
+            VectorLinksLayer,
+            VectorLinksResponse,
+            VectorRandMemberRequest,
+            VectorRandMemberResponse,
+            VectorRangeRequest,
+            VectorRangeItemResponse,
+            VectorRangeResponse,
+            VectorInfoResponse,
+            VectorGetAttrResponse,
+            VectorSetAttrRequest,
+            VectorSetAttrResponse,
         )
     ),
     modifiers(&SecurityAddon)
@@ -1408,6 +1456,7 @@ const BLOOM_PREFIXES: &[&str] = &["/api/v1/bloom", "/api/v1/cms", "/api/v1/topk"
 const TIMESERIES_PREFIXES: &[&str] = &["/api/v1/timeseries"];
 const FUNCTIONS_PREFIXES: &[&str] = &["/api/v1/functions"];
 const CLUSTER_PREFIXES: &[&str] = &["/api/v1/cluster"];
+const VECTORS_PREFIXES: &[&str] = &["/api/v1/vectors"];
 
 /// Tags removed together with their paths so the Swagger sidebar stays clean.
 const STREAM_TAGS: &[&str] = &["Streams", "Streams (Admin)"];
@@ -1422,6 +1471,7 @@ const BLOOM_TAGS: &[&str] = &[
 const TIMESERIES_TAGS: &[&str] = &["TimeSeries"];
 const FUNCTIONS_TAGS: &[&str] = &["Functions"];
 const CLUSTER_TAGS: &[&str] = &["Cluster"];
+const VECTORS_TAGS: &[&str] = &["Vectors"];
 
 /// Build an OpenAPI spec filtered to only include routes that are actually
 /// available given the detected Redis capabilities.
@@ -1461,6 +1511,16 @@ pub fn filtered_openapi(
     if !capabilities.features.cluster {
         remove_prefixes.extend(CLUSTER_PREFIXES);
         remove_tags.extend(CLUSTER_TAGS);
+    }
+    if !capabilities.features.vectors {
+        remove_prefixes.extend(VECTORS_PREFIXES);
+        remove_tags.extend(VECTORS_TAGS);
+    }
+
+    // VRANGE is gated independently — strip it if vector_range is false
+    // even when core vector commands are available.
+    if !capabilities.features.vector_range {
+        spec.paths.paths.remove("/api/v1/vectors/{key}/range");
     }
 
     if !remove_prefixes.is_empty() {
@@ -1573,6 +1633,8 @@ mod tests {
         caps.features.streams = true;
         caps.features.functions = true;
         caps.features.cluster = true;
+        caps.features.vectors = true;
+        caps.features.vector_range = true;
         let full_spec = ApiDoc::openapi();
         let filtered = filtered_openapi(&caps);
         assert_eq!(full_spec.paths.paths.len(), filtered.paths.paths.len());

@@ -1462,6 +1462,9 @@ mod tests {
             config.blocking.max_sse_connections,
         ));
         let cluster_service = Arc::new(ClusterService::new(Arc::new(MockClusterRepository)));
+        let vector_service = Arc::new(crate::application::services::VectorService::new(Arc::new(
+            crate::test_support::MockVectorRepository,
+        )));
 
         AppState::new_with_services(
             pool,
@@ -1488,6 +1491,7 @@ mod tests {
             function_service,
             timeseries_service,
             cluster_service,
+            vector_service,
             None,
             None,
         )
@@ -2237,6 +2241,9 @@ mod tests {
         ));
         let sse_semaphore = Arc::new(tokio::sync::Semaphore::new(max_sse));
         let cluster_service = Arc::new(ClusterService::new(Arc::new(MockClusterRepository)));
+        let vector_service = Arc::new(crate::application::services::VectorService::new(Arc::new(
+            crate::test_support::MockVectorRepository,
+        )));
 
         AppState::new_with_services(
             pool,
@@ -2263,6 +2270,7 @@ mod tests {
             function_service,
             timeseries_service,
             cluster_service,
+            vector_service,
             None,
             None,
         )

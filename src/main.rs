@@ -54,8 +54,9 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // Detect Redis capabilities
+    // Detect Redis capabilities and store in pool for sentinel failover comparison
     let capabilities = pool.detect_capabilities().await?;
+    pool.store_capabilities(Arc::new(capabilities.clone()));
     info!(?capabilities, mode, "Redis capabilities detected");
 
     // Security warnings and production safeguards

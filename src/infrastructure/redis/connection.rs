@@ -79,6 +79,9 @@ pub struct PoolStats {
 struct PoolState {
     pool: Pool,
     url: String,
+    /// Capabilities detected against the current pool/master.
+    /// Refreshed after sentinel failover pool swap.
+    capabilities: Option<Arc<RedisCapabilities>>,
 }
 
 /// Simple circuit breaker state for fast-failing when Redis is unreachable.
@@ -117,6 +120,9 @@ pub struct InstrumentedPool {
     /// Optional cluster pool. When set, `get()` returns cluster connections
     /// that route commands based on key hash slot (MOVED/ASK handling).
     cluster_pool: Option<crate::infrastructure::redis::cluster_connection::ClusterPool>,
+    /// Set to true when sentinel failover detects capability drift.
+    /// Readiness probe returns 503 until the process is restarted.
+    capability_drift: std::sync::atomic::AtomicBool,
     /// Circuit breaker for fast-failing when Redis is unreachable
     circuit_breaker: CircuitBreaker,
 }
@@ -183,11 +189,13 @@ impl InstrumentedPool {
             state: std::sync::RwLock::new(PoolState {
                 pool,
                 url: connection_url,
+                capabilities: None,
             }),
             metrics,
             max_size: pool_config.max_size as usize,
             allow_get: true,
             cluster_pool: None,
+            capability_drift: std::sync::atomic::AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::default(),
         })
     }
@@ -377,11 +385,13 @@ impl InstrumentedPool {
             state: std::sync::RwLock::new(PoolState {
                 pool,
                 url: "redis://127.0.0.1:0".to_string(),
+                capabilities: None,
             }),
             metrics: Arc::new(PoolMetrics::default()),
             max_size: 1,
             allow_get: false,
             cluster_pool: None,
+            capability_drift: std::sync::atomic::AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::default(),
         }
     }
@@ -400,11 +410,13 @@ impl InstrumentedPool {
             state: std::sync::RwLock::new(PoolState {
                 pool,
                 url: redis_url.to_string(),
+                capabilities: None,
             }),
             metrics: Arc::new(PoolMetrics::default()),
             max_size: 4,
             allow_get: true,
             cluster_pool: None,
+            capability_drift: std::sync::atomic::AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::default(),
         })
     }
@@ -676,11 +688,39 @@ impl InstrumentedPool {
 
     /// Swap the inner pool and resolved URL atomically under a single write lock.
     /// Used by the sentinel watcher to point the pool at a newly promoted master.
+    /// Clears cached capabilities so they are re-detected against the new master.
     pub fn swap_pool(&self, new_pool: Pool, new_url: String) {
         if let Ok(mut state) = self.state.write() {
             state.pool = new_pool;
             state.url = new_url;
+            state.capabilities = None;
         }
+    }
+
+    /// Store detected capabilities in the pool state.
+    pub fn store_capabilities(&self, caps: Arc<RedisCapabilities>) {
+        if let Ok(mut state) = self.state.write() {
+            state.capabilities = Some(caps);
+        }
+    }
+
+    /// Get the most recently detected capabilities.
+    /// Returns None if capabilities have not been detected or were cleared by a pool swap.
+    pub fn get_capabilities(&self) -> Option<Arc<RedisCapabilities>> {
+        self.state.read().ok().and_then(|s| s.capabilities.clone())
+    }
+
+    /// Mark the pool as having drifted capabilities after sentinel failover.
+    /// The readiness probe will return 503 until the process is restarted.
+    pub fn set_capability_drift(&self) {
+        self.capability_drift
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Check if capability drift has been detected after a sentinel failover.
+    pub fn has_capability_drift(&self) -> bool {
+        self.capability_drift
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Build a fully-configured replacement pool for a new URL.
@@ -788,6 +828,76 @@ impl InstrumentedPool {
             info.contains("cluster_enabled:1")
         };
 
+        // Probe for vector set commands by checking COMMAND INFO for every
+        // exposed command. Version check alone is insufficient — some 8.x builds
+        // may not include all vector commands.
+        let is_8x = RedisCapabilities::version_gte(&redis_version, "7.9.0");
+
+        // Batch-probe all vector commands we expose in a single COMMAND INFO call.
+        // COMMAND INFO returns one entry per command name; Nil means unknown.
+        let (vectors_available, vector_range_available) = if is_8x {
+            // Core commands: VADD VREM VSIM VCARD VDIM VEMB VISMEMBER VLINKS
+            //                VRANDMEMBER VINFO VGETATTR VSETATTR
+            // Extended:      VRANGE (may be absent on early 8.x)
+            let core_cmds = [
+                "VADD",
+                "VREM",
+                "VSIM",
+                "VCARD",
+                "VDIM",
+                "VEMB",
+                "VISMEMBER",
+                "VLINKS",
+                "VRANDMEMBER",
+                "VINFO",
+                "VGETATTR",
+                "VSETATTR",
+            ];
+            let mut cmd = redis::cmd("COMMAND");
+            cmd.arg("INFO");
+            for c in &core_cmds {
+                cmd.arg(*c);
+            }
+            cmd.arg("VRANGE");
+
+            let all_present = |arr: &[redis::Value], count: usize| -> bool {
+                arr.len() >= count
+                    && arr
+                        .iter()
+                        .take(count)
+                        .all(|v| !matches!(v, redis::Value::Nil))
+            };
+
+            match cmd.query_async::<redis::Value>(&mut conn).await {
+                Ok(redis::Value::Array(ref arr)) => {
+                    let core_ok = all_present(arr, core_cmds.len());
+                    let range_ok = core_ok
+                        && arr.len() > core_cmds.len()
+                        && !matches!(arr.get(core_cmds.len()), Some(redis::Value::Nil));
+                    (core_ok, range_ok)
+                }
+                Err(e) => {
+                    let msg = e.to_string().to_lowercase();
+                    if msg.contains("noperm") || msg.contains("acl") || msg.contains("denied") {
+                        // ACL restricts COMMAND INFO — we cannot verify which
+                        // vector commands exist, so fail closed: disable vectors.
+                        // Operators must grant COMMAND INFO permission or the
+                        // service will not expose vector routes.
+                        warn!(
+                            "COMMAND INFO blocked by ACL — vector routes disabled. \
+                             Grant COMMAND INFO permission to enable vector support."
+                        );
+                    } else {
+                        warn!(?e, "Vector capability probe failed — vectors disabled");
+                    }
+                    (false, false)
+                }
+                _ => (false, false),
+            }
+        } else {
+            (false, false)
+        };
+
         let feature_capabilities = FeatureCapabilities {
             streams: RedisCapabilities::version_gte(&redis_version, "5.0.0"),
             acl: RedisCapabilities::version_gte(&redis_version, "6.0.0"),
@@ -797,6 +907,8 @@ impl InstrumentedPool {
             hash_field_expiration: RedisCapabilities::version_gte(&redis_version, "7.4.0"),
             // Redis 8.0 pre-releases report as 7.9.x, so gate at 7.9.0
             hash_8_commands: RedisCapabilities::version_gte(&redis_version, "7.9.0"),
+            vectors: vectors_available,
+            vector_range: vector_range_available,
             cluster: cluster_enabled,
         };
 

@@ -98,7 +98,10 @@ async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<Readiness
     // Check if we can get a connection
     let connected = state.pool.get_standalone().await.is_ok();
 
-    let status = if connected {
+    // Fail readiness if capability drift was detected after sentinel failover
+    let capability_ok = !state.pool.has_capability_drift();
+
+    let status = if connected && capability_ok {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -115,7 +118,14 @@ async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<Readiness
     (
         status,
         Json(ReadinessResponse {
-            status: if connected { "ready" } else { "not_ready" }.to_string(),
+            status: if connected && capability_ok {
+                "ready"
+            } else if connected {
+                "degraded"
+            } else {
+                "not_ready"
+            }
+            .to_string(),
             mode: mode.to_string(),
             redis: RedisHealthStatus {
                 connected,

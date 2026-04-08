@@ -10,6 +10,7 @@ mod probabilistic_value;
 mod search_value;
 mod stream;
 mod string_value;
+mod vector_value;
 
 pub use admin::*;
 pub use bloom_value::*;
@@ -19,3 +20,4 @@ pub use probabilistic_value::*;
 pub use search_value::*;
 pub use stream::*;
 pub use string_value::*;
+pub use vector_value::*;

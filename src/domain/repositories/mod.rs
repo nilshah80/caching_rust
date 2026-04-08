@@ -20,6 +20,7 @@ mod sorted_set_repository;
 mod stream_repository;
 mod string_repository;
 mod timeseries_repository;
+mod vector_repository;
 
 pub use admin_repository::AdminRepository;
 pub use bitmap_repository::{
@@ -55,3 +56,4 @@ pub use timeseries_repository::{
     TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
     TimeSeriesRepository, TimeSeriesSample, TsAggregation, TsDuplicatePolicy,
 };
+pub use vector_repository::VectorRepository;

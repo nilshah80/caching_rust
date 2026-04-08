@@ -55,11 +55,88 @@ pub fn spawn_sentinel_watcher(
 
                         match pool.build_replacement_pool(&new_url, &pool_config).await {
                             Ok(new_pool) => {
+                                // Capture old capabilities before swap for comparison
+                                let old_caps = pool.get_capabilities();
                                 pool.swap_pool(new_pool, new_url.clone());
                                 info!(
                                     master = %mask_password(&new_url),
                                     "Pool swapped to new master successfully"
                                 );
+
+                                // Re-detect capabilities against the new master and
+                                // compare ALL route-affecting fields. Routes and OpenAPI
+                                // are frozen at startup, so any drift means the live
+                                // router no longer matches the backend.
+                                match pool.detect_capabilities().await {
+                                    Ok(new_caps) => {
+                                        let new_caps = std::sync::Arc::new(new_caps);
+                                        if let Some(ref old) = old_caps {
+                                            let has_drift =
+                                                // Feature-gated routes and per-request guards
+                                                old.features.streams != new_caps.features.streams
+                                                || old.features.functions != new_caps.features.functions
+                                                || old.features.vectors != new_caps.features.vectors
+                                                || old.features.vector_range != new_caps.features.vector_range
+                                                || old.features.cluster != new_caps.features.cluster
+                                                || old.features.lcs != new_caps.features.lcs
+                                                || old.features.hash_field_expiration != new_caps.features.hash_field_expiration
+                                                || old.features.hash_8_commands != new_caps.features.hash_8_commands
+                                                // Module-gated routes
+                                                || old.modules.json != new_caps.modules.json
+                                                || old.modules.search != new_caps.modules.search
+                                                || old.modules.bloom != new_caps.modules.bloom
+                                                || old.modules.timeseries != new_caps.modules.timeseries;
+
+                                            if has_drift {
+                                                error!(
+                                                    "CRITICAL: Route-affecting capabilities changed \
+                                                     after sentinel failover. Routes were registered \
+                                                     at startup and cannot be dynamically updated — \
+                                                     restart the service. \
+                                                     Old: streams={} functions={} vectors={} vector_range={} \
+                                                     json={} search={} bloom={} timeseries={} cluster={} | \
+                                                     New: streams={} functions={} vectors={} vector_range={} \
+                                                     json={} search={} bloom={} timeseries={} cluster={}",
+                                                    old.features.streams,
+                                                    old.features.functions,
+                                                    old.features.vectors,
+                                                    old.features.vector_range,
+                                                    old.modules.json,
+                                                    old.modules.search,
+                                                    old.modules.bloom,
+                                                    old.modules.timeseries,
+                                                    old.features.cluster,
+                                                    new_caps.features.streams,
+                                                    new_caps.features.functions,
+                                                    new_caps.features.vectors,
+                                                    new_caps.features.vector_range,
+                                                    new_caps.modules.json,
+                                                    new_caps.modules.search,
+                                                    new_caps.modules.bloom,
+                                                    new_caps.modules.timeseries,
+                                                    new_caps.features.cluster,
+                                                );
+                                                pool.set_capability_drift();
+                                            }
+                                            if old.redis_version != new_caps.redis_version {
+                                                warn!(
+                                                    old_version = %old.redis_version,
+                                                    new_version = %new_caps.redis_version,
+                                                    "Redis version changed after failover"
+                                                );
+                                            }
+                                        }
+                                        pool.store_capabilities(new_caps);
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            error = %e,
+                                            "Failed to re-detect capabilities after failover — \
+                                             marking service degraded, restart required"
+                                        );
+                                        pool.set_capability_drift();
+                                    }
+                                }
                             }
                             Err(e) => {
                                 error!(

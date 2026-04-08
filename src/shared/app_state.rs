@@ -10,7 +10,7 @@ use crate::application::services::{
     AdminService, BitMapService, BloomService, ClusterService, FunctionService, GeoService,
     HashService, JsonService, KeyService, ListService, ProbabilisticService, PubSubService,
     ScriptingService, SearchService, SetService, SortedSetService, StreamService, StringService,
-    TimeSeriesService, TransactionService,
+    TimeSeriesService, TransactionService, VectorService,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -95,6 +95,9 @@ pub struct AppState {
     /// Cluster operations service
     pub cluster_service: Arc<ClusterService>,
 
+    /// Vector Sets operations service
+    pub vector_service: Arc<VectorService>,
+
     /// Cluster connection pool (only set in cluster mode)
     pub cluster_pool: Option<Arc<ClusterPool>>,
 
@@ -152,6 +155,11 @@ impl AppState {
         );
         let cluster_service = Arc::new(ClusterService::new(cluster_repo));
 
+        let vector_repo = Arc::new(
+            crate::infrastructure::redis::repositories::RedisVectorRepository::new(pool.clone()),
+        );
+        let vector_service = Arc::new(VectorService::new(vector_repo));
+
         // Install Prometheus recorder (None if already installed, e.g. in tests)
         let metrics_handle = crate::infrastructure::metrics::install_prometheus_recorder()
             .ok()
@@ -182,6 +190,7 @@ impl AppState {
             function_service,
             timeseries_service,
             cluster_service,
+            vector_service,
             None,
             metrics_handle,
         )
@@ -227,6 +236,7 @@ impl AppState {
         function_service: Arc<FunctionService>,
         timeseries_service: Arc<TimeSeriesService>,
         cluster_service: Arc<ClusterService>,
+        vector_service: Arc<VectorService>,
         cluster_pool: Option<Arc<ClusterPool>>,
         metrics_handle: Option<Arc<PrometheusHandle>>,
     ) -> Self {
@@ -255,6 +265,7 @@ impl AppState {
             function_service,
             timeseries_service,
             cluster_service,
+            vector_service,
             cluster_pool,
             metrics_handle,
         }
@@ -264,6 +275,11 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::entities::{
+        VectorAddResult, VectorInfo, VectorRangeResult, VectorSimResult,
+    };
+    use crate::domain::errors::CacheError;
+    use crate::domain::repositories::VectorRepository;
     use crate::test_support::{
         MockAdminRepository, MockBitMapRepository, MockBloomRepository, MockClusterRepository,
         MockFunctionRepository, MockGeoRepository, MockHashRepository, MockJsonRepository,
@@ -271,6 +287,84 @@ mod tests {
         MockSetRepository, MockSortedSetRepository, MockStreamRepository, MockStringRepository,
         MockTimeSeriesRepository,
     };
+    use async_trait::async_trait;
+
+    struct MockVectorRepository;
+
+    #[async_trait]
+    impl VectorRepository for MockVectorRepository {
+        async fn vadd(
+            &self,
+            key: &str,
+            items: Vec<(String, Vec<f32>)>,
+        ) -> Result<VectorAddResult, CacheError> {
+            Ok(VectorAddResult {
+                key: key.to_string(),
+                added_count: items.len() as u64,
+            })
+        }
+        async fn vrem(&self, _key: &str, items: Vec<String>) -> Result<u64, CacheError> {
+            Ok(items.len() as u64)
+        }
+        async fn vsim(
+            &self,
+            _key: &str,
+            _vector: Vec<f32>,
+            _k: u64,
+        ) -> Result<VectorSimResult, CacheError> {
+            Ok(VectorSimResult { items: vec![] })
+        }
+        async fn vcard(&self, _key: &str) -> Result<u64, CacheError> {
+            Ok(42)
+        }
+        async fn vdim(&self, _key: &str) -> Result<u64, CacheError> {
+            Ok(128)
+        }
+        async fn vemb(
+            &self,
+            _key: &str,
+            items: Vec<String>,
+        ) -> Result<Vec<Option<Vec<f32>>>, CacheError> {
+            Ok(items.into_iter().map(|_| Some(vec![1.0, 2.0])).collect())
+        }
+        async fn vismember(&self, _key: &str, items: Vec<String>) -> Result<Vec<bool>, CacheError> {
+            Ok(items.into_iter().map(|_| true).collect())
+        }
+        async fn vlinks(&self, _key: &str, _item: &str) -> Result<Vec<Vec<String>>, CacheError> {
+            Ok(vec![vec!["neighbor".to_string()]])
+        }
+        async fn vrandmember(&self, _key: &str, _count: i64) -> Result<Vec<String>, CacheError> {
+            Ok(vec!["member1".to_string()])
+        }
+        async fn vrange(
+            &self,
+            _key: &str,
+            _start: &str,
+            _end: &str,
+            _count: Option<i64>,
+        ) -> Result<VectorRangeResult, CacheError> {
+            Ok(VectorRangeResult { items: vec![] })
+        }
+        async fn vinfo(&self, _key: &str) -> Result<VectorInfo, CacheError> {
+            Ok(VectorInfo {
+                dimension: 128,
+                distance_metric: "L2".to_string(),
+                data_type: "FLOAT32".to_string(),
+                count: 10,
+            })
+        }
+        async fn vgetattr(&self, _key: &str, _item: &str) -> Result<Option<String>, CacheError> {
+            Ok(Some("{}".to_string()))
+        }
+        async fn vsetattr(
+            &self,
+            _key: &str,
+            _item: &str,
+            _attributes: &str,
+        ) -> Result<bool, CacheError> {
+            Ok(true)
+        }
+    }
 
     #[test]
     fn test_new_with_services() {
@@ -334,6 +428,7 @@ mod tests {
             MockTimeSeriesRepository::new(),
         )));
         let cluster_service = Arc::new(ClusterService::new(Arc::new(MockClusterRepository)));
+        let vector_service = Arc::new(VectorService::new(Arc::new(MockVectorRepository)));
 
         let state = AppState::new_with_services(
             pool.clone(),
@@ -360,6 +455,7 @@ mod tests {
             function_service,
             timeseries_service,
             cluster_service,
+            vector_service,
             None,
             None,
         );

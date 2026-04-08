@@ -2599,6 +2599,9 @@ pub fn test_state_with_all_repos_and_config(
         MockTimeSeriesRepository::new(),
     )));
     let cluster_service = Arc::new(ClusterService::new(Arc::new(MockClusterRepository)));
+    let vector_service = Arc::new(crate::application::services::VectorService::new(Arc::new(
+        MockVectorRepository,
+    )));
 
     AppState::new_with_services(
         pool,
@@ -2625,6 +2628,7 @@ pub fn test_state_with_all_repos_and_config(
         function_service,
         timeseries_service,
         cluster_service,
+        vector_service,
         None,
         None,
     )
@@ -5524,4 +5528,98 @@ impl ClusterRepository for MockClusterRepository {
     async fn cluster_keyslot(&self, _key: &str) -> Result<u16, CacheError> {
         Err(CacheError::Internal("not in cluster mode".to_string()))
     }
+}
+
+pub struct MockVectorRepository;
+
+#[async_trait]
+impl crate::domain::repositories::VectorRepository for MockVectorRepository {
+    async fn vadd(
+        &self,
+        key: &str,
+        items: Vec<(String, Vec<f32>)>,
+    ) -> Result<crate::domain::entities::VectorAddResult, CacheError> {
+        Ok(crate::domain::entities::VectorAddResult {
+            key: key.to_string(),
+            added_count: items.len() as u64,
+        })
+    }
+    async fn vrem(&self, _key: &str, items: Vec<String>) -> Result<u64, CacheError> {
+        Ok(items.len() as u64)
+    }
+    async fn vsim(
+        &self,
+        _key: &str,
+        _vector: Vec<f32>,
+        _k: u64,
+    ) -> Result<crate::domain::entities::VectorSimResult, CacheError> {
+        Ok(crate::domain::entities::VectorSimResult { items: vec![] })
+    }
+    async fn vcard(&self, _key: &str) -> Result<u64, CacheError> {
+        Ok(42)
+    }
+    async fn vdim(&self, _key: &str) -> Result<u64, CacheError> {
+        Ok(128)
+    }
+    async fn vemb(
+        &self,
+        _key: &str,
+        items: Vec<String>,
+    ) -> Result<Vec<Option<Vec<f32>>>, CacheError> {
+        Ok(items.into_iter().map(|_| Some(vec![1.0, 2.0])).collect())
+    }
+    async fn vismember(&self, _key: &str, items: Vec<String>) -> Result<Vec<bool>, CacheError> {
+        Ok(items.into_iter().map(|_| true).collect())
+    }
+    async fn vlinks(&self, _key: &str, _item: &str) -> Result<Vec<Vec<String>>, CacheError> {
+        Ok(vec![vec!["neighbor".to_string()]])
+    }
+    async fn vrandmember(&self, _key: &str, _count: i64) -> Result<Vec<String>, CacheError> {
+        Ok(vec!["member1".to_string()])
+    }
+    async fn vrange(
+        &self,
+        _key: &str,
+        _start: &str,
+        _end: &str,
+        _count: Option<i64>,
+    ) -> Result<crate::domain::entities::VectorRangeResult, CacheError> {
+        Ok(crate::domain::entities::VectorRangeResult { items: vec![] })
+    }
+    async fn vinfo(&self, _key: &str) -> Result<crate::domain::entities::VectorInfo, CacheError> {
+        Ok(crate::domain::entities::VectorInfo {
+            dimension: 128,
+            distance_metric: "L2".to_string(),
+            data_type: "FLOAT32".to_string(),
+            count: 10,
+        })
+    }
+    async fn vgetattr(&self, _key: &str, _item: &str) -> Result<Option<String>, CacheError> {
+        Ok(Some("{}".to_string()))
+    }
+    async fn vsetattr(
+        &self,
+        _key: &str,
+        _item: &str,
+        _attributes: &str,
+    ) -> Result<bool, CacheError> {
+        Ok(true)
+    }
+}
+
+pub fn test_state_with_vector_repo() -> (AppState, Arc<MockVectorRepository>) {
+    let vector_repo = Arc::new(MockVectorRepository);
+    let mut state = test_state_with_repos(
+        Arc::new(MockStringRepository::new()),
+        Arc::new(MockKeyRepository::new()),
+        Arc::new(MockAdminRepository),
+    );
+    state.vector_service = Arc::new(crate::application::services::VectorService::new(
+        vector_repo.clone(),
+    ));
+    let mut caps = (*state.capabilities).clone();
+    caps.features.vectors = true;
+    caps.features.vector_range = true;
+    state.capabilities = Arc::new(caps);
+    (state, vector_repo)
 }

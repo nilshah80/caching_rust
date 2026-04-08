@@ -22,6 +22,7 @@ pub mod streams;
 pub mod strings;
 pub mod timeseries;
 pub mod transactions;
+pub mod vectors;
 
 pub use bitmaps::*;
 pub use bloom::*;
@@ -43,3 +44,4 @@ pub use streams::*;
 pub use strings::*;
 pub use timeseries::*;
 pub use transactions::*;
+pub use vectors::*;
