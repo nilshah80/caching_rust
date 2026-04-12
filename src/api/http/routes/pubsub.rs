@@ -674,8 +674,8 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use serde_json::Value;
     use std::net::SocketAddr;
-    use std::sync::{Arc as StdArc, OnceLock};
     use std::sync::Arc;
+    use std::sync::{Arc as StdArc, OnceLock};
     use testcontainers::ContainerAsync;
     use testcontainers_modules::redis::Redis;
     use tokio::net::TcpListener;
@@ -1201,10 +1201,7 @@ mod tests {
         let state = build_state_with_config(repo, config);
         let server = spawn_pubsub_server(state).await;
 
-        let ws_url = format!(
-            "ws://{}/api/v1/pubsub/subscribe?channels=news",
-            server.addr
-        );
+        let ws_url = format!("ws://{}/api/v1/pubsub/subscribe?channels=news", server.addr);
         let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
 
         let msg = timeout(Duration::from_secs(3), socket.next())
@@ -1334,10 +1331,7 @@ mod tests {
         let state = build_state_with_config(repo, config);
         let server = spawn_pubsub_server(state).await;
 
-        let ws_url = format!(
-            "ws://{}/api/v1/pubsub/subscribe?channels=news",
-            server.addr
-        );
+        let ws_url = format!("ws://{}/api/v1/pubsub/subscribe?channels=news", server.addr);
         let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
 
         let _ = timeout(Duration::from_secs(3), socket.next())
@@ -1901,7 +1895,10 @@ mod tests {
         let server = spawn_pubsub_server(state).await;
 
         set_ws_send_failures(1);
-        let ws_url = format!("ws://{}/api/v1/pubsub/psubscribe?patterns=user:*", server.addr);
+        let ws_url = format!(
+            "ws://{}/api/v1/pubsub/psubscribe?patterns=user:*",
+            server.addr
+        );
         let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
         let _ = timeout(Duration::from_secs(1), socket.next()).await;
         let _ = server.shutdown_tx.send(());
@@ -1926,7 +1923,10 @@ mod tests {
         let state = build_state_with_config(repo, config);
         let server = spawn_pubsub_server(state).await;
 
-        let ws_url = format!("ws://{}/api/v1/pubsub/psubscribe?patterns=user:*", server.addr);
+        let ws_url = format!(
+            "ws://{}/api/v1/pubsub/psubscribe?patterns=user:*",
+            server.addr
+        );
         let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
         let _ = timeout(Duration::from_secs(3), socket.next())
             .await
@@ -1959,7 +1959,10 @@ mod tests {
         let state = build_state_with_config(repo, config);
         let server = spawn_pubsub_server(state).await;
 
-        let ws_url = format!("ws://{}/api/v1/pubsub/psubscribe?patterns=user:*", server.addr);
+        let ws_url = format!(
+            "ws://{}/api/v1/pubsub/psubscribe?patterns=user:*",
+            server.addr
+        );
         let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
         let _ = timeout(Duration::from_secs(3), socket.next())
             .await
@@ -1999,7 +2002,10 @@ mod tests {
         let state = build_state_with_config(repo, config);
         let server = spawn_pubsub_server(state).await;
 
-        let ws_url = format!("ws://{}/api/v1/pubsub/psubscribe?patterns=user:*", server.addr);
+        let ws_url = format!(
+            "ws://{}/api/v1/pubsub/psubscribe?patterns=user:*",
+            server.addr
+        );
         let (mut socket, _) = tokio_tungstenite::connect_async(ws_url).await.unwrap();
         let _ = timeout(Duration::from_secs(3), socket.next())
             .await

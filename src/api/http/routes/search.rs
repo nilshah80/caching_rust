@@ -11,9 +11,11 @@ use validator::Validate;
 
 use crate::api::http::schemas::search::{
     AggregateRequest, AggregateResponse, AliasRequest, AliasResponse, AlterIndexRequest,
-    AlterIndexResponse, CreateIndexRequest, CreateIndexResponse, DictDumpResponse, DictResponse,
-    DictTermsRequest, DropIndexParams, DropIndexResponse, ExplainRequest, ExplainResponse,
-    IndexInfoResponse, ListIndicesResponse, ProfileRequest, ProfileResponse, SearchRequest,
+    AlterIndexResponse, CreateIndexRequest, CreateIndexResponse, CursorDelResponse,
+    CursorReadParams, CursorReadResponse, DictDumpResponse, DictResponse, DictTermsRequest,
+    DropIndexParams, DropIndexResponse, ExplainRequest, ExplainResponse, HybridSearchRequest,
+    HybridSearchResponse, IndexInfoResponse, ListIndicesResponse, ProfileRequest, ProfileResponse,
+    SearchConfigGetResponse, SearchConfigSetRequest, SearchConfigSetResponse, SearchRequest,
     SearchResponse, SpellcheckRequest, SpellcheckResponse, SugAddRequest, SugAddResponse,
     SugDelRequest, SugDelResponse, SugGetParams, SugGetResponse, SugLenResponse,
     SynonymDumpResponse, SynonymUpdateRequest, SynonymUpdateResponse, parse_profile_type,
@@ -35,6 +37,7 @@ pub fn search_routes() -> Router<AppState> {
         // Query operations
         .route("/api/v1/search/indices/{index}/search", post(search))
         .route("/api/v1/search/indices/{index}/aggregate", post(aggregate))
+        .route("/api/v1/search/indices/{index}/hybrid", post(hybrid_search))
         .route("/api/v1/search/indices/{index}/explain", post(explain))
         .route("/api/v1/search/indices/{index}/profile", post(profile))
         // Alias operations
@@ -61,6 +64,18 @@ pub fn search_routes() -> Router<AppState> {
         .route("/api/v1/search/dicts/{dict}/terms", post(dict_add))
         .route("/api/v1/search/dicts/{dict}/terms", delete(dict_del))
         .route("/api/v1/search/dicts/{dict}/terms", get(dict_dump))
+        // Configuration operations
+        .route("/api/v1/search/config/{option}", get(config_get))
+        .route("/api/v1/search/config/{option}", put(config_set))
+        // Cursor operations
+        .route(
+            "/api/v1/search/indices/{index}/cursor/{cursor}",
+            get(cursor_read),
+        )
+        .route(
+            "/api/v1/search/indices/{index}/cursor/{cursor}",
+            delete(cursor_del),
+        )
 }
 
 // ==================== Index Operations ====================
@@ -281,6 +296,39 @@ async fn aggregate(
         .search_service
         .ft_aggregate(&index, &request.query, options)
         .await?;
+
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/search/indices/:index/hybrid
+///
+/// Execute a hybrid text+vector search (FT.HYBRID, Redis 8.4+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/search/indices/{index}/hybrid",
+    params(
+        ("index" = String, Path, description = "Index name")
+    ),
+    request_body = HybridSearchRequest,
+    responses(
+        (status = 200, description = "Hybrid search results", body = HybridSearchResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 404, description = "Index not found"),
+        (status = 501, description = "RediSearch module not available")
+    ),
+    tag = "Search"
+)]
+pub async fn hybrid_search(
+    State(state): State<AppState>,
+    Path(index): Path<String>,
+    Json(request): Json<HybridSearchRequest>,
+) -> Result<Json<ApiResponse<HybridSearchResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let options = request.into();
+    let result = state.search_service.ft_hybrid(&index, options).await?;
 
     Ok(Json(ApiResponse::new(result.into())))
 }
@@ -787,6 +835,127 @@ async fn dict_dump(
     Ok(Json(ApiResponse::new(result.into())))
 }
 
+// ==================== Configuration Operations ====================
+
+/// GET /api/v1/search/config/{option}
+///
+/// Get configuration option (FT.CONFIG GET).
+#[utoipa::path(
+    get,
+    path = "/api/v1/search/config/{option}",
+    params(
+        ("option" = String, Path, description = "Configuration option name (or * for all)")
+    ),
+    responses(
+        (status = 200, description = "Configuration retrieved", body = SearchConfigGetResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Search"
+)]
+async fn config_get(
+    State(state): State<AppState>,
+    Path(option): Path<String>,
+) -> Result<Json<ApiResponse<SearchConfigGetResponse>>, CacheError> {
+    let config = state.search_service.ft_config_get(&option).await?;
+
+    Ok(Json(ApiResponse::success(SearchConfigGetResponse {
+        config,
+    })))
+}
+
+/// PUT /api/v1/search/config/{option}
+///
+/// Set configuration option (FT.CONFIG SET).
+#[utoipa::path(
+    put,
+    path = "/api/v1/search/config/{option}",
+    params(
+        ("option" = String, Path, description = "Configuration option name")
+    ),
+    request_body = SearchConfigSetRequest,
+    responses(
+        (status = 200, description = "Configuration updated successfully", body = SearchConfigSetResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Search"
+)]
+async fn config_set(
+    State(state): State<AppState>,
+    Path(option): Path<String>,
+    Json(request): Json<SearchConfigSetRequest>,
+) -> Result<Json<ApiResponse<SearchConfigSetResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let success = state
+        .search_service
+        .ft_config_set(&option, &request.value)
+        .await?;
+
+    Ok(Json(ApiResponse::success(SearchConfigSetResponse {
+        option,
+        success,
+    })))
+}
+
+// ==================== Cursor Operations ====================
+
+/// GET /api/v1/search/indices/{index}/cursor/{cursor}
+///
+/// Read from an aggregate cursor (FT.CURSOR READ).
+#[utoipa::path(
+    get,
+    path = "/api/v1/search/indices/{index}/cursor/{cursor}",
+    params(
+        ("index" = String, Path, description = "Index name"),
+        ("cursor" = u64, Path, description = "Cursor ID"),
+        ("count" = Option<u64>, Query, description = "Number of results to read")
+    ),
+    responses(
+        (status = 200, description = "Cursor read successfully", body = CursorReadResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Search"
+)]
+async fn cursor_read(
+    State(state): State<AppState>,
+    Path((index, cursor)): Path<(String, u64)>,
+    Query(params): Query<CursorReadParams>,
+) -> Result<Json<ApiResponse<CursorReadResponse>>, CacheError> {
+    let result = state
+        .search_service
+        .ft_cursor_read(&index, cursor, params.count)
+        .await?;
+
+    Ok(Json(ApiResponse::success(result.into())))
+}
+
+/// DELETE /api/v1/search/indices/{index}/cursor/{cursor}
+///
+/// Delete an aggregate cursor (FT.CURSOR DEL).
+#[utoipa::path(
+    delete,
+    path = "/api/v1/search/indices/{index}/cursor/{cursor}",
+    params(
+        ("index" = String, Path, description = "Index name"),
+        ("cursor" = u64, Path, description = "Cursor ID")
+    ),
+    responses(
+        (status = 200, description = "Cursor deleted successfully", body = CursorDelResponse),
+        (status = 400, description = "Invalid request")
+    ),
+    tag = "Search"
+)]
+async fn cursor_del(
+    State(state): State<AppState>,
+    Path((index, cursor)): Path<(String, u64)>,
+) -> Result<Json<ApiResponse<CursorDelResponse>>, CacheError> {
+    let success = state.search_service.ft_cursor_del(&index, cursor).await?;
+
+    Ok(Json(ApiResponse::success(CursorDelResponse { success })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1152,5 +1321,121 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // ==================== Phase 10.3 Route Tests ====================
+
+    #[tokio::test]
+    async fn test_ft_config_get_route() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/search/config/TIMEOUT")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_ft_config_set_route() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/search/config/TIMEOUT")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"value":"500"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_ft_cursor_read_route() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/search/indices/myindex/cursor/12345")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_ft_cursor_del_route() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/v1/search/indices/myindex/cursor/12345")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_route() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/search/indices/myindex/hybrid")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"query":"*","vsim_field":"vec","vsim_input":{"type":"VALUES","dim":3,"values":[1.0,0.0,0.0]},"limit":3}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_route_empty_query() {
+        let (state, _) = test_state_with_search_repo();
+        let app = search_routes().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/search/indices/myindex/hybrid")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"query":"","vsim_field":"vec","vsim_input":{"type":"VALUES","dim":3,"values":[1.0,0.0,0.0]}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Empty query should fail validation (400 or 422)
+        assert_ne!(response.status(), StatusCode::OK);
     }
 }

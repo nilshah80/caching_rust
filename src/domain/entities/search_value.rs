@@ -548,6 +548,10 @@ pub struct SearchOptions {
     #[serde(default)]
     pub explainscore: bool,
 
+    /// Use Reciprocal Rank Fusion (hybrid search)
+    #[serde(default)]
+    pub rrf: bool,
+
     /// Sort by field
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sortby: Option<SortBy>,
@@ -716,6 +720,14 @@ pub struct AggregateOptions {
     /// Dialect version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dialect: Option<u32>,
+
+    /// Use cursor for result pagination
+    #[serde(default)]
+    pub withcursor: bool,
+
+    /// Count for cursor pagination
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_count: Option<u64>,
 }
 
 /// Result of FT.AGGREGATE operation
@@ -723,6 +735,20 @@ pub struct AggregateOptions {
 pub struct AggregateResult {
     /// Total number of results
     pub total_results: u64,
+
+    /// Result rows
+    pub rows: Vec<HashMap<String, serde_json::Value>>,
+
+    /// Cursor ID (if WITHCURSOR was used)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_id: Option<u64>,
+}
+
+/// Result of FT.CURSOR READ operation
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CursorReadResult {
+    /// Next cursor ID (0 if exhausted)
+    pub cursor_id: u64,
 
     /// Result rows
     pub rows: Vec<HashMap<String, serde_json::Value>>,
@@ -876,6 +902,139 @@ pub struct ProfileResult {
 pub struct ExplainResult {
     /// Query execution plan
     pub plan: String,
+}
+
+// ==================== Hybrid Search Types ====================
+
+/// Vector similarity input for FT.HYBRID VSIM clause
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "UPPERCASE")]
+pub enum VsimInput {
+    /// Reference element (existing key)
+    Ele {
+        /// The element key reference
+        element: String,
+    },
+    /// Raw vector values
+    Values {
+        /// Vector dimension
+        dim: u32,
+        /// Vector values
+        values: Vec<f64>,
+    },
+}
+
+/// Combination strategy for FT.HYBRID.
+/// Controls how text search and vector similarity scores are merged.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "method", rename_all = "UPPERCASE")]
+pub enum CombineStrategy {
+    /// Reciprocal Rank Fusion
+    Rrf {
+        /// RRF constant (default 60)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        constant: Option<u32>,
+        /// Window size
+        #[serde(skip_serializing_if = "Option::is_none")]
+        window: Option<u32>,
+        /// Name for the combined score
+        #[serde(skip_serializing_if = "Option::is_none")]
+        yield_score_as: Option<String>,
+    },
+    /// Linear combination
+    Linear {
+        /// Weight for text search score
+        #[serde(skip_serializing_if = "Option::is_none")]
+        alpha: Option<f64>,
+        /// Weight for vector similarity score
+        #[serde(skip_serializing_if = "Option::is_none")]
+        beta: Option<f64>,
+        /// Window size
+        #[serde(skip_serializing_if = "Option::is_none")]
+        window: Option<u32>,
+        /// Name for the combined score
+        #[serde(skip_serializing_if = "Option::is_none")]
+        yield_score_as: Option<String>,
+    },
+}
+
+/// Options for FT.HYBRID command
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HybridSearchOptions {
+    /// Text search query for the SEARCH clause
+    pub query: String,
+
+    /// Optional scorer for the SEARCH clause
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_scorer: Option<String>,
+
+    /// Optional YIELD_SCORE_AS name for text search score
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_yield_score_as: Option<String>,
+
+    /// Vector field name for the VSIM clause
+    pub vsim_field: String,
+
+    /// Vector similarity input (ELE or VALUES) — required
+    pub vsim_input: VsimInput,
+
+    /// Optional YIELD_SCORE_AS name for vector score
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vsim_yield_score_as: Option<String>,
+
+    /// Fields to LOAD from documents
+    #[serde(default)]
+    pub load: Vec<String>,
+
+    /// APPLY expressions (expression, alias)
+    #[serde(default)]
+    pub apply: Vec<ApplyStep>,
+
+    /// SORTBY specifications
+    #[serde(default)]
+    pub sortby: Vec<SortBy>,
+
+    /// LIMIT offset
+    #[serde(default)]
+    pub offset: u64,
+
+    /// LIMIT count (default 10)
+    #[serde(default = "default_hybrid_limit")]
+    pub limit: u64,
+
+    /// Parameters for parameterized queries
+    #[serde(default)]
+    pub params: HashMap<String, String>,
+
+    /// FILTER expressions
+    #[serde(default)]
+    pub filters: Vec<String>,
+
+    /// Combination strategy (RRF or LINEAR with parameters)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combine: Option<CombineStrategy>,
+
+    /// Execution policy: ADHOC or BATCHES
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<String>,
+
+    /// Batch size (when policy is BATCHES)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<u32>,
+}
+
+fn default_hybrid_limit() -> u64 {
+    10
+}
+
+/// Result of FT.HYBRID operation
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HybridSearchResult {
+    /// Total number of results
+    pub total_results: u64,
+
+    /// Returned documents (same format as FT.SEARCH)
+    pub documents: Vec<SearchDocument>,
 }
 
 // ==================== Result Types ====================

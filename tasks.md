@@ -254,11 +254,11 @@
 - [x] **10.2.2**: Create request/response schemas and API routes
 - [x] **10.2.3**: Add unit and E2E tests
 
-### 10.3 Search Enhancements (Redis 8.4+) 🟡 MEDIUM PRIORITY
+### 10.3 Search Enhancements (Redis 8.4+) 🟢 COMPLETED
 
-- [ ] **10.3.1**: Implement FT.CONFIG GET/SET
-- [ ] **10.3.2**: Implement FT.HYBRID (hybrid text + vector search with RRF)
-- [ ] **10.3.3**: Implement FT.CURSOR READ/DEL (aggregation result pagination)
+- [x] **10.3.1**: Implement FT.CONFIG GET/SET
+- [x] **10.3.2**: Implement FT.HYBRID (hybrid text + vector search with RRF)
+- [x] **10.3.3**: Implement FT.CURSOR READ/DEL (aggregation result pagination)
 
 ### 10.4 T-Digest (Probabilistic Module) 🟡 MEDIUM PRIORITY
 
@@ -319,9 +319,9 @@
 
 | Task | Feature | Commands | Priority | Status |
 |------|---------|----------|----------|--------|
-| 10.1 | Vector Sets | 13 | 🔴 High | Planned |
-| 10.2 | Hash Atomic Ops (HGETDEL/HGETEX/HSETEX) | 3 | 🟡 Medium-High | Planned |
-| 10.3 | Search (FT.CONFIG, FT.HYBRID, FT.CURSOR) | 5 | 🟡 Medium | Planned |
+| 10.1 | Vector Sets | 13 | 🔴 High | Completed |
+| 10.2 | Hash Atomic Ops (HGETDEL/HGETEX/HSETEX) | 3 | 🟡 Medium-High | Completed |
+| 10.3 | Search (FT.CONFIG, FT.HYBRID, FT.CURSOR) | 5 | 🟡 Medium | Completed |
 | 10.4 | T-Digest | 14 | 🟡 Medium | Planned |
 | 10.5 | MSETEX / DELEX / DIGEST | 3 | 🟡 Medium | Planned |
 | 10.6 | JSON.MSET | 1 | 🟢 Low | Planned |

@@ -4,12 +4,14 @@
 
 use async_trait::async_trait;
 
+use std::collections::HashMap;
+
 use crate::domain::entities::{
-    AggregateOptions, AggregateResult, AliasResult, DictDumpResult, DictResult, ExplainResult,
-    IndexAlterResult, IndexCreateOptions, IndexCreateResult, IndexDropResult, IndexInfo,
-    ProfileResult, ProfileType, SearchFieldSchema, SearchOptions, SearchResult, SpellcheckOptions,
-    SpellcheckResult, SugAddOptions, SugAddResult, SugDelResult, SugGetOptions, SugLenResult,
-    Suggestion, SynonymGroup, SynonymUpdateResult,
+    AggregateOptions, AggregateResult, AliasResult, CursorReadResult, DictDumpResult, DictResult,
+    ExplainResult, HybridSearchOptions, HybridSearchResult, IndexAlterResult, IndexCreateOptions,
+    IndexCreateResult, IndexDropResult, IndexInfo, ProfileResult, ProfileType, SearchFieldSchema,
+    SearchOptions, SearchResult, SpellcheckOptions, SpellcheckResult, SugAddOptions, SugAddResult,
+    SugDelResult, SugGetOptions, SugLenResult, Suggestion, SynonymGroup, SynonymUpdateResult,
 };
 use crate::domain::errors::CacheError;
 
@@ -120,6 +122,17 @@ pub trait SearchRepository: Send + Sync {
         search_options: Option<&SearchOptions>,
         aggregate_options: Option<&AggregateOptions>,
     ) -> Result<ProfileResult, CacheError>;
+
+    /// FT.HYBRID - Execute a hybrid text+vector search (Redis 8.4+)
+    ///
+    /// # Arguments
+    /// * `index` - Index name
+    /// * `options` - Hybrid search options (SEARCH + VSIM clauses)
+    async fn ft_hybrid(
+        &self,
+        index: &str,
+        options: &HybridSearchOptions,
+    ) -> Result<HybridSearchResult, CacheError>;
 
     // ==================== Alias Operations ====================
 
@@ -245,4 +258,41 @@ pub trait SearchRepository: Send + Sync {
     /// # Arguments
     /// * `dict` - Dictionary name
     async fn ft_dictdump(&self, dict: &str) -> Result<DictDumpResult, CacheError>;
+
+    // ==================== Config Operations ====================
+
+    /// FT.CONFIG GET - Get configuration option
+    ///
+    /// # Arguments
+    /// * `option` - Configuration option name (or * for all)
+    async fn ft_config_get(&self, option: &str) -> Result<HashMap<String, String>, CacheError>;
+
+    /// FT.CONFIG SET - Set configuration option
+    ///
+    /// # Arguments
+    /// * `option` - Configuration option name
+    /// * `value` - Configuration option value
+    async fn ft_config_set(&self, option: &str, value: &str) -> Result<bool, CacheError>;
+
+    // ==================== Cursor Operations ====================
+
+    /// FT.CURSOR READ - Read from an existing cursor
+    ///
+    /// # Arguments
+    /// * `index` - Index name
+    /// * `cursor` - Cursor ID
+    /// * `count` - Optional number of results to read
+    async fn ft_cursor_read(
+        &self,
+        index: &str,
+        cursor: u64,
+        count: Option<u64>,
+    ) -> Result<CursorReadResult, CacheError>;
+
+    /// FT.CURSOR DEL - Delete a cursor
+    ///
+    /// # Arguments
+    /// * `index` - Index name
+    /// * `cursor` - Cursor ID
+    async fn ft_cursor_del(&self, index: &str, cursor: u64) -> Result<bool, CacheError>;
 }

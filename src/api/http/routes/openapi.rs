@@ -174,11 +174,13 @@ use crate::api::http::schemas::scripting::{
 use crate::api::http::schemas::search::{
     AggregateOptionsDto, AggregateRequest, AggregateResponse, AliasRequest, AliasResponse,
     AlterIndexRequest, AlterIndexResponse, CreateIndexRequest, CreateIndexResponse,
-    DictDumpResponse, DictResponse, DictTermsRequest, DropIndexParams, DropIndexResponse,
-    ExplainRequest, ExplainResponse, IndexCreateOptionsDto, IndexInfoResponse, ListIndicesResponse,
-    ProfileRequest, ProfileResponse, SearchFieldSchemaDto, SearchOptionsDto, SearchRequest,
-    SearchResponse, SpellcheckRequest, SpellcheckResponse, SugAddRequest, SugAddResponse,
-    SugDelRequest, SugDelResponse, SugGetParams, SugGetResponse, SugLenResponse,
+    CursorDelResponse, CursorReadParams, CursorReadResponse, DictDumpResponse, DictResponse,
+    DictTermsRequest, DropIndexParams, DropIndexResponse, ExplainRequest, ExplainResponse,
+    HybridSearchRequest, HybridSearchResponse, IndexCreateOptionsDto, IndexInfoResponse,
+    ListIndicesResponse, ProfileRequest, ProfileResponse, SearchConfigGetResponse,
+    SearchConfigSetRequest, SearchConfigSetResponse, SearchFieldSchemaDto, SearchOptionsDto,
+    SearchRequest, SearchResponse, SpellcheckRequest, SpellcheckResponse, SugAddRequest,
+    SugAddResponse, SugDelRequest, SugDelResponse, SugGetParams, SugGetResponse, SugLenResponse,
     SynonymDumpResponse, SynonymUpdateRequest, SynonymUpdateResponse,
 };
 use crate::api::http::schemas::sets::{
@@ -553,6 +555,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::search::alter_index,
         crate::api::http::routes::search::search,
         crate::api::http::routes::search::aggregate,
+        crate::api::http::routes::search::hybrid_search,
         crate::api::http::routes::search::explain,
         crate::api::http::routes::search::profile,
         crate::api::http::routes::search::alias_add,
@@ -568,6 +571,10 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::search::dict_add,
         crate::api::http::routes::search::dict_del,
         crate::api::http::routes::search::dict_dump,
+        crate::api::http::routes::search::config_get,
+        crate::api::http::routes::search::config_set,
+        crate::api::http::routes::search::cursor_read,
+        crate::api::http::routes::search::cursor_del,
         // Bloom filter endpoints (RedisBloom module)
         crate::api::http::routes::bloom::bf_reserve,
         crate::api::http::routes::bloom::bf_info,
@@ -1167,6 +1174,8 @@ use crate::shared::app_state::AppState;
             AggregateRequest,
             AggregateOptionsDto,
             AggregateResponse,
+            HybridSearchRequest,
+            HybridSearchResponse,
             ExplainRequest,
             ExplainResponse,
             ProfileRequest,
@@ -1193,6 +1202,14 @@ use crate::shared::app_state::AppState;
             DictTermsRequest,
             DictResponse,
             DictDumpResponse,
+            // Search config
+            SearchConfigGetResponse,
+            SearchConfigSetRequest,
+            SearchConfigSetResponse,
+            // Search cursors
+            CursorReadParams,
+            CursorReadResponse,
+            CursorDelResponse,
             // Search domain entities
             SearchFieldType,
             SearchFieldSchema,

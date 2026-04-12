@@ -7,12 +7,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::entities::{
-    AggregateOptions, AggregateResult, AggregateStep, AliasResult, DictDumpResult, DictResult,
-    ExplainResult, IndexAlterResult, IndexCreateOptions, IndexCreateResult, IndexDropResult,
+    AggregateOptions, AggregateResult, AggregateStep, AliasResult, CombineStrategy,
+    CursorReadResult, DictDumpResult, DictResult, ExplainResult, HybridSearchOptions,
+    HybridSearchResult, IndexAlterResult, IndexCreateOptions, IndexCreateResult, IndexDropResult,
     IndexInfo, ProfileResult, ProfileType, SearchDocument, SearchFieldSchema, SearchFieldType,
     SearchOptions, SearchResult, SpellcheckOptions, SpellcheckResult, SpellcheckSuggestion,
     SpellcheckTerm, SugAddOptions, SugAddResult, SugDelResult, SugGetOptions, SugLenResult,
-    Suggestion, SynonymGroup, SynonymUpdateResult,
+    Suggestion, SynonymGroup, SynonymUpdateResult, VsimInput,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::SearchRepository;
@@ -376,6 +377,9 @@ impl RedisSearchRepository {
             args.push("SORTBY".to_string());
             args.push(sort.field.clone());
             args.push(sort.order.to_string());
+        } else if options.rrf {
+            args.push("SORTBY".to_string());
+            args.push("RRF".to_string());
         }
 
         // Limit
@@ -489,6 +493,15 @@ impl RedisSearchRepository {
         if let Some(dialect) = options.dialect {
             args.push("DIALECT".to_string());
             args.push(dialect.to_string());
+        }
+
+        // Cursor pagination (FT.AGGREGATE ... WITHCURSOR [COUNT n])
+        if options.withcursor {
+            args.push("WITHCURSOR".to_string());
+            if let Some(count) = options.cursor_count {
+                args.push("COUNT".to_string());
+                args.push(count.to_string());
+            }
         }
 
         args
@@ -714,39 +727,343 @@ impl RedisSearchRepository {
         search_result
     }
 
+    /// Build the FT.HYBRID redis::Cmd from options.
+    ///
+    /// Encoding notes (verified against Redis 8.6 docs/COMMAND DOCS):
+    ///   - VSIM field is prefixed with `@`.
+    ///   - VSIM uses `$param` references for vector blobs, resolved via PARAMS.
+    ///   - KNN is intentionally omitted: Redis 8.6's parser treats KNN as a
+    ///     variadic block that swallows PARAMS; LIMIT controls result count.
+    ///   - COMBINE requires a `count` token after the method name per the
+    ///     parameter-count convention: `COMBINE RRF 0`, `COMBINE RRF 2 CONSTANT 60`, etc.
+    ///   - FILTER uses `FILTER <expr>` (no count prefix).
+    ///   - POLICY BATCHES optionally nests BATCH_SIZE as a sub-arg.
+    ///   - PARAMS must be the last clause.
+    fn build_ft_hybrid_cmd(index: &str, options: &HybridSearchOptions) -> redis::Cmd {
+        let mut cmd = redis::cmd("FT.HYBRID");
+        cmd.arg(index);
+
+        // SEARCH clause
+        cmd.arg("SEARCH").arg(&options.query);
+        if let Some(scorer) = &options.search_scorer {
+            cmd.arg("SCORER").arg(scorer);
+        }
+        if let Some(name) = &options.search_yield_score_as {
+            cmd.arg("YIELD_SCORE_AS").arg(name);
+        }
+
+        // VSIM clause — field name needs @ prefix
+        let vsim_field = if options.vsim_field.starts_with('@') {
+            options.vsim_field.clone()
+        } else {
+            format!("@{}", options.vsim_field)
+        };
+        let mut extra_params: Vec<(String, Vec<u8>)> = Vec::new();
+
+        cmd.arg("VSIM").arg(&vsim_field);
+        match &options.vsim_input {
+            VsimInput::Ele { element } => {
+                cmd.arg("ELE").arg(element);
+            }
+            VsimInput::Values { values, .. } => {
+                let blob: Vec<u8> = values
+                    .iter()
+                    .flat_map(|v| (*v as f32).to_le_bytes())
+                    .collect();
+                cmd.arg("$__hybrid_vec");
+                extra_params.push(("__hybrid_vec".to_string(), blob));
+            }
+        }
+        if let Some(name) = &options.vsim_yield_score_as {
+            cmd.arg("YIELD_SCORE_AS").arg(name);
+        }
+
+        // COMBINE clause — includes required count token per parameter-count convention.
+        if let Some(combine) = &options.combine {
+            match combine {
+                CombineStrategy::Rrf {
+                    constant,
+                    window,
+                    yield_score_as,
+                } => {
+                    let mut rrf_args: Vec<String> = Vec::new();
+                    if let Some(c) = constant {
+                        rrf_args.push("CONSTANT".to_string());
+                        rrf_args.push(c.to_string());
+                    }
+                    if let Some(w) = window {
+                        rrf_args.push("WINDOW".to_string());
+                        rrf_args.push(w.to_string());
+                    }
+                    if let Some(name) = yield_score_as {
+                        rrf_args.push("YIELD_SCORE_AS".to_string());
+                        rrf_args.push(name.clone());
+                    }
+                    cmd.arg("COMBINE").arg("RRF").arg(rrf_args.len());
+                    for a in &rrf_args {
+                        cmd.arg(a);
+                    }
+                }
+                CombineStrategy::Linear {
+                    alpha,
+                    beta,
+                    window,
+                    yield_score_as,
+                } => {
+                    let mut linear_args: Vec<String> = Vec::new();
+                    if let Some(a) = alpha {
+                        linear_args.push("ALPHA".to_string());
+                        linear_args.push(a.to_string());
+                    }
+                    if let Some(b) = beta {
+                        linear_args.push("BETA".to_string());
+                        linear_args.push(b.to_string());
+                    }
+                    if let Some(w) = window {
+                        linear_args.push("WINDOW".to_string());
+                        linear_args.push(w.to_string());
+                    }
+                    if let Some(name) = yield_score_as {
+                        linear_args.push("YIELD_SCORE_AS".to_string());
+                        linear_args.push(name.clone());
+                    }
+                    cmd.arg("COMBINE").arg("LINEAR").arg(linear_args.len());
+                    for a in &linear_args {
+                        cmd.arg(a);
+                    }
+                }
+            }
+        }
+
+        // LOAD clause
+        if !options.load.is_empty() {
+            cmd.arg("LOAD").arg(options.load.len());
+            for field in &options.load {
+                cmd.arg(field);
+            }
+        }
+
+        // APPLY clauses
+        for apply in &options.apply {
+            cmd.arg("APPLY")
+                .arg(&apply.expression)
+                .arg("AS")
+                .arg(&apply.alias);
+        }
+
+        // SORTBY clause
+        if !options.sortby.is_empty() {
+            cmd.arg("SORTBY").arg(options.sortby.len() * 2);
+            for sort in &options.sortby {
+                cmd.arg(&sort.field).arg(sort.order.to_string());
+            }
+        }
+
+        // FILTER clause — no count prefix per FT.HYBRID docs
+        for filter_expr in &options.filters {
+            cmd.arg("FILTER").arg(filter_expr);
+        }
+
+        // POLICY clause — BATCH_SIZE is only valid under POLICY BATCHES
+        if let Some(policy) = &options.policy {
+            cmd.arg("POLICY").arg(policy);
+            if policy == "BATCHES"
+                && let Some(batch_size) = options.batch_size
+            {
+                cmd.arg("BATCH_SIZE").arg(batch_size);
+            }
+        }
+
+        // LIMIT clause
+        cmd.arg("LIMIT").arg(options.offset).arg(options.limit);
+
+        // PARAMS clause — must be last. Vector blob params + user params.
+        let param_pairs = options.params.len() + extra_params.len();
+        if param_pairs > 0 {
+            cmd.arg("PARAMS").arg(param_pairs * 2);
+            for (k, blob) in &extra_params {
+                cmd.arg(k.as_str()).arg(blob.as_slice());
+            }
+            for (k, v) in &options.params {
+                cmd.arg(k).arg(v);
+            }
+        }
+
+        cmd
+    }
+
+    /// Parse FT.HYBRID response (same format as FT.SEARCH: total_results, then doc_id, fields pairs)
+    fn parse_hybrid_result(result: redis::Value) -> HybridSearchResult {
+        let mut hybrid_result = HybridSearchResult {
+            total_results: 0,
+            documents: vec![],
+        };
+
+        // FT.HYBRID returns a flat key-value array:
+        //   ["total_results", N, "results", [...], "warnings", [...], "execution_time", "..."]
+        if let redis::Value::Array(arr) = result {
+            let mut iter = arr.into_iter();
+            while let Some(key_val) = iter.next() {
+                let key = Self::extract_string(&key_val).unwrap_or_default();
+                if let Some(val) = iter.next() {
+                    match key.as_str() {
+                        "total_results" => {
+                            hybrid_result.total_results =
+                                Self::extract_i64(&val).unwrap_or(0) as u64;
+                        }
+                        "results" => {
+                            if let redis::Value::Array(results_arr) = val {
+                                for result_val in results_arr {
+                                    // Each result is a flat key-value map:
+                                    //   ["id", "doc:1", "score", "0.5", "extra_attributes", [...]]
+                                    if let redis::Value::Array(doc_arr) = result_val {
+                                        let mut doc = SearchDocument {
+                                            id: String::new(),
+                                            score: None,
+                                            payload: None,
+                                            sortkey: None,
+                                            fields: HashMap::new(),
+                                            score_explanation: None,
+                                        };
+                                        let mut doc_iter = doc_arr.into_iter();
+                                        while let Some(dk) = doc_iter.next() {
+                                            let dk_str =
+                                                Self::extract_string(&dk).unwrap_or_default();
+                                            if let Some(dv) = doc_iter.next() {
+                                                match dk_str.as_str() {
+                                                    "id" => {
+                                                        doc.id = Self::extract_string(&dv)
+                                                            .unwrap_or_default();
+                                                    }
+                                                    "score" => {
+                                                        doc.score = Self::extract_f64(&dv);
+                                                    }
+                                                    "extra_attributes" => {
+                                                        if let redis::Value::Array(fields) = dv {
+                                                            let mut fi = fields.into_iter();
+                                                            while let Some(fk) = fi.next() {
+                                                                if let Some(fv) = fi.next()
+                                                                    && let Some(fk_str) =
+                                                                        Self::extract_string(&fk)
+                                                                {
+                                                                    doc.fields.insert(
+                                                                        fk_str,
+                                                                        Self::to_json_value(fv),
+                                                                    );
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                        hybrid_result.documents.push(doc);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {} // warnings, execution_time — ignored
+                    }
+                }
+            }
+        }
+
+        hybrid_result
+    }
+
     /// Parse FT.AGGREGATE response
-    fn parse_aggregate_result(result: redis::Value) -> AggregateResult {
+    fn parse_aggregate_result(result: redis::Value, options: &AggregateOptions) -> AggregateResult {
         let mut agg_result = AggregateResult {
             total_results: 0,
             rows: vec![],
+            cursor_id: None,
         };
 
-        if let redis::Value::Array(arr) = result {
-            let mut iter = arr.into_iter();
-
-            // First element is total count
-            if let Some(total) = iter.next() {
-                agg_result.total_results = Self::extract_i64(&total).unwrap_or(0) as u64;
-            }
-
-            // Rest are rows
-            for row_val in iter {
-                if let redis::Value::Array(row_arr) = row_val {
-                    let mut row = HashMap::new();
-                    let mut row_iter = row_arr.into_iter();
-                    while let Some(k) = row_iter.next() {
-                        if let Some(v) = row_iter.next()
-                            && let Some(key) = Self::extract_string(&k)
-                        {
-                            row.insert(key, Self::to_json_value(v));
+        if let redis::Value::Array(mut arr) = result {
+            if options.withcursor && arr.len() == 2 {
+                if let Some(cursor_val) = arr.pop() {
+                    agg_result.cursor_id = Self::extract_i64(&cursor_val).map(|v| v as u64);
+                }
+                if let Some(redis::Value::Array(results_arr)) = arr.pop() {
+                    let mut iter = results_arr.into_iter();
+                    if let Some(total) = iter.next() {
+                        agg_result.total_results = Self::extract_i64(&total).unwrap_or(0) as u64;
+                    }
+                    for row_val in iter {
+                        if let redis::Value::Array(row_arr) = row_val {
+                            let mut row = HashMap::new();
+                            let mut row_iter = row_arr.into_iter();
+                            while let Some(k) = row_iter.next() {
+                                if let Some(v) = row_iter.next()
+                                    && let Some(key) = Self::extract_string(&k)
+                                {
+                                    row.insert(key, Self::to_json_value(v));
+                                }
+                            }
+                            agg_result.rows.push(row);
                         }
                     }
-                    agg_result.rows.push(row);
+                }
+            } else {
+                let mut iter = arr.into_iter();
+                // First element is total count
+                if let Some(total) = iter.next() {
+                    agg_result.total_results = Self::extract_i64(&total).unwrap_or(0) as u64;
+                }
+                // Rest are rows
+                for row_val in iter {
+                    if let redis::Value::Array(row_arr) = row_val {
+                        let mut row = HashMap::new();
+                        let mut row_iter = row_arr.into_iter();
+                        while let Some(k) = row_iter.next() {
+                            if let Some(v) = row_iter.next()
+                                && let Some(key) = Self::extract_string(&k)
+                            {
+                                row.insert(key, Self::to_json_value(v));
+                            }
+                        }
+                        agg_result.rows.push(row);
+                    }
                 }
             }
         }
 
         agg_result
+    }
+
+    /// Parse FT.CURSOR READ response
+    fn parse_cursor_read_result(result: redis::Value) -> CursorReadResult {
+        let mut cursor_result = CursorReadResult {
+            cursor_id: 0,
+            rows: vec![],
+        };
+
+        if let redis::Value::Array(mut arr) = result
+            && arr.len() == 2
+        {
+            if let Some(redis::Value::Array(results_arr)) = arr.pop() {
+                for row_val in results_arr {
+                    if let redis::Value::Array(row_arr) = row_val {
+                        let mut row = HashMap::new();
+                        let mut row_iter = row_arr.into_iter();
+                        while let Some(k) = row_iter.next() {
+                            if let Some(v) = row_iter.next()
+                                && let Some(key) = Self::extract_string(&k)
+                            {
+                                row.insert(key, Self::to_json_value(v));
+                            }
+                        }
+                        cursor_result.rows.push(row);
+                    }
+                }
+            }
+            if let Some(cursor_val) = arr.pop() {
+                cursor_result.cursor_id = Self::extract_i64(&cursor_val).unwrap_or(0) as u64;
+            }
+        }
+
+        cursor_result
     }
 
     /// Parse FT.SUGGET response
@@ -1081,7 +1398,7 @@ impl SearchRepository for RedisSearchRepository {
 
         let result: redis::Value = cmd.query_async(&mut conn).await?;
 
-        Ok(Self::parse_aggregate_result(result))
+        Ok(Self::parse_aggregate_result(result, options))
     }
 
     async fn ft_explain(
@@ -1171,6 +1488,17 @@ impl SearchRepository for RedisSearchRepository {
         };
 
         Ok(ProfileResult { results, profile })
+    }
+
+    async fn ft_hybrid(
+        &self,
+        index: &str,
+        options: &HybridSearchOptions,
+    ) -> Result<HybridSearchResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let cmd = Self::build_ft_hybrid_cmd(index, options);
+        let result: redis::Value = cmd.query_async(&mut conn).await?;
+        Ok(Self::parse_hybrid_result(result))
     }
 
     // ==================== Alias Operations ====================
@@ -1444,5 +1772,371 @@ impl SearchRepository for RedisSearchRepository {
             dict: dict.to_string(),
             terms,
         })
+    }
+
+    // ==================== Config Operations ====================
+
+    async fn ft_config_get(&self, option: &str) -> Result<HashMap<String, String>, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: redis::Value = redis::cmd("FT.CONFIG")
+            .arg("GET")
+            .arg(option)
+            .query_async(&mut conn)
+            .await?;
+
+        let mut config_map = HashMap::new();
+        if let redis::Value::Array(arr) = result {
+            let mut iter = arr.into_iter();
+            while let Some(item) = iter.next() {
+                match item {
+                    redis::Value::Array(ref inner) if inner.len() == 2 => {
+                        if let Some(k) = Self::extract_string(&inner[0])
+                            && let Some(v) = Self::extract_string(&inner[1])
+                        {
+                            config_map.insert(k, v);
+                        }
+                    }
+                    _ => {
+                        if let Some(k) = Self::extract_string(&item)
+                            && let Some(v_val) = iter.next()
+                            && let Some(v) = Self::extract_string(&v_val)
+                        {
+                            config_map.insert(k, v);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(config_map)
+    }
+
+    async fn ft_config_set(&self, option: &str, value: &str) -> Result<bool, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: String = redis::cmd("FT.CONFIG")
+            .arg("SET")
+            .arg(option)
+            .arg(value)
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(result == "OK")
+    }
+
+    // ==================== Cursor Operations ====================
+
+    async fn ft_cursor_read(
+        &self,
+        index: &str,
+        cursor: u64,
+        count: Option<u64>,
+    ) -> Result<CursorReadResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut cmd = redis::cmd("FT.CURSOR");
+        cmd.arg("READ").arg(index).arg(cursor);
+
+        if let Some(c) = count {
+            cmd.arg("COUNT").arg(c);
+        }
+
+        let result: redis::Value = cmd.query_async(&mut conn).await?;
+
+        Ok(Self::parse_cursor_read_result(result))
+    }
+
+    async fn ft_cursor_del(&self, index: &str, cursor: u64) -> Result<bool, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: String = redis::cmd("FT.CURSOR")
+            .arg("DEL")
+            .arg(index)
+            .arg(cursor)
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(result == "OK")
+    }
+}
+
+#[cfg(test)]
+mod hybrid_builder_tests {
+    use super::*;
+    use crate::domain::entities::{CombineStrategy, HybridSearchOptions, VsimInput};
+
+    /// Collect the redis::Cmd args as a Vec<Vec<u8>> for assertion.
+    fn cmd_args(cmd: &redis::Cmd) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        for a in cmd.args_iter() {
+            if let redis::Arg::Simple(bytes) = a {
+                out.push(bytes.to_vec());
+            }
+        }
+        out
+    }
+
+    /// Helper to convert arg bytes to lossy strings for readable assertions.
+    fn args_as_strings(cmd: &redis::Cmd) -> Vec<String> {
+        cmd_args(cmd)
+            .into_iter()
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .collect()
+    }
+
+    fn base_options() -> HybridSearchOptions {
+        HybridSearchOptions {
+            query: "*".to_string(),
+            search_scorer: None,
+            search_yield_score_as: None,
+            vsim_field: "vec".to_string(),
+            vsim_input: VsimInput::Values {
+                dim: 3,
+                values: vec![1.0, 0.0, 0.0],
+            },
+            vsim_yield_score_as: None,
+            load: vec![],
+            apply: vec![],
+            sortby: vec![],
+            offset: 0,
+            limit: 10,
+            params: std::collections::HashMap::new(),
+            filters: vec![],
+            combine: None,
+            policy: None,
+            batch_size: None,
+        }
+    }
+
+    #[test]
+    fn test_build_vsim_field_prepends_at_sign() {
+        let opts = base_options();
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        // Find VSIM position and verify the field arg is prefixed with @
+        let vsim_pos = args.iter().position(|a| a == "VSIM").unwrap();
+        assert_eq!(args[vsim_pos + 1], "@vec");
+    }
+
+    #[test]
+    fn test_build_vsim_field_preserves_existing_at_sign() {
+        let mut opts = base_options();
+        opts.vsim_field = "@already_prefixed".to_string();
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let vsim_pos = args.iter().position(|a| a == "VSIM").unwrap();
+        assert_eq!(args[vsim_pos + 1], "@already_prefixed");
+    }
+
+    #[test]
+    fn test_build_vsim_values_uses_param_reference() {
+        let opts = base_options();
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        assert!(args.contains(&"$__hybrid_vec".to_string()));
+    }
+
+    #[test]
+    fn test_build_vsim_ele_passes_element_literal() {
+        let mut opts = base_options();
+        opts.vsim_input = VsimInput::Ele {
+            element: "doc:1".to_string(),
+        };
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let ele_pos = args.iter().position(|a| a == "ELE").unwrap();
+        assert_eq!(args[ele_pos + 1], "doc:1");
+        // And there should be no $__hybrid_vec param when using ELE
+        assert!(!args.contains(&"$__hybrid_vec".to_string()));
+    }
+
+    #[test]
+    fn test_build_combine_rrf_emits_count_token() {
+        let mut opts = base_options();
+        opts.combine = Some(CombineStrategy::Rrf {
+            constant: Some(60),
+            window: Some(20),
+            yield_score_as: None,
+        });
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let pos = args.iter().position(|a| a == "COMBINE").unwrap();
+        assert_eq!(args[pos + 1], "RRF");
+        // Count token: CONSTANT 60 WINDOW 20 = 4 args
+        assert_eq!(args[pos + 2], "4");
+        assert_eq!(args[pos + 3], "CONSTANT");
+        assert_eq!(args[pos + 4], "60");
+        assert_eq!(args[pos + 5], "WINDOW");
+        assert_eq!(args[pos + 6], "20");
+    }
+
+    #[test]
+    fn test_build_combine_rrf_zero_args() {
+        let mut opts = base_options();
+        opts.combine = Some(CombineStrategy::Rrf {
+            constant: None,
+            window: None,
+            yield_score_as: None,
+        });
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let pos = args.iter().position(|a| a == "COMBINE").unwrap();
+        assert_eq!(args[pos + 1], "RRF");
+        assert_eq!(args[pos + 2], "0");
+    }
+
+    #[test]
+    fn test_build_combine_linear_emits_count_token() {
+        let mut opts = base_options();
+        opts.combine = Some(CombineStrategy::Linear {
+            alpha: Some(0.7),
+            beta: Some(0.3),
+            window: None,
+            yield_score_as: Some("score".to_string()),
+        });
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let pos = args.iter().position(|a| a == "COMBINE").unwrap();
+        assert_eq!(args[pos + 1], "LINEAR");
+        // ALPHA 0.7 BETA 0.3 YIELD_SCORE_AS score = 6 args
+        assert_eq!(args[pos + 2], "6");
+        assert_eq!(args[pos + 3], "ALPHA");
+        assert_eq!(args[pos + 4], "0.7");
+        assert_eq!(args[pos + 5], "BETA");
+        assert_eq!(args[pos + 6], "0.3");
+        assert_eq!(args[pos + 7], "YIELD_SCORE_AS");
+        assert_eq!(args[pos + 8], "score");
+    }
+
+    #[test]
+    fn test_build_filter_no_count_prefix() {
+        let mut opts = base_options();
+        opts.filters = vec!["@score > 0.5".to_string()];
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let pos = args.iter().position(|a| a == "FILTER").unwrap();
+        // FILTER is followed directly by the expression, no count
+        assert_eq!(args[pos + 1], "@score > 0.5");
+    }
+
+    #[test]
+    fn test_build_policy_with_batch_size() {
+        let mut opts = base_options();
+        opts.policy = Some("BATCHES".to_string());
+        opts.batch_size = Some(100);
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let pos = args.iter().position(|a| a == "POLICY").unwrap();
+        assert_eq!(args[pos + 1], "BATCHES");
+        assert_eq!(args[pos + 2], "BATCH_SIZE");
+        assert_eq!(args[pos + 3], "100");
+    }
+
+    #[test]
+    fn test_build_policy_without_batch_size() {
+        let mut opts = base_options();
+        opts.policy = Some("ADHOC_BF".to_string());
+        opts.batch_size = Some(100); // Must be ignored when not BATCHES
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let pos = args.iter().position(|a| a == "POLICY").unwrap();
+        assert_eq!(args[pos + 1], "ADHOC_BF");
+        assert!(!args.contains(&"BATCH_SIZE".to_string()));
+    }
+
+    #[test]
+    fn test_build_params_is_last_clause() {
+        let mut opts = base_options();
+        opts.filters = vec!["@x > 0".to_string()];
+        opts.policy = Some("BATCHES".to_string());
+        opts.batch_size = Some(50);
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        // PARAMS must be after FILTER, POLICY, BATCH_SIZE, LIMIT
+        let params_pos = args.iter().position(|a| a == "PARAMS").unwrap();
+        let filter_pos = args.iter().position(|a| a == "FILTER").unwrap();
+        let policy_pos = args.iter().position(|a| a == "POLICY").unwrap();
+        let limit_pos = args.iter().position(|a| a == "LIMIT").unwrap();
+        assert!(params_pos > filter_pos);
+        assert!(params_pos > policy_pos);
+        assert!(params_pos > limit_pos);
+    }
+
+    #[test]
+    fn test_build_params_contains_vector_blob() {
+        let opts = base_options();
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = cmd_args(&cmd);
+        // Find PARAMS in string-decoded args
+        let string_args: Vec<String> = args
+            .iter()
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .collect();
+        let params_pos = string_args.iter().position(|a| a == "PARAMS").unwrap();
+        // PARAMS 2 __hybrid_vec <blob>
+        assert_eq!(string_args[params_pos + 1], "2");
+        assert_eq!(string_args[params_pos + 2], "__hybrid_vec");
+        // The blob is 12 bytes (3 f32 values)
+        assert_eq!(args[params_pos + 3].len(), 12);
+    }
+
+    #[test]
+    fn test_build_params_combines_user_and_vector() {
+        let mut opts = base_options();
+        opts.params
+            .insert("user_key".to_string(), "user_val".to_string());
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        let pos = args.iter().position(|a| a == "PARAMS").unwrap();
+        // 1 vector pair + 1 user pair = 4 individual args
+        assert_eq!(args[pos + 1], "4");
+    }
+
+    #[test]
+    fn test_build_full_clause_order() {
+        // Verify the full ordering: SEARCH -> VSIM -> COMBINE -> LOAD -> APPLY -> SORTBY
+        //                        -> FILTER -> POLICY -> LIMIT -> PARAMS
+        let mut opts = base_options();
+        opts.combine = Some(CombineStrategy::Rrf {
+            constant: None,
+            window: None,
+            yield_score_as: None,
+        });
+        opts.load = vec!["title".to_string()];
+        opts.filters = vec!["@x > 0".to_string()];
+        opts.policy = Some("BATCHES".to_string());
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+
+        let positions: Vec<usize> = [
+            "SEARCH", "VSIM", "COMBINE", "LOAD", "FILTER", "POLICY", "LIMIT", "PARAMS",
+        ]
+        .iter()
+        .map(|tok| {
+            args.iter()
+                .position(|a| a == *tok)
+                .unwrap_or_else(|| panic!("missing {} clause", tok))
+        })
+        .collect();
+
+        // Each subsequent clause must come after the previous one
+        for window in positions.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "clauses out of order: {:?}",
+                positions
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_cmd_name_is_ft_hybrid() {
+        let opts = base_options();
+        let cmd = RedisSearchRepository::build_ft_hybrid_cmd("idx", &opts);
+        let args = args_as_strings(&cmd);
+        assert_eq!(args[0], "FT.HYBRID");
+        assert_eq!(args[1], "idx");
+        assert_eq!(args[2], "SEARCH");
     }
 }

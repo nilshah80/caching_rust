@@ -4276,6 +4276,7 @@ impl SearchRepository for MockSearchRepository {
         Ok(AggregateResult {
             total_results: 0,
             rows: vec![],
+            cursor_id: None,
         })
     }
 
@@ -4302,6 +4303,17 @@ impl SearchRepository for MockSearchRepository {
         Ok(ProfileResult {
             results: serde_json::Value::Null,
             profile: std::collections::HashMap::new(),
+        })
+    }
+
+    async fn ft_hybrid(
+        &self,
+        _index: &str,
+        _options: &crate::domain::entities::HybridSearchOptions,
+    ) -> Result<crate::domain::entities::HybridSearchResult, CacheError> {
+        Ok(crate::domain::entities::HybridSearchResult {
+            total_results: 0,
+            documents: vec![],
         })
     }
 
@@ -4411,6 +4423,33 @@ impl SearchRepository for MockSearchRepository {
             dict: dict.to_string(),
             terms: vec![],
         })
+    }
+
+    async fn ft_config_get(
+        &self,
+        _option: &str,
+    ) -> Result<std::collections::HashMap<String, String>, CacheError> {
+        Ok(std::collections::HashMap::new())
+    }
+
+    async fn ft_config_set(&self, _option: &str, _value: &str) -> Result<bool, CacheError> {
+        Ok(true)
+    }
+
+    async fn ft_cursor_read(
+        &self,
+        _index: &str,
+        _cursor: u64,
+        _count: Option<u64>,
+    ) -> Result<crate::domain::entities::CursorReadResult, CacheError> {
+        Ok(crate::domain::entities::CursorReadResult {
+            cursor_id: 0,
+            rows: vec![],
+        })
+    }
+
+    async fn ft_cursor_del(&self, _index: &str, _cursor: u64) -> Result<bool, CacheError> {
+        Ok(true)
     }
 }
 

@@ -425,6 +425,10 @@ pub struct SearchOptionsDto {
     #[serde(default)]
     pub explainscore: bool,
 
+    /// Use Reciprocal Rank Fusion (hybrid search)
+    #[serde(default)]
+    pub rrf: bool,
+
     /// Sort by field
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sortby: Option<SortBy>,
@@ -472,6 +476,7 @@ impl From<SearchOptionsDto> for SearchOptions {
             language: dto.language,
             scorer: dto.scorer,
             explainscore: dto.explainscore,
+            rrf: dto.rrf,
             sortby: dto.sortby,
             offset: dto.offset,
             limit: dto.limit,
@@ -547,6 +552,14 @@ pub struct AggregateOptionsDto {
     /// Dialect version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dialect: Option<u32>,
+
+    /// Use cursor for result pagination
+    #[serde(default)]
+    pub withcursor: bool,
+
+    /// Count for cursor pagination
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_count: Option<u64>,
 }
 
 impl From<AggregateOptionsDto> for AggregateOptions {
@@ -559,6 +572,8 @@ impl From<AggregateOptionsDto> for AggregateOptions {
             pipeline: dto.pipeline,
             params: dto.params,
             dialect: dto.dialect,
+            withcursor: dto.withcursor,
+            cursor_count: dto.cursor_count,
         }
     }
 }
@@ -570,16 +585,134 @@ pub struct AggregateResponse {
     pub total_results: u64,
     /// Result rows
     pub rows: Vec<serde_json::Value>,
+    /// Cursor ID (if WITHCURSOR was used)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_id: Option<u64>,
 }
 
 impl From<AggregateResult> for AggregateResponse {
     fn from(result: AggregateResult) -> Self {
         AggregateResponse {
             total_results: result.total_results,
+            cursor_id: result.cursor_id,
             rows: result
                 .rows
                 .into_iter()
                 .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
+                .collect(),
+        }
+    }
+}
+
+// ==================== Hybrid Search Operations ====================
+
+/// Request for hybrid text+vector search (FT.HYBRID, Redis 8.4+)
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct HybridSearchRequest {
+    /// Text search query for the SEARCH clause
+    #[validate(length(min = 1, message = "Query cannot be empty"))]
+    pub query: String,
+
+    /// Optional scorer for the SEARCH clause
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_scorer: Option<String>,
+
+    /// Optional YIELD_SCORE_AS name for text search score
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_yield_score_as: Option<String>,
+
+    /// Vector field name for the VSIM clause
+    #[validate(length(min = 1, message = "VSIM field name cannot be empty"))]
+    pub vsim_field: String,
+
+    /// Vector similarity input (ELE or VALUES) — required
+    pub vsim_input: crate::domain::entities::VsimInput,
+
+    /// Optional YIELD_SCORE_AS name for vector score
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vsim_yield_score_as: Option<String>,
+
+    /// Fields to LOAD from documents
+    #[serde(default)]
+    pub load: Vec<String>,
+
+    /// APPLY expressions
+    #[serde(default)]
+    pub apply: Vec<crate::domain::entities::ApplyStep>,
+
+    /// SORTBY specifications
+    #[serde(default)]
+    pub sortby: Vec<SortBy>,
+
+    /// LIMIT offset
+    #[serde(default)]
+    pub offset: u64,
+
+    /// LIMIT count (default 10)
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+
+    /// Parameters for parameterized queries
+    #[serde(default)]
+    pub params: std::collections::HashMap<String, String>,
+
+    /// FILTER expressions
+    #[serde(default)]
+    pub filters: Vec<String>,
+
+    /// Combination strategy (RRF or LINEAR with parameters)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combine: Option<crate::domain::entities::CombineStrategy>,
+
+    /// Execution policy: ADHOC or BATCHES
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<String>,
+
+    /// Batch size (when policy is BATCHES)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<u32>,
+}
+
+impl From<HybridSearchRequest> for crate::domain::entities::HybridSearchOptions {
+    fn from(req: HybridSearchRequest) -> Self {
+        crate::domain::entities::HybridSearchOptions {
+            query: req.query,
+            search_scorer: req.search_scorer,
+            search_yield_score_as: req.search_yield_score_as,
+            vsim_field: req.vsim_field,
+            vsim_input: req.vsim_input,
+            vsim_yield_score_as: req.vsim_yield_score_as,
+            load: req.load,
+            apply: req.apply,
+            sortby: req.sortby,
+            offset: req.offset,
+            limit: req.limit,
+            params: req.params,
+            filters: req.filters,
+            combine: req.combine,
+            policy: req.policy,
+            batch_size: req.batch_size,
+        }
+    }
+}
+
+/// Response for hybrid search query
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HybridSearchResponse {
+    /// Total results
+    pub total_results: u64,
+    /// Documents
+    pub documents: Vec<serde_json::Value>,
+}
+
+impl From<crate::domain::entities::HybridSearchResult> for HybridSearchResponse {
+    fn from(result: crate::domain::entities::HybridSearchResult) -> Self {
+        HybridSearchResponse {
+            total_results: result.total_results,
+            documents: result
+                .documents
+                .into_iter()
+                .map(|d| serde_json::to_value(d).unwrap_or(serde_json::Value::Null))
                 .collect(),
         }
     }
@@ -959,6 +1092,70 @@ impl From<DictDumpResult> for DictDumpResponse {
     }
 }
 
+// ==================== Configuration Operations ====================
+
+/// Request to set a configuration option
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct SearchConfigSetRequest {
+    /// Option value
+    #[validate(length(min = 1, message = "Value cannot be empty"))]
+    pub value: String,
+}
+
+/// Response for configuration get
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SearchConfigGetResponse {
+    /// Configuration key-value pairs
+    pub config: std::collections::HashMap<String, String>,
+}
+
+/// Response for configuration set
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SearchConfigSetResponse {
+    /// Option name
+    pub option: String,
+    /// Whether operation succeeded
+    pub success: bool,
+}
+
+// ==================== Cursor Operations ====================
+
+/// Query parameters for cursor read
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct CursorReadParams {
+    /// Maximum count to read
+    pub count: Option<u64>,
+}
+
+/// Response for cursor read
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CursorReadResponse {
+    /// Next cursor ID (0 if exhausted)
+    pub cursor_id: u64,
+    /// Result rows
+    pub rows: Vec<serde_json::Value>,
+}
+
+impl From<crate::domain::entities::CursorReadResult> for CursorReadResponse {
+    fn from(result: crate::domain::entities::CursorReadResult) -> Self {
+        CursorReadResponse {
+            cursor_id: result.cursor_id,
+            rows: result
+                .rows
+                .into_iter()
+                .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
+                .collect(),
+        }
+    }
+}
+
+/// Response for cursor delete
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CursorDelResponse {
+    /// Whether deletion succeeded
+    pub success: bool,
+}
+
 // ==================== Helper Functions ====================
 
 /// Parse profile type from string
@@ -1179,6 +1376,7 @@ mod tests {
         let aggregate = AggregateResponse::from(AggregateResult {
             total_results: 1,
             rows: vec![row],
+            cursor_id: None,
         });
         assert_eq!(aggregate.rows.len(), 1);
 

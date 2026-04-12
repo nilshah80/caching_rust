@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use crate::domain::entities::{
     AggregateOptions, AggregateResult, AliasResult, DictDumpResult, DictResult, ExplainResult,
-    IndexAlterResult, IndexCreateOptions, IndexCreateResult, IndexDropResult, IndexInfo,
-    ProfileResult, ProfileType, SearchFieldSchema, SearchOptions, SearchResult, SpellcheckOptions,
-    SpellcheckResult, SugAddOptions, SugAddResult, SugDelResult, SugGetOptions, SugLenResult,
-    Suggestion, SynonymGroup, SynonymUpdateResult,
+    HybridSearchOptions, HybridSearchResult, IndexAlterResult, IndexCreateOptions,
+    IndexCreateResult, IndexDropResult, IndexInfo, ProfileResult, ProfileType, SearchFieldSchema,
+    SearchOptions, SearchResult, SpellcheckOptions, SpellcheckResult, SugAddOptions, SugAddResult,
+    SugDelResult, SugGetOptions, SugLenResult, Suggestion, SynonymGroup, SynonymUpdateResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::SearchRepository;
@@ -102,6 +102,22 @@ impl SearchService {
         self.validate_index_name(index)?;
         self.validate_query(query)?;
         self.repository.ft_aggregate(index, query, &options).await
+    }
+
+    /// Execute a hybrid text+vector search (Redis 8.4+)
+    pub async fn ft_hybrid(
+        &self,
+        index: &str,
+        options: HybridSearchOptions,
+    ) -> Result<HybridSearchResult, CacheError> {
+        self.validate_index_name(index)?;
+        self.validate_query(&options.query)?;
+        if options.vsim_field.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "VSIM field name cannot be empty".to_string(),
+            ));
+        }
+        self.repository.ft_hybrid(index, &options).await
     }
 
     /// Get query execution plan
@@ -290,6 +306,55 @@ impl SearchService {
         self.repository.ft_dictdump(dict).await
     }
 
+    // ==================== Config Operations ====================
+
+    /// Get configuration option
+    pub async fn ft_config_get(
+        &self,
+        option: &str,
+    ) -> Result<std::collections::HashMap<String, String>, CacheError> {
+        if option.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Option cannot be empty".to_string(),
+            ));
+        }
+        self.repository.ft_config_get(option).await
+    }
+
+    /// Set configuration option
+    pub async fn ft_config_set(&self, option: &str, value: &str) -> Result<bool, CacheError> {
+        if option.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Option cannot be empty".to_string(),
+            ));
+        }
+        if value.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Value cannot be empty".to_string(),
+            ));
+        }
+        self.repository.ft_config_set(option, value).await
+    }
+
+    // ==================== Cursor Operations ====================
+
+    /// Read from an existing cursor
+    pub async fn ft_cursor_read(
+        &self,
+        index: &str,
+        cursor: u64,
+        count: Option<u64>,
+    ) -> Result<crate::domain::entities::CursorReadResult, CacheError> {
+        self.validate_index_name(index)?;
+        self.repository.ft_cursor_read(index, cursor, count).await
+    }
+
+    /// Delete a cursor
+    pub async fn ft_cursor_del(&self, index: &str, cursor: u64) -> Result<bool, CacheError> {
+        self.validate_index_name(index)?;
+        self.repository.ft_cursor_del(index, cursor).await
+    }
+
     // ==================== Validation Helpers ====================
 
     /// Validate index name
@@ -430,8 +495,8 @@ impl SearchService {
 mod tests {
     use super::*;
     use crate::domain::entities::{
-        AggregateOptions, IndexCreateOptions, ProfileType, SearchFieldType, SearchOptions,
-        SpellcheckOptions, SugAddOptions, SugGetOptions,
+        AggregateOptions, HybridSearchOptions, IndexCreateOptions, ProfileType, SearchFieldType,
+        SearchOptions, SpellcheckOptions, SugAddOptions, SugGetOptions, VsimInput,
     };
     use crate::infrastructure::redis::connection::InstrumentedPool;
     use crate::test_support::MockSearchRepository;
@@ -729,5 +794,144 @@ mod tests {
 
         let result = service.ft_dictdel("dict", vec![]).await;
         assert!(result.is_err());
+    }
+
+    // ==================== Phase 10.3 Tests ====================
+
+    #[tokio::test]
+    async fn test_ft_config_get() {
+        let service = create_mock_service();
+        let result = service.ft_config_get("TIMEOUT").await;
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.is_empty() || config.contains_key("TIMEOUT"));
+    }
+
+    #[tokio::test]
+    async fn test_ft_config_set() {
+        let service = create_mock_service();
+        let result = service.ft_config_set("TIMEOUT", "500").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ft_cursor_read() {
+        let service = create_mock_service();
+        let result = service.ft_cursor_read("myindex", 12345, None).await;
+        assert!(result.is_ok());
+        let cursor_result = result.unwrap();
+        assert_eq!(cursor_result.cursor_id, 0);
+    }
+
+    #[tokio::test]
+    async fn test_ft_cursor_del() {
+        let service = create_mock_service();
+        let result = service.ft_cursor_del("myindex", 12345).await;
+        assert!(result.is_ok());
+    }
+
+    fn test_hybrid_options(query: &str, vsim_field: &str) -> HybridSearchOptions {
+        HybridSearchOptions {
+            query: query.to_string(),
+            search_scorer: None,
+            search_yield_score_as: None,
+            vsim_field: vsim_field.to_string(),
+            vsim_input: VsimInput::Values {
+                dim: 3,
+                values: vec![1.0, 0.0, 0.0],
+            },
+            vsim_yield_score_as: None,
+            load: vec![],
+            apply: vec![],
+            sortby: vec![],
+            offset: 0,
+            limit: 10,
+            params: std::collections::HashMap::new(),
+            filters: vec![],
+            combine: None,
+            policy: None,
+            batch_size: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_basic() {
+        let service = create_mock_service();
+        let options = test_hybrid_options("*", "vec");
+        let result = service.ft_hybrid("myindex", options).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_empty_index() {
+        let service = create_mock_service();
+        let options = test_hybrid_options("*", "vec");
+        let result = service.ft_hybrid("", options).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_empty_query() {
+        let service = create_mock_service();
+        let options = test_hybrid_options("", "vec");
+        let result = service.ft_hybrid("idx", options).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_empty_vsim_field() {
+        let service = create_mock_service();
+        let options = test_hybrid_options("*", "");
+        let result = service.ft_hybrid("idx", options).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("VSIM field"));
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_with_combine_rrf() {
+        let service = create_mock_service();
+        let mut options = test_hybrid_options("*", "vec");
+        options.combine = Some(crate::domain::entities::CombineStrategy::Rrf {
+            constant: Some(60),
+            window: None,
+            yield_score_as: Some("combined".to_string()),
+        });
+        let result = service.ft_hybrid("myindex", options).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_with_combine_linear() {
+        let service = create_mock_service();
+        let mut options = test_hybrid_options("*", "vec");
+        options.combine = Some(crate::domain::entities::CombineStrategy::Linear {
+            alpha: Some(0.7),
+            beta: Some(0.3),
+            window: None,
+            yield_score_as: None,
+        });
+        let result = service.ft_hybrid("myindex", options).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_with_filter() {
+        let service = create_mock_service();
+        let mut options = test_hybrid_options("*", "vec");
+        options.filters = vec!["@score > 0.5".to_string()];
+        let result = service.ft_hybrid("myindex", options).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ft_hybrid_with_policy() {
+        let service = create_mock_service();
+        let mut options = test_hybrid_options("*", "vec");
+        options.policy = Some("BATCHES".to_string());
+        options.batch_size = Some(100);
+        let result = service.ft_hybrid("myindex", options).await;
+        assert!(result.is_ok());
     }
 }

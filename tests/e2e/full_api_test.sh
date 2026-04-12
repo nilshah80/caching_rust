@@ -355,6 +355,64 @@ if [[ "$status" == "200" ]]; then
 
     # Cleanup index
     do_request DELETE "/api/v1/search/indices/${P}_idx" > /dev/null 2>&1 || true
+
+    # --- Phase 10.3 Search Enhancements ---
+    echo ""
+    echo "--- Search Enhancements (10.3) ---"
+
+    # 10.3.1 FT.CONFIG GET/SET
+    IFS='|' read -r status body < <(do_request GET "/api/v1/search/config/TIMEOUT")
+    check "FT.CONFIG GET" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request PUT "/api/v1/search/config/TIMEOUT" \
+        '{"value":"500"}' "Content-Type: application/json")
+    check "FT.CONFIG SET" "200" "$status" "$body"
+
+    # 10.3.3 FT.CURSOR (via AGGREGATE with WITHCURSOR)
+    # Create a temp index for cursor test
+    IFS='|' read -r status body < <(do_request POST "/api/v1/search/indices" \
+        "{\"index\":\"${P}_cur\",\"options\":{\"prefix\":\"${P}_cdoc:\"},\"schema\":[{\"name\":\"title\",\"field_type\":\"TEXT\"}]}")
+    if [[ "$status" == "200" ]]; then
+        do_request PUT "/api/v1/hashes/${P}_cdoc:1" '{"items":{"title":"cursor doc one"}}' > /dev/null
+        do_request PUT "/api/v1/hashes/${P}_cdoc:2" '{"items":{"title":"cursor doc two"}}' > /dev/null
+        sleep 1
+
+        IFS='|' read -r status body < <(do_request POST "/api/v1/search/indices/${P}_cur/aggregate" \
+            '{"query":"*","options":{"withcursor":true,"cursor_count":1,"load_all":true}}')
+        check "FT.AGGREGATE WITHCURSOR" "200" "$status" "$body"
+
+        CURSOR_ID=$(echo "$body" | sed -n 's/.*"cursor_id":\([0-9]*\).*/\1/p')
+        if [[ -n "$CURSOR_ID" && "$CURSOR_ID" != "0" ]]; then
+            IFS='|' read -r status body < <(do_request GET "/api/v1/search/indices/${P}_cur/cursor/$CURSOR_ID")
+            check "FT.CURSOR READ" "200" "$status" "$body"
+
+            IFS='|' read -r status body < <(do_request DELETE "/api/v1/search/indices/${P}_cur/cursor/$CURSOR_ID")
+            check "FT.CURSOR DEL" "200" "$status" "$body"
+        else
+            echo "  SKIP  FT.CURSOR READ/DEL (no cursor returned)"
+            SKIP=$((SKIP + 2))
+        fi
+
+        do_request DELETE "/api/v1/search/indices/${P}_cur?dd=true" > /dev/null 2>&1 || true
+        do_request POST "/api/v1/keys/delete" "{\"keys\":[\"${P}_cdoc:1\",\"${P}_cdoc:2\"]}" > /dev/null 2>&1 || true
+    fi
+
+    # 10.3.2 FT.HYBRID
+    # Create index with TEXT + VECTOR fields
+    IFS='|' read -r status body < <(do_request POST "/api/v1/search/indices" \
+        "{\"index\":\"${P}_hyb\",\"options\":{\"prefix\":\"${P}_hdoc:\"},\"schema\":[{\"name\":\"title\",\"field_type\":\"TEXT\"},{\"name\":\"vec\",\"field_type\":\"VECTOR\",\"vector_options\":{\"algorithm\":\"FLAT\",\"dim\":3,\"distance_metric\":\"COSINE\",\"type\":\"FLOAT32\"}}]}")
+    if [[ "$status" == "200" ]]; then
+        sleep 1
+
+        IFS='|' read -r status body < <(do_request POST "/api/v1/search/indices/${P}_hyb/hybrid" \
+            "{\"query\":\"*\",\"vsim_field\":\"vec\",\"vsim_input\":{\"type\":\"VALUES\",\"dim\":3,\"values\":[1.0,0.0,0.0]},\"limit\":3}")
+        check "FT.HYBRID" "200" "$status" "$body"
+
+        do_request DELETE "/api/v1/search/indices/${P}_hyb?dd=true" > /dev/null 2>&1 || true
+    else
+        echo "  SKIP  FT.HYBRID (index creation failed)"
+        SKIP=$((SKIP + 1))
+    fi
 else
     SKIP=$((SKIP + 3))
     echo "  SKIP  FT.CREATE, FT.SEARCH, FT.INFO (module not available)"
