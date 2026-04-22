@@ -38,7 +38,7 @@ pub use json::json_routes;
 pub use keys::key_routes;
 pub use lists::list_routes;
 pub use openapi::openapi_routes;
-pub use probabilistic::{cms_routes, hyperloglog_routes, topk_routes};
+pub use probabilistic::{cms_routes, hyperloglog_routes, tdigest_routes, topk_routes};
 pub use pubsub::pubsub_routes;
 pub use scripting::scripting_routes;
 pub use search::search_routes;
@@ -123,9 +123,10 @@ pub fn build_router(state: AppState) -> Router {
     if capabilities.modules.bloom {
         router = router
             .merge(bloom_routes())
-            // CMS and Top-K are part of RedisBloom module
+            // CMS, Top-K, and T-Digest are part of RedisBloom module
             .merge(cms_routes())
-            .merge(topk_routes());
+            .merge(topk_routes())
+            .merge(tdigest_routes());
     } else {
         router = router
             .merge(unavailable_feature_routes(
@@ -142,6 +143,11 @@ pub fn build_router(state: AppState) -> Router {
                 "/api/v1/topk",
                 "/api/v1/topk/{*path}",
                 "RedisBloom Top-K commands are not available",
+            ))
+            .merge(unavailable_feature_routes(
+                "/api/v1/tdigest",
+                "/api/v1/tdigest/{*path}",
+                "RedisBloom T-Digest commands are not available",
             ));
     }
 
@@ -322,6 +328,48 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_with_tdigest_routes() {
+        let (mut state, _) = test_state_with_bloom_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.modules.bloom = true;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/tdigest/td-test/min")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_returns_501_for_tdigest_when_bloom_disabled() {
+        let (mut state, _) = test_state_with_bloom_repo();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.modules.bloom = false;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/tdigest/td-test/min")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_IMPLEMENTED);
     }
 
     #[tokio::test]

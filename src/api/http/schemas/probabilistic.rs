@@ -8,8 +8,9 @@ use validator::Validate;
 
 use crate::domain::entities::{
     CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult, PfAddResult,
-    PfCountResult, PfMergeResult, TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo,
-    TopKItem, TopKListResult, TopKQueryResult, TopKReserveResult,
+    PfCountResult, PfMergeResult, TDigestAckResult, TDigestInfo, TDigestRanksResult,
+    TDigestScalarResult, TDigestValuesResult, TopKAddResult, TopKCountResult, TopKIncrByResult,
+    TopKInfo, TopKItem, TopKListResult, TopKQueryResult, TopKReserveResult,
 };
 
 // ==================== Count-Min Sketch Schemas ====================
@@ -395,6 +396,192 @@ impl From<TopKInfo> for TopKInfoResponse {
     }
 }
 
+// ==================== T-Digest Schemas ====================
+
+/// Request body for TDIGEST.CREATE.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct TDigestCreateRequest {
+    /// Optional compression (accuracy/memory trade-off, default 100)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "compression must be >= 1"))]
+    pub compression: Option<u64>,
+}
+
+/// Generic ack response used by TDIGEST.CREATE/ADD/RESET/MERGE.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TDigestAckResponse {
+    /// Key name
+    pub key: String,
+    /// Whether Redis returned OK
+    pub success: bool,
+}
+
+impl From<TDigestAckResult> for TDigestAckResponse {
+    fn from(result: TDigestAckResult) -> Self {
+        Self {
+            key: result.key,
+            success: result.success,
+        }
+    }
+}
+
+/// Request body for TDIGEST.ADD.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct TDigestAddRequest {
+    /// Values to add to the sketch
+    #[validate(length(min = 1, message = "At least one value is required"))]
+    pub values: Vec<f64>,
+}
+
+/// Request body for TDIGEST.QUANTILE.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct TDigestQuantileRequest {
+    /// Quantiles to estimate (each must be between 0 and 1)
+    #[validate(length(min = 1, message = "At least one quantile is required"))]
+    pub quantiles: Vec<f64>,
+}
+
+/// Request body for TDIGEST.CDF / TDIGEST.RANK / TDIGEST.REVRANK.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct TDigestValuesRequest {
+    /// Values to look up
+    #[validate(length(min = 1, message = "At least one value is required"))]
+    pub values: Vec<f64>,
+}
+
+/// Request body for TDIGEST.BYRANK / TDIGEST.BYREVRANK.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct TDigestRanksRequest {
+    /// Ranks to look up
+    #[validate(length(min = 1, message = "At least one rank is required"))]
+    pub ranks: Vec<u64>,
+}
+
+/// Request body for TDIGEST.MERGE.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct TDigestMergeRequest {
+    /// Source sketches to merge into the destination
+    #[validate(length(min = 1, message = "At least one source is required"))]
+    pub sources: Vec<String>,
+
+    /// Optional compression override
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "compression must be >= 1"))]
+    pub compression: Option<u64>,
+
+    /// If true, allow overwriting the destination if it already exists
+    #[serde(default)]
+    pub override_existing: bool,
+}
+
+/// Request body for TDIGEST.TRIMMED_MEAN.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct TDigestTrimmedMeanRequest {
+    /// Lower quantile cut-off (inclusive)
+    #[validate(range(min = 0.0, max = 1.0, message = "low_cut_quantile must be in [0, 1]"))]
+    pub low_cut_quantile: f64,
+
+    /// Upper quantile cut-off (inclusive)
+    #[validate(range(min = 0.0, max = 1.0, message = "high_cut_quantile must be in [0, 1]"))]
+    pub high_cut_quantile: f64,
+}
+
+/// Response for commands that return an array of floats in the same order as the
+/// input (TDIGEST.QUANTILE / TDIGEST.CDF / TDIGEST.BYRANK / TDIGEST.BYREVRANK).
+/// `null` is used where Redis returned `nan` (e.g. empty sketch).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TDigestValuesResponse {
+    /// Key name
+    pub key: String,
+    /// One result per input, preserving order
+    pub values: Vec<Option<f64>>,
+}
+
+impl From<TDigestValuesResult> for TDigestValuesResponse {
+    fn from(result: TDigestValuesResult) -> Self {
+        Self {
+            key: result.key,
+            values: result.values,
+        }
+    }
+}
+
+/// Response for TDIGEST.RANK / TDIGEST.REVRANK.
+/// Raw signed ints preserve sentinel values (-1/-2) from the module.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TDigestRanksResponse {
+    /// Key name
+    pub key: String,
+    /// Rank per input, preserving order
+    pub ranks: Vec<i64>,
+}
+
+impl From<TDigestRanksResult> for TDigestRanksResponse {
+    fn from(result: TDigestRanksResult) -> Self {
+        Self {
+            key: result.key,
+            ranks: result.ranks,
+        }
+    }
+}
+
+/// Response for TDIGEST.MIN / TDIGEST.MAX / TDIGEST.TRIMMED_MEAN.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TDigestScalarResponse {
+    /// Key name
+    pub key: String,
+    /// Scalar value (null if sketch is empty and Redis returned `nan`)
+    pub value: Option<f64>,
+}
+
+impl From<TDigestScalarResult> for TDigestScalarResponse {
+    fn from(result: TDigestScalarResult) -> Self {
+        Self {
+            key: result.key,
+            value: result.value,
+        }
+    }
+}
+
+/// Response for TDIGEST.INFO.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TDigestInfoResponse {
+    /// Compression parameter
+    pub compression: u64,
+    /// Maximum capacity (derived from compression)
+    pub capacity: u64,
+    /// Number of merged centroids
+    pub merged_nodes: u64,
+    /// Number of unmerged centroids
+    pub unmerged_nodes: u64,
+    /// Total weight of merged centroids
+    pub merged_weight: f64,
+    /// Total weight of unmerged centroids
+    pub unmerged_weight: f64,
+    /// Count of observations added
+    pub observations: u64,
+    /// Number of compressions performed
+    pub total_compressions: u64,
+    /// Memory footprint in bytes
+    pub memory_usage: u64,
+}
+
+impl From<TDigestInfo> for TDigestInfoResponse {
+    fn from(info: TDigestInfo) -> Self {
+        Self {
+            compression: info.compression,
+            capacity: info.capacity,
+            merged_nodes: info.merged_nodes,
+            unmerged_nodes: info.unmerged_nodes,
+            merged_weight: info.merged_weight,
+            unmerged_weight: info.unmerged_weight,
+            observations: info.observations,
+            total_compressions: info.total_compressions,
+            memory_usage: info.memory_usage,
+        }
+    }
+}
+
 // ==================== HyperLogLog Schemas ====================
 
 /// Request to add elements to a HyperLogLog
@@ -620,5 +807,87 @@ mod tests {
             success: true,
         });
         assert!(pf_merge.success);
+    }
+
+    #[test]
+    fn test_tdigest_create_request_defaults() {
+        let json = r#"{}"#;
+        let req: TDigestCreateRequest = serde_json::from_str(json).unwrap();
+        assert!(req.compression.is_none());
+    }
+
+    #[test]
+    fn test_tdigest_add_request() {
+        let json = r#"{"values":[1.0,2.0,3.0]}"#;
+        let req: TDigestAddRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.values.len(), 3);
+    }
+
+    #[test]
+    fn test_tdigest_response_conversions() {
+        let ack = TDigestAckResponse::from(TDigestAckResult {
+            key: "td:test".to_string(),
+            success: true,
+        });
+        assert!(ack.success);
+
+        let values = TDigestValuesResponse::from(TDigestValuesResult {
+            key: "td:test".to_string(),
+            values: vec![Some(0.5), None],
+        });
+        assert_eq!(values.values.len(), 2);
+        assert!(values.values[1].is_none());
+
+        let ranks = TDigestRanksResponse::from(TDigestRanksResult {
+            key: "td:test".to_string(),
+            ranks: vec![0, -1, -2],
+        });
+        assert_eq!(ranks.ranks, vec![0, -1, -2]);
+
+        let scalar = TDigestScalarResponse::from(TDigestScalarResult {
+            key: "td:test".to_string(),
+            value: Some(3.14),
+        });
+        assert_eq!(scalar.value, Some(3.14));
+
+        let info = TDigestInfoResponse::from(TDigestInfo {
+            compression: 100,
+            capacity: 610,
+            merged_nodes: 10,
+            unmerged_nodes: 2,
+            merged_weight: 100.0,
+            unmerged_weight: 5.0,
+            observations: 105,
+            total_compressions: 1,
+            memory_usage: 2048,
+        });
+        assert_eq!(info.compression, 100);
+    }
+
+    #[test]
+    fn test_tdigest_values_response_serializes_null_for_nan() {
+        let values = TDigestValuesResponse::from(TDigestValuesResult {
+            key: "td:test".to_string(),
+            values: vec![Some(0.5), None, Some(1.0)],
+        });
+        let json = serde_json::to_string(&values).unwrap();
+        assert!(json.contains("null"));
+        assert!(json.contains("0.5"));
+    }
+
+    #[test]
+    fn test_tdigest_trimmed_mean_request() {
+        let json = r#"{"low_cut_quantile":0.1,"high_cut_quantile":0.9}"#;
+        let req: TDigestTrimmedMeanRequest = serde_json::from_str(json).unwrap();
+        req.validate().unwrap();
+        assert_eq!(req.low_cut_quantile, 0.1);
+        assert_eq!(req.high_cut_quantile, 0.9);
+    }
+
+    #[test]
+    fn test_tdigest_trimmed_mean_request_rejects_out_of_range() {
+        let json = r#"{"low_cut_quantile":-0.1,"high_cut_quantile":0.9}"#;
+        let req: TDigestTrimmedMeanRequest = serde_json::from_str(json).unwrap();
+        assert!(req.validate().is_err());
     }
 }

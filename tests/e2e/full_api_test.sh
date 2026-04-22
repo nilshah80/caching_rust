@@ -319,9 +319,20 @@ if [[ "$status" == "200" ]]; then
 
     IFS='|' read -r status body < <(do_request DELETE "/api/v1/json/${P}_json?path=$.tags")
     check "JSON.DEL" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/json/mset" \
+        "{\"items\":[{\"key\":\"${P}_mset_a\",\"path\":\"$\",\"value\":{\"n\":1}},{\"key\":\"${P}_mset_b\",\"path\":\"$\",\"value\":{\"n\":2}}]}")
+    check "JSON.MSET" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/json/mget" \
+        "{\"keys\":[\"${P}_mset_a\",\"${P}_mset_b\"],\"path\":\"$.n\"}")
+    check "JSON.MGET (after MSET)" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/json/mset" '{"items":[]}')
+    check "JSON.MSET (empty items rejected)" "400" "$status" "$body"
 else
-    SKIP=$((SKIP + 6))
-    echo "  SKIP  JSON.GET, JSON.TYPE, JSON.STRLEN, JSON.NUMINCRBY, JSON.ARRLEN, JSON.DEL (module not available)"
+    SKIP=$((SKIP + 9))
+    echo "  SKIP  JSON.GET, JSON.TYPE, JSON.STRLEN, JSON.NUMINCRBY, JSON.ARRLEN, JSON.DEL, JSON.MSET, JSON.MGET, JSON.MSET validation (module not available)"
 fi
 
 echo ""
@@ -500,6 +511,89 @@ if [[ "$status" == "200" ]]; then
 else
     SKIP=$((SKIP + 3))
     echo "  SKIP  TOPK.ADD, TOPK.LIST, TOPK.INFO (module not available)"
+fi
+
+echo ""
+
+# ==========================================================================
+# T-Digest (RedisBloom module)
+# ==========================================================================
+echo "--- T-Digest ---"
+
+IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td" \
+    '{"compression":100}')
+check_any "TDIGEST.CREATE" "$status" "$body" 200 501
+
+if [[ "$status" == "200" ]]; then
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/add" \
+        '{"values":[1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0]}')
+    check "TDIGEST.ADD" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/quantile" \
+        '{"quantiles":[0.5,0.9,0.99]}')
+    check "TDIGEST.QUANTILE" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/cdf" \
+        '{"values":[5.0]}')
+    check "TDIGEST.CDF" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/rank" \
+        '{"values":[5.0]}')
+    check "TDIGEST.RANK" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/revrank" \
+        '{"values":[5.0]}')
+    check "TDIGEST.REVRANK" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/byrank" \
+        '{"ranks":[0,5]}')
+    check "TDIGEST.BYRANK" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/byrevrank" \
+        '{"ranks":[0]}')
+    check "TDIGEST.BYREVRANK" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request GET "/api/v1/tdigest/${P}_td/min")
+    check "TDIGEST.MIN" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request GET "/api/v1/tdigest/${P}_td/max")
+    check "TDIGEST.MAX" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request GET "/api/v1/tdigest/${P}_td")
+    check "TDIGEST.INFO" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/trimmed_mean" \
+        '{"low_cut_quantile":0.1,"high_cut_quantile":0.9}')
+    check "TDIGEST.TRIMMED_MEAN" "200" "$status" "$body"
+
+    # Seed a second sketch and merge it into a fresh destination.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td2" \
+        '{"compression":100}')
+    check "TDIGEST.CREATE (source for merge)" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td2/add" \
+        '{"values":[100.0,200.0,300.0]}')
+    check "TDIGEST.ADD (source for merge)" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td_dest/merge" \
+        "{\"sources\":[\"${P}_td\",\"${P}_td2\"],\"override_existing\":true}")
+    check "TDIGEST.MERGE" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/reset" "")
+    check "TDIGEST.RESET" "200" "$status" "$body"
+
+    # Validation: invalid quantile should be rejected with 400.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/quantile" \
+        '{"quantiles":[1.5]}')
+    check "TDIGEST.QUANTILE (rejects out-of-range)" "400" "$status" "$body"
+
+    # Validation: low >= high is rejected.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/tdigest/${P}_td/trimmed_mean" \
+        '{"low_cut_quantile":0.9,"high_cut_quantile":0.1}')
+    check "TDIGEST.TRIMMED_MEAN (rejects inverted cut)" "400" "$status" "$body"
+else
+    SKIP=$((SKIP + 17))
+    echo "  SKIP  TDIGEST.* (module not available)"
 fi
 
 echo ""

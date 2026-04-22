@@ -157,7 +157,10 @@ use crate::api::http::schemas::probabilistic::{
     CmsIncrByItem, CmsIncrByRequest, CmsIncrByResponse, CmsInfoResponse, CmsInitByDimRequest,
     CmsInitByProbRequest, CmsInitResponse, CmsMergeRequest, CmsMergeResponse, CmsQueryRequest,
     CmsQueryResponse, PfAddRequest, PfAddResponse, PfCountRequest, PfCountResponse, PfMergeRequest,
-    PfMergeResponse, TopKAddRequest, TopKAddResponse, TopKCountResponse, TopKIncrByItem,
+    PfMergeResponse, TDigestAckResponse, TDigestAddRequest, TDigestCreateRequest,
+    TDigestInfoResponse, TDigestMergeRequest, TDigestQuantileRequest, TDigestRanksRequest,
+    TDigestRanksResponse, TDigestScalarResponse, TDigestTrimmedMeanRequest, TDigestValuesRequest,
+    TDigestValuesResponse, TopKAddRequest, TopKAddResponse, TopKCountResponse, TopKIncrByItem,
     TopKIncrByRequest, TopKIncrByResponse, TopKInfoResponse, TopKListItem, TopKListQuery,
     TopKListResponse, TopKQueryRequest, TopKQueryResponse, TopKReserveRequest, TopKReserveResponse,
 };
@@ -330,6 +333,7 @@ use crate::shared::app_state::AppState;
         (name = "Cuckoo Filters", description = "RedisBloom Cuckoo filter operations (CF.RESERVE, CF.ADD, CF.ADDNX, CF.EXISTS, CF.DEL, CF.INFO, CF.SCANDUMP, CF.LOADCHUNK, etc.) - requires RedisBloom module"),
         (name = "Count-Min Sketch", description = "RedisBloom Count-Min Sketch operations for frequency estimation (CMS.INITBYDIM, CMS.INITBYPROB, CMS.INCRBY, CMS.QUERY, CMS.MERGE, CMS.INFO) - requires RedisBloom module"),
         (name = "Top-K", description = "RedisBloom Top-K operations for tracking most frequent items (TOPK.RESERVE, TOPK.ADD, TOPK.INCRBY, TOPK.QUERY, TOPK.COUNT, TOPK.LIST, TOPK.INFO) - requires RedisBloom module"),
+        (name = "T-Digest", description = "RedisBloom T-Digest operations for quantile estimation (TDIGEST.CREATE, TDIGEST.ADD, TDIGEST.QUANTILE, TDIGEST.CDF, TDIGEST.RANK, TDIGEST.REVRANK, TDIGEST.BYRANK, TDIGEST.BYREVRANK, TDIGEST.MIN, TDIGEST.MAX, TDIGEST.INFO, TDIGEST.MERGE, TDIGEST.RESET, TDIGEST.TRIMMED_MEAN) - requires RedisBloom module"),
         (name = "HyperLogLog", description = "Redis HyperLogLog operations for cardinality estimation (PFADD, PFCOUNT, PFMERGE) - core Redis feature"),
         (name = "Geo", description = "Redis geospatial operations (GEOADD, GEODIST, GEOHASH, GEOPOS, GEOSEARCH, GEOSEARCHSTORE, GEORADIUS, GEORADIUSBYMEMBER) - core Redis feature since 3.2"),
         (name = "Pub/Sub", description = "Redis Pub/Sub operations (PUBLISH, SUBSCRIBE, PSUBSCRIBE, PUBSUB CHANNELS/NUMSUB/NUMPAT). HTTP endpoints for publish and info commands, WebSocket endpoints for subscriptions - core Redis feature"),
@@ -611,6 +615,21 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::probabilistic::topk_query,
         crate::api::http::routes::probabilistic::topk_count,
         crate::api::http::routes::probabilistic::topk_list,
+        // T-Digest endpoints (RedisBloom module)
+        crate::api::http::routes::probabilistic::tdigest_create,
+        crate::api::http::routes::probabilistic::tdigest_info,
+        crate::api::http::routes::probabilistic::tdigest_add,
+        crate::api::http::routes::probabilistic::tdigest_quantile,
+        crate::api::http::routes::probabilistic::tdigest_cdf,
+        crate::api::http::routes::probabilistic::tdigest_rank,
+        crate::api::http::routes::probabilistic::tdigest_revrank,
+        crate::api::http::routes::probabilistic::tdigest_byrank,
+        crate::api::http::routes::probabilistic::tdigest_byrevrank,
+        crate::api::http::routes::probabilistic::tdigest_min,
+        crate::api::http::routes::probabilistic::tdigest_max,
+        crate::api::http::routes::probabilistic::tdigest_merge,
+        crate::api::http::routes::probabilistic::tdigest_reset,
+        crate::api::http::routes::probabilistic::tdigest_trimmed_mean,
         // HyperLogLog endpoints (core Redis)
         crate::api::http::routes::probabilistic::pf_add,
         crate::api::http::routes::probabilistic::pf_count,
@@ -1306,6 +1325,19 @@ use crate::shared::app_state::AppState;
             TopKListItem,
             TopKListResponse,
             TopKInfoResponse,
+            // T-Digest schemas (RedisBloom module)
+            TDigestCreateRequest,
+            TDigestAddRequest,
+            TDigestQuantileRequest,
+            TDigestValuesRequest,
+            TDigestRanksRequest,
+            TDigestMergeRequest,
+            TDigestTrimmedMeanRequest,
+            TDigestAckResponse,
+            TDigestValuesResponse,
+            TDigestRanksResponse,
+            TDigestScalarResponse,
+            TDigestInfoResponse,
             // HyperLogLog schemas (core Redis)
             PfAddRequest,
             PfAddResponse,
@@ -1469,7 +1501,12 @@ impl Modify for SecurityAddon {
 const STREAM_PREFIXES: &[&str] = &["/api/v1/streams"];
 const JSON_PREFIXES: &[&str] = &["/api/v1/json"];
 const SEARCH_PREFIXES: &[&str] = &["/api/v1/search"];
-const BLOOM_PREFIXES: &[&str] = &["/api/v1/bloom", "/api/v1/cms", "/api/v1/topk"];
+const BLOOM_PREFIXES: &[&str] = &[
+    "/api/v1/bloom",
+    "/api/v1/cms",
+    "/api/v1/topk",
+    "/api/v1/tdigest",
+];
 const TIMESERIES_PREFIXES: &[&str] = &["/api/v1/timeseries"];
 const FUNCTIONS_PREFIXES: &[&str] = &["/api/v1/functions"];
 const CLUSTER_PREFIXES: &[&str] = &["/api/v1/cluster"];
@@ -1484,6 +1521,7 @@ const BLOOM_TAGS: &[&str] = &[
     "Cuckoo Filters",
     "Count-Min Sketch",
     "Top-K",
+    "T-Digest",
 ];
 const TIMESERIES_TAGS: &[&str] = &["TimeSeries"];
 const FUNCTIONS_TAGS: &[&str] = &["Functions"];
@@ -1637,6 +1675,13 @@ mod tests {
                 .paths
                 .keys()
                 .any(|p| p.starts_with("/api/v1/topk"))
+        );
+        assert!(
+            !spec
+                .paths
+                .paths
+                .keys()
+                .any(|p| p.starts_with("/api/v1/tdigest"))
         );
     }
 

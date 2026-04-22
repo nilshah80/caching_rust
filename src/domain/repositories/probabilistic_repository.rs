@@ -6,8 +6,9 @@ use async_trait::async_trait;
 
 use crate::domain::entities::{
     CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult, PfAddResult,
-    PfCountResult, PfMergeResult, TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo,
-    TopKListResult, TopKQueryResult, TopKReserveResult,
+    PfCountResult, PfMergeResult, TDigestAckResult, TDigestInfo, TDigestRanksResult,
+    TDigestScalarResult, TDigestValuesResult, TopKAddResult, TopKCountResult, TopKIncrByResult,
+    TopKInfo, TopKListResult, TopKQueryResult, TopKReserveResult,
 };
 use crate::domain::errors::CacheError;
 
@@ -94,6 +95,93 @@ pub trait ProbabilisticRepository: Send + Sync {
 
     /// Get information about a Top-K filter (TOPK.INFO)
     async fn topk_info(&self, key: &str) -> Result<TopKInfo, CacheError>;
+
+    // ==================== T-Digest Operations ====================
+
+    /// Create a new t-digest sketch (TDIGEST.CREATE)
+    async fn tdigest_create(
+        &self,
+        key: &str,
+        compression: Option<u64>,
+    ) -> Result<TDigestAckResult, CacheError>;
+
+    /// Add one or more observations to a sketch (TDIGEST.ADD)
+    async fn tdigest_add(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestAckResult, CacheError>;
+
+    /// Estimate quantiles (TDIGEST.QUANTILE)
+    async fn tdigest_quantile(
+        &self,
+        key: &str,
+        quantiles: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError>;
+
+    /// Estimate the CDF at one or more values (TDIGEST.CDF)
+    async fn tdigest_cdf(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError>;
+
+    /// Estimate ranks (TDIGEST.RANK)
+    async fn tdigest_rank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError>;
+
+    /// Estimate reverse ranks (TDIGEST.REVRANK)
+    async fn tdigest_revrank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError>;
+
+    /// Lookup values by rank (TDIGEST.BYRANK)
+    async fn tdigest_byrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError>;
+
+    /// Lookup values by reverse rank (TDIGEST.BYREVRANK)
+    async fn tdigest_byrevrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError>;
+
+    /// Get the smallest observation (TDIGEST.MIN)
+    async fn tdigest_min(&self, key: &str) -> Result<TDigestScalarResult, CacheError>;
+
+    /// Get the largest observation (TDIGEST.MAX)
+    async fn tdigest_max(&self, key: &str) -> Result<TDigestScalarResult, CacheError>;
+
+    /// Get sketch metadata (TDIGEST.INFO)
+    async fn tdigest_info(&self, key: &str) -> Result<TDigestInfo, CacheError>;
+
+    /// Merge one or more sketches into `dest` (TDIGEST.MERGE)
+    async fn tdigest_merge(
+        &self,
+        dest: &str,
+        sources: Vec<String>,
+        compression: Option<u64>,
+        override_existing: bool,
+    ) -> Result<TDigestAckResult, CacheError>;
+
+    /// Empty an existing sketch while preserving its parameters (TDIGEST.RESET)
+    async fn tdigest_reset(&self, key: &str) -> Result<TDigestAckResult, CacheError>;
+
+    /// Compute a trimmed mean between two quantiles (TDIGEST.TRIMMED_MEAN)
+    async fn tdigest_trimmed_mean(
+        &self,
+        key: &str,
+        low_cut_quantile: f64,
+        high_cut_quantile: f64,
+    ) -> Result<TDigestScalarResult, CacheError>;
 
     // ==================== HyperLogLog Operations ====================
 

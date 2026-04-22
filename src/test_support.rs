@@ -143,6 +143,11 @@ use crate::domain::entities::{
     Suggestion,
     SynonymGroup,
     SynonymUpdateResult,
+    TDigestAckResult,
+    TDigestInfo,
+    TDigestRanksResult,
+    TDigestScalarResult,
+    TDigestValuesResult,
     TopKAddResult,
     TopKCountResult,
     TopKIncrByResult,
@@ -4877,6 +4882,155 @@ impl ProbabilisticRepository for MockProbabilisticRepository {
         Ok(PfMergeResult {
             dest_key: dest.to_string(),
             success: true,
+        })
+    }
+
+    // T-Digest operations
+    async fn tdigest_create(
+        &self,
+        key: &str,
+        _compression: Option<u64>,
+    ) -> Result<TDigestAckResult, CacheError> {
+        Ok(TDigestAckResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn tdigest_add(
+        &self,
+        key: &str,
+        _values: Vec<f64>,
+    ) -> Result<TDigestAckResult, CacheError> {
+        Ok(TDigestAckResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn tdigest_quantile(
+        &self,
+        key: &str,
+        quantiles: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values: quantiles.into_iter().map(Some).collect(),
+        })
+    }
+
+    async fn tdigest_cdf(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values: vec![Some(0.5); values.len()],
+        })
+    }
+
+    async fn tdigest_rank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError> {
+        Ok(TDigestRanksResult {
+            key: key.to_string(),
+            ranks: vec![1; values.len()],
+        })
+    }
+
+    async fn tdigest_revrank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError> {
+        Ok(TDigestRanksResult {
+            key: key.to_string(),
+            ranks: vec![1; values.len()],
+        })
+    }
+
+    async fn tdigest_byrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values: vec![Some(10.0); ranks.len()],
+        })
+    }
+
+    async fn tdigest_byrevrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values: vec![Some(90.0); ranks.len()],
+        })
+    }
+
+    async fn tdigest_min(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+        Ok(TDigestScalarResult {
+            key: key.to_string(),
+            value: Some(1.0),
+        })
+    }
+
+    async fn tdigest_max(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+        Ok(TDigestScalarResult {
+            key: key.to_string(),
+            value: Some(99.0),
+        })
+    }
+
+    async fn tdigest_info(&self, _key: &str) -> Result<TDigestInfo, CacheError> {
+        Ok(TDigestInfo {
+            compression: 100,
+            capacity: 610,
+            merged_nodes: 5,
+            unmerged_nodes: 2,
+            merged_weight: 100.0,
+            unmerged_weight: 3.0,
+            observations: 103,
+            total_compressions: 1,
+            memory_usage: 2048,
+        })
+    }
+
+    async fn tdigest_merge(
+        &self,
+        dest: &str,
+        _sources: Vec<String>,
+        _compression: Option<u64>,
+        _override_existing: bool,
+    ) -> Result<TDigestAckResult, CacheError> {
+        Ok(TDigestAckResult {
+            key: dest.to_string(),
+            success: true,
+        })
+    }
+
+    async fn tdigest_reset(&self, key: &str) -> Result<TDigestAckResult, CacheError> {
+        Ok(TDigestAckResult {
+            key: key.to_string(),
+            success: true,
+        })
+    }
+
+    async fn tdigest_trimmed_mean(
+        &self,
+        key: &str,
+        _low: f64,
+        _high: f64,
+    ) -> Result<TDigestScalarResult, CacheError> {
+        Ok(TDigestScalarResult {
+            key: key.to_string(),
+            value: Some(50.0),
         })
     }
 }

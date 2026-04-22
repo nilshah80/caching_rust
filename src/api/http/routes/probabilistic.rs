@@ -13,7 +13,10 @@ use crate::api::http::schemas::probabilistic::{
     CmsIncrByRequest, CmsIncrByResponse, CmsInfoResponse, CmsInitByDimRequest,
     CmsInitByProbRequest, CmsInitResponse, CmsMergeRequest, CmsMergeResponse, CmsQueryRequest,
     CmsQueryResponse, PfAddRequest, PfAddResponse, PfCountRequest, PfCountResponse, PfMergeRequest,
-    PfMergeResponse, TopKAddRequest, TopKAddResponse, TopKCountResponse, TopKIncrByRequest,
+    PfMergeResponse, TDigestAckResponse, TDigestAddRequest, TDigestCreateRequest,
+    TDigestInfoResponse, TDigestMergeRequest, TDigestQuantileRequest, TDigestRanksRequest,
+    TDigestRanksResponse, TDigestScalarResponse, TDigestTrimmedMeanRequest, TDigestValuesRequest,
+    TDigestValuesResponse, TopKAddRequest, TopKAddResponse, TopKCountResponse, TopKIncrByRequest,
     TopKIncrByResponse, TopKInfoResponse, TopKListQuery, TopKListResponse, TopKQueryRequest,
     TopKQueryResponse, TopKReserveRequest, TopKReserveResponse,
 };
@@ -42,6 +45,28 @@ pub fn topk_routes() -> Router<AppState> {
         .route("/api/v1/topk/{key}/query", post(topk_query))
         .route("/api/v1/topk/{key}/count", post(topk_count))
         .route("/api/v1/topk/{key}/list", get(topk_list))
+}
+
+/// Build T-Digest routes
+pub fn tdigest_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/tdigest/{key}", post(tdigest_create))
+        .route("/api/v1/tdigest/{key}", get(tdigest_info))
+        .route("/api/v1/tdigest/{key}/add", post(tdigest_add))
+        .route("/api/v1/tdigest/{key}/quantile", post(tdigest_quantile))
+        .route("/api/v1/tdigest/{key}/cdf", post(tdigest_cdf))
+        .route("/api/v1/tdigest/{key}/rank", post(tdigest_rank))
+        .route("/api/v1/tdigest/{key}/revrank", post(tdigest_revrank))
+        .route("/api/v1/tdigest/{key}/byrank", post(tdigest_byrank))
+        .route("/api/v1/tdigest/{key}/byrevrank", post(tdigest_byrevrank))
+        .route("/api/v1/tdigest/{key}/min", get(tdigest_min))
+        .route("/api/v1/tdigest/{key}/max", get(tdigest_max))
+        .route("/api/v1/tdigest/{key}/merge", post(tdigest_merge))
+        .route("/api/v1/tdigest/{key}/reset", post(tdigest_reset))
+        .route(
+            "/api/v1/tdigest/{key}/trimmed_mean",
+            post(tdigest_trimmed_mean),
+        )
 }
 
 /// Build HyperLogLog routes
@@ -478,6 +503,422 @@ async fn topk_list(
     Ok(Json(ApiResponse::new(result.into())))
 }
 
+// ==================== T-Digest Handlers ====================
+
+/// POST /api/v1/tdigest/:key
+///
+/// Create a t-digest sketch (TDIGEST.CREATE)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestCreateRequest,
+    responses(
+        (status = 200, description = "Sketch created", body = TDigestAckResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_create(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestCreateRequest>,
+) -> Result<Json<ApiResponse<TDigestAckResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_create(&key, request.compression)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// GET /api/v1/tdigest/:key
+///
+/// Get t-digest metadata (TDIGEST.INFO)
+#[utoipa::path(
+    get,
+    path = "/api/v1/tdigest/{key}",
+    params(("key" = String, Path, description = "T-Digest key")),
+    responses(
+        (status = 200, description = "T-Digest info", body = TDigestInfoResponse),
+        (status = 404, description = "Sketch not found"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_info(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<ApiResponse<TDigestInfoResponse>>, CacheError> {
+    let result = state.probabilistic_service.tdigest_info(&key).await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/add
+///
+/// Add observations (TDIGEST.ADD)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/add",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestAddRequest,
+    responses(
+        (status = 200, description = "Values added", body = TDigestAckResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_add(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestAddRequest>,
+) -> Result<Json<ApiResponse<TDigestAckResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_add(&key, request.values)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/quantile
+///
+/// Estimate quantiles (TDIGEST.QUANTILE)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/quantile",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestQuantileRequest,
+    responses(
+        (status = 200, description = "Quantile estimates", body = TDigestValuesResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_quantile(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestQuantileRequest>,
+) -> Result<Json<ApiResponse<TDigestValuesResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_quantile(&key, request.quantiles)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/cdf
+///
+/// Estimate CDF (TDIGEST.CDF)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/cdf",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestValuesRequest,
+    responses(
+        (status = 200, description = "CDF estimates", body = TDigestValuesResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_cdf(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestValuesRequest>,
+) -> Result<Json<ApiResponse<TDigestValuesResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_cdf(&key, request.values)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/rank
+///
+/// Estimate ranks (TDIGEST.RANK)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/rank",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestValuesRequest,
+    responses(
+        (status = 200, description = "Rank estimates", body = TDigestRanksResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_rank(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestValuesRequest>,
+) -> Result<Json<ApiResponse<TDigestRanksResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_rank(&key, request.values)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/revrank
+///
+/// Estimate reverse ranks (TDIGEST.REVRANK)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/revrank",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestValuesRequest,
+    responses(
+        (status = 200, description = "Reverse rank estimates", body = TDigestRanksResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_revrank(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestValuesRequest>,
+) -> Result<Json<ApiResponse<TDigestRanksResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_revrank(&key, request.values)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/byrank
+///
+/// Lookup values by rank (TDIGEST.BYRANK)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/byrank",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestRanksRequest,
+    responses(
+        (status = 200, description = "Values at ranks", body = TDigestValuesResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_byrank(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestRanksRequest>,
+) -> Result<Json<ApiResponse<TDigestValuesResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_byrank(&key, request.ranks)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/byrevrank
+///
+/// Lookup values by reverse rank (TDIGEST.BYREVRANK)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/byrevrank",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestRanksRequest,
+    responses(
+        (status = 200, description = "Values at reverse ranks", body = TDigestValuesResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_byrevrank(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestRanksRequest>,
+) -> Result<Json<ApiResponse<TDigestValuesResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_byrevrank(&key, request.ranks)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// GET /api/v1/tdigest/:key/min
+///
+/// Get the smallest observation (TDIGEST.MIN)
+#[utoipa::path(
+    get,
+    path = "/api/v1/tdigest/{key}/min",
+    params(("key" = String, Path, description = "T-Digest key")),
+    responses(
+        (status = 200, description = "Minimum value", body = TDigestScalarResponse),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_min(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<ApiResponse<TDigestScalarResponse>>, CacheError> {
+    let result = state.probabilistic_service.tdigest_min(&key).await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// GET /api/v1/tdigest/:key/max
+///
+/// Get the largest observation (TDIGEST.MAX)
+#[utoipa::path(
+    get,
+    path = "/api/v1/tdigest/{key}/max",
+    params(("key" = String, Path, description = "T-Digest key")),
+    responses(
+        (status = 200, description = "Maximum value", body = TDigestScalarResponse),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_max(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<ApiResponse<TDigestScalarResponse>>, CacheError> {
+    let result = state.probabilistic_service.tdigest_max(&key).await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/merge
+///
+/// Merge sketches into `key` (TDIGEST.MERGE)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/merge",
+    params(("key" = String, Path, description = "Destination T-Digest key")),
+    request_body = TDigestMergeRequest,
+    responses(
+        (status = 200, description = "Merge successful", body = TDigestAckResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_merge(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestMergeRequest>,
+) -> Result<Json<ApiResponse<TDigestAckResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_merge(
+            &key,
+            request.sources,
+            request.compression,
+            request.override_existing,
+        )
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/reset
+///
+/// Reset a sketch (TDIGEST.RESET)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/reset",
+    params(("key" = String, Path, description = "T-Digest key")),
+    responses(
+        (status = 200, description = "Sketch reset", body = TDigestAckResponse),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_reset(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<ApiResponse<TDigestAckResponse>>, CacheError> {
+    let result = state.probabilistic_service.tdigest_reset(&key).await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
+/// POST /api/v1/tdigest/:key/trimmed_mean
+///
+/// Compute a trimmed mean between two quantiles (TDIGEST.TRIMMED_MEAN)
+#[utoipa::path(
+    post,
+    path = "/api/v1/tdigest/{key}/trimmed_mean",
+    params(("key" = String, Path, description = "T-Digest key")),
+    request_body = TDigestTrimmedMeanRequest,
+    responses(
+        (status = 200, description = "Trimmed mean", body = TDigestScalarResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 501, description = "RedisBloom module not available"),
+        (status = 500, description = "Server error")
+    ),
+    tag = "T-Digest"
+)]
+pub async fn tdigest_trimmed_mean(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<TDigestTrimmedMeanRequest>,
+) -> Result<Json<ApiResponse<TDigestScalarResponse>>, CacheError> {
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    let result = state
+        .probabilistic_service
+        .tdigest_trimmed_mean(&key, request.low_cut_quantile, request.high_cut_quantile)
+        .await?;
+    Ok(Json(ApiResponse::new(result.into())))
+}
+
 // ==================== HyperLogLog Handlers ====================
 
 /// POST /api/v1/hll/:key/add
@@ -593,6 +1034,213 @@ mod tests {
     #[test]
     fn test_hyperloglog_routes_structure() {
         let _routes = hyperloglog_routes();
+    }
+
+    #[test]
+    fn test_tdigest_routes_structure() {
+        let _routes = tdigest_routes();
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_routes_smoke() {
+        let (state, _) = test_state_with_probabilistic_repo();
+        let app = Router::new().merge(tdigest_routes()).with_state(state);
+
+        // CREATE
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"compression":100}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // CREATE with empty body (compression optional)
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // ADD
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test/add")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"values":[1.0,2.5,3.75]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // ADD rejects empty values
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test/add")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"values":[]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // QUANTILE
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test/quantile")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"quantiles":[0.5,0.9]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // QUANTILE rejects out-of-range
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test/quantile")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"quantiles":[1.5]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // CDF / RANK / REVRANK
+        for path in ["cdf", "rank", "revrank"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/v1/tdigest/td-test/{path}"))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(r#"{"values":[1.0,2.0]}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+
+        // BYRANK / BYREVRANK
+        for path in ["byrank", "byrevrank"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/v1/tdigest/td-test/{path}"))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(r#"{"ranks":[0,1,2]}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+
+        // MIN / MAX / INFO / RESET
+        for (method, path) in [
+            ("GET", "/api/v1/tdigest/td-test/min"),
+            ("GET", "/api/v1/tdigest/td-test/max"),
+            ("GET", "/api/v1/tdigest/td-test"),
+            ("POST", "/api/v1/tdigest/td-test/reset"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{method} {path}");
+        }
+
+        // MERGE
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-dest/merge")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"sources":["td-a","td-b"],"compression":100,"override_existing":true}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // TRIMMED_MEAN
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test/trimmed_mean")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"low_cut_quantile":0.1,"high_cut_quantile":0.9}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // TRIMMED_MEAN rejects out-of-range
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tdigest/td-test/trimmed_mean")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"low_cut_quantile":-0.1,"high_cut_quantile":0.9}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

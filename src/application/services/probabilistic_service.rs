@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use crate::domain::entities::{
     CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult, PfAddResult,
-    PfCountResult, PfMergeResult, TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo,
-    TopKListResult, TopKQueryResult, TopKReserveResult,
+    PfCountResult, PfMergeResult, TDigestAckResult, TDigestInfo, TDigestRanksResult,
+    TDigestScalarResult, TDigestValuesResult, TopKAddResult, TopKCountResult, TopKIncrByResult,
+    TopKInfo, TopKListResult, TopKQueryResult, TopKReserveResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::ProbabilisticRepository;
@@ -185,6 +186,195 @@ impl ProbabilisticService {
         self.repository.topk_info(key).await
     }
 
+    // ==================== T-Digest Operations ====================
+
+    /// Create a t-digest sketch (TDIGEST.CREATE)
+    pub async fn tdigest_create(
+        &self,
+        key: &str,
+        compression: Option<u64>,
+    ) -> Result<TDigestAckResult, CacheError> {
+        self.validate_key(key)?;
+        if let Some(c) = compression
+            && c == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "Compression must be greater than 0".to_string(),
+            ));
+        }
+        self.repository.tdigest_create(key, compression).await
+    }
+
+    /// Add observations (TDIGEST.ADD)
+    pub async fn tdigest_add(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestAckResult, CacheError> {
+        self.validate_key(key)?;
+        self.validate_non_empty_values(&values)?;
+        self.validate_finite_values(&values, "value")?;
+        self.repository.tdigest_add(key, values).await
+    }
+
+    /// Estimate quantiles (TDIGEST.QUANTILE)
+    pub async fn tdigest_quantile(
+        &self,
+        key: &str,
+        quantiles: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        self.validate_key(key)?;
+        self.validate_non_empty_values(&quantiles)?;
+        for q in &quantiles {
+            if !q.is_finite() || !(0.0..=1.0).contains(q) {
+                return Err(CacheError::InvalidInput(
+                    "Quantile must be a finite number between 0 and 1".to_string(),
+                ));
+            }
+        }
+        self.repository.tdigest_quantile(key, quantiles).await
+    }
+
+    /// Estimate CDF values (TDIGEST.CDF)
+    pub async fn tdigest_cdf(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        self.validate_key(key)?;
+        self.validate_non_empty_values(&values)?;
+        self.validate_finite_values(&values, "value")?;
+        self.repository.tdigest_cdf(key, values).await
+    }
+
+    /// Estimate ranks (TDIGEST.RANK)
+    pub async fn tdigest_rank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError> {
+        self.validate_key(key)?;
+        self.validate_non_empty_values(&values)?;
+        self.validate_finite_values(&values, "value")?;
+        self.repository.tdigest_rank(key, values).await
+    }
+
+    /// Estimate reverse ranks (TDIGEST.REVRANK)
+    pub async fn tdigest_revrank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError> {
+        self.validate_key(key)?;
+        self.validate_non_empty_values(&values)?;
+        self.validate_finite_values(&values, "value")?;
+        self.repository.tdigest_revrank(key, values).await
+    }
+
+    /// Lookup values by rank (TDIGEST.BYRANK)
+    pub async fn tdigest_byrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        self.validate_key(key)?;
+        if ranks.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "ranks cannot be empty".to_string(),
+            ));
+        }
+        self.repository.tdigest_byrank(key, ranks).await
+    }
+
+    /// Lookup values by reverse rank (TDIGEST.BYREVRANK)
+    pub async fn tdigest_byrevrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        self.validate_key(key)?;
+        if ranks.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "ranks cannot be empty".to_string(),
+            ));
+        }
+        self.repository.tdigest_byrevrank(key, ranks).await
+    }
+
+    /// Get smallest observation (TDIGEST.MIN)
+    pub async fn tdigest_min(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+        self.validate_key(key)?;
+        self.repository.tdigest_min(key).await
+    }
+
+    /// Get largest observation (TDIGEST.MAX)
+    pub async fn tdigest_max(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+        self.validate_key(key)?;
+        self.repository.tdigest_max(key).await
+    }
+
+    /// Get t-digest metadata (TDIGEST.INFO)
+    pub async fn tdigest_info(&self, key: &str) -> Result<TDigestInfo, CacheError> {
+        self.validate_key(key)?;
+        self.repository.tdigest_info(key).await
+    }
+
+    /// Merge sketches (TDIGEST.MERGE)
+    pub async fn tdigest_merge(
+        &self,
+        dest: &str,
+        sources: Vec<String>,
+        compression: Option<u64>,
+        override_existing: bool,
+    ) -> Result<TDigestAckResult, CacheError> {
+        self.validate_key(dest)?;
+        self.validate_keys(&sources)?;
+        if let Some(c) = compression
+            && c == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "Compression must be greater than 0".to_string(),
+            ));
+        }
+        self.repository
+            .tdigest_merge(dest, sources, compression, override_existing)
+            .await
+    }
+
+    /// Reset sketch (TDIGEST.RESET)
+    pub async fn tdigest_reset(&self, key: &str) -> Result<TDigestAckResult, CacheError> {
+        self.validate_key(key)?;
+        self.repository.tdigest_reset(key).await
+    }
+
+    /// Compute trimmed mean (TDIGEST.TRIMMED_MEAN)
+    pub async fn tdigest_trimmed_mean(
+        &self,
+        key: &str,
+        low_cut_quantile: f64,
+        high_cut_quantile: f64,
+    ) -> Result<TDigestScalarResult, CacheError> {
+        self.validate_key(key)?;
+        if !low_cut_quantile.is_finite() || !(0.0..=1.0).contains(&low_cut_quantile) {
+            return Err(CacheError::InvalidInput(
+                "low_cut_quantile must be between 0 and 1".to_string(),
+            ));
+        }
+        if !high_cut_quantile.is_finite() || !(0.0..=1.0).contains(&high_cut_quantile) {
+            return Err(CacheError::InvalidInput(
+                "high_cut_quantile must be between 0 and 1".to_string(),
+            ));
+        }
+        if low_cut_quantile >= high_cut_quantile {
+            return Err(CacheError::InvalidInput(
+                "low_cut_quantile must be strictly less than high_cut_quantile".to_string(),
+            ));
+        }
+        self.repository
+            .tdigest_trimmed_mean(key, low_cut_quantile, high_cut_quantile)
+            .await
+    }
+
     // ==================== HyperLogLog Operations ====================
 
     /// Add elements to a HyperLogLog (PFADD)
@@ -241,6 +431,26 @@ impl ProbabilisticService {
             return Err(CacheError::InvalidInput(
                 "Items cannot be empty".to_string(),
             ));
+        }
+        Ok(())
+    }
+
+    fn validate_non_empty_values(&self, values: &[f64]) -> Result<(), CacheError> {
+        if values.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "values cannot be empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_finite_values(&self, values: &[f64], label: &str) -> Result<(), CacheError> {
+        for v in values {
+            if !v.is_finite() {
+                return Err(CacheError::InvalidInput(format!(
+                    "{label} must be a finite number"
+                )));
+            }
         }
         Ok(())
     }
@@ -492,6 +702,140 @@ mod tests {
             Ok(PfMergeResult {
                 dest_key: dest.to_string(),
                 success: true,
+            })
+        }
+        async fn tdigest_create(
+            &self,
+            key: &str,
+            _compression: Option<u64>,
+        ) -> Result<TDigestAckResult, CacheError> {
+            Ok(TDigestAckResult {
+                key: key.to_string(),
+                success: true,
+            })
+        }
+        async fn tdigest_add(
+            &self,
+            key: &str,
+            _values: Vec<f64>,
+        ) -> Result<TDigestAckResult, CacheError> {
+            Ok(TDigestAckResult {
+                key: key.to_string(),
+                success: true,
+            })
+        }
+        async fn tdigest_quantile(
+            &self,
+            key: &str,
+            quantiles: Vec<f64>,
+        ) -> Result<TDigestValuesResult, CacheError> {
+            Ok(TDigestValuesResult {
+                key: key.to_string(),
+                values: quantiles.into_iter().map(Some).collect(),
+            })
+        }
+        async fn tdigest_cdf(
+            &self,
+            key: &str,
+            values: Vec<f64>,
+        ) -> Result<TDigestValuesResult, CacheError> {
+            Ok(TDigestValuesResult {
+                key: key.to_string(),
+                values: vec![Some(0.5); values.len()],
+            })
+        }
+        async fn tdigest_rank(
+            &self,
+            key: &str,
+            values: Vec<f64>,
+        ) -> Result<TDigestRanksResult, CacheError> {
+            Ok(TDigestRanksResult {
+                key: key.to_string(),
+                ranks: vec![0; values.len()],
+            })
+        }
+        async fn tdigest_revrank(
+            &self,
+            key: &str,
+            values: Vec<f64>,
+        ) -> Result<TDigestRanksResult, CacheError> {
+            Ok(TDigestRanksResult {
+                key: key.to_string(),
+                ranks: vec![0; values.len()],
+            })
+        }
+        async fn tdigest_byrank(
+            &self,
+            key: &str,
+            ranks: Vec<u64>,
+        ) -> Result<TDigestValuesResult, CacheError> {
+            Ok(TDigestValuesResult {
+                key: key.to_string(),
+                values: vec![Some(0.0); ranks.len()],
+            })
+        }
+        async fn tdigest_byrevrank(
+            &self,
+            key: &str,
+            ranks: Vec<u64>,
+        ) -> Result<TDigestValuesResult, CacheError> {
+            Ok(TDigestValuesResult {
+                key: key.to_string(),
+                values: vec![Some(0.0); ranks.len()],
+            })
+        }
+        async fn tdigest_min(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+            Ok(TDigestScalarResult {
+                key: key.to_string(),
+                value: Some(0.0),
+            })
+        }
+        async fn tdigest_max(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+            Ok(TDigestScalarResult {
+                key: key.to_string(),
+                value: Some(100.0),
+            })
+        }
+        async fn tdigest_info(&self, _key: &str) -> Result<TDigestInfo, CacheError> {
+            Ok(TDigestInfo {
+                compression: 100,
+                capacity: 610,
+                merged_nodes: 0,
+                unmerged_nodes: 0,
+                merged_weight: 0.0,
+                unmerged_weight: 0.0,
+                observations: 0,
+                total_compressions: 0,
+                memory_usage: 2048,
+            })
+        }
+        async fn tdigest_merge(
+            &self,
+            dest: &str,
+            _sources: Vec<String>,
+            _compression: Option<u64>,
+            _override_existing: bool,
+        ) -> Result<TDigestAckResult, CacheError> {
+            Ok(TDigestAckResult {
+                key: dest.to_string(),
+                success: true,
+            })
+        }
+        async fn tdigest_reset(&self, key: &str) -> Result<TDigestAckResult, CacheError> {
+            Ok(TDigestAckResult {
+                key: key.to_string(),
+                success: true,
+            })
+        }
+        async fn tdigest_trimmed_mean(
+            &self,
+            key: &str,
+            _low: f64,
+            _high: f64,
+        ) -> Result<TDigestScalarResult, CacheError> {
+            Ok(TDigestScalarResult {
+                key: key.to_string(),
+                value: Some(50.0),
             })
         }
     }
@@ -787,5 +1131,176 @@ mod tests {
         let service = create_test_service();
         let result = service.pf_add("hll:test", vec![]).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    // ==================== T-Digest tests ====================
+
+    #[tokio::test]
+    async fn test_tdigest_create_default_and_explicit_compression() {
+        let service = create_test_service();
+        let a = service.tdigest_create("td:a", None).await.unwrap();
+        assert!(a.success);
+        let b = service.tdigest_create("td:b", Some(200)).await.unwrap();
+        assert!(b.success);
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_create_rejects_zero_compression() {
+        let service = create_test_service();
+        let result = service.tdigest_create("td:a", Some(0)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_create_rejects_empty_key() {
+        let service = create_test_service();
+        let result = service.tdigest_create("", None).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_add_and_rejects_empty_and_nan() {
+        let service = create_test_service();
+        let ok = service.tdigest_add("td:a", vec![1.0, 2.0]).await.unwrap();
+        assert!(ok.success);
+
+        let empty = service.tdigest_add("td:a", vec![]).await;
+        assert!(matches!(empty, Err(CacheError::InvalidInput(_))));
+
+        let nan = service.tdigest_add("td:a", vec![f64::NAN]).await;
+        assert!(matches!(nan, Err(CacheError::InvalidInput(_))));
+
+        let inf = service.tdigest_add("td:a", vec![f64::INFINITY]).await;
+        assert!(matches!(inf, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_quantile_accepts_valid_range_only() {
+        let service = create_test_service();
+        let ok = service
+            .tdigest_quantile("td:a", vec![0.0, 0.5, 1.0])
+            .await
+            .unwrap();
+        assert_eq!(ok.values.len(), 3);
+
+        assert!(matches!(
+            service.tdigest_quantile("td:a", vec![]).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            service.tdigest_quantile("td:a", vec![-0.1]).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            service.tdigest_quantile("td:a", vec![1.5]).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            service.tdigest_quantile("td:a", vec![f64::NAN]).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_cdf_rank_revrank() {
+        let service = create_test_service();
+        let cdf = service.tdigest_cdf("td:a", vec![1.0, 2.0]).await.unwrap();
+        assert_eq!(cdf.values.len(), 2);
+
+        let rank = service
+            .tdigest_rank("td:a", vec![1.0, 2.0, 3.0])
+            .await
+            .unwrap();
+        assert_eq!(rank.ranks.len(), 3);
+
+        let rev = service.tdigest_revrank("td:a", vec![1.0]).await.unwrap();
+        assert_eq!(rev.ranks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_byrank_and_byrevrank() {
+        let service = create_test_service();
+        let byrank = service.tdigest_byrank("td:a", vec![0, 1, 2]).await.unwrap();
+        assert_eq!(byrank.values.len(), 3);
+
+        let byrev = service.tdigest_byrevrank("td:a", vec![0]).await.unwrap();
+        assert_eq!(byrev.values.len(), 1);
+
+        assert!(matches!(
+            service.tdigest_byrank("td:a", vec![]).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_min_max_info_reset() {
+        let service = create_test_service();
+        let min = service.tdigest_min("td:a").await.unwrap();
+        assert!(min.value.is_some());
+
+        let max = service.tdigest_max("td:a").await.unwrap();
+        assert!(max.value.is_some());
+
+        let info = service.tdigest_info("td:a").await.unwrap();
+        assert_eq!(info.compression, 100);
+
+        let reset = service.tdigest_reset("td:a").await.unwrap();
+        assert!(reset.success);
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_merge_validates_sources_and_compression() {
+        let service = create_test_service();
+        let ok = service
+            .tdigest_merge(
+                "td:dest",
+                vec!["td:a".to_string(), "td:b".to_string()],
+                Some(100),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(ok.success);
+
+        assert!(matches!(
+            service.tdigest_merge("td:dest", vec![], None, false).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            service
+                .tdigest_merge("td:dest", vec!["td:a".to_string()], Some(0), false)
+                .await,
+            Err(CacheError::InvalidInput(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_tdigest_trimmed_mean_validation() {
+        let service = create_test_service();
+        let ok = service
+            .tdigest_trimmed_mean("td:a", 0.1, 0.9)
+            .await
+            .unwrap();
+        assert_eq!(ok.value, Some(50.0));
+
+        // Low must be < high
+        assert!(matches!(
+            service.tdigest_trimmed_mean("td:a", 0.5, 0.5).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            service.tdigest_trimmed_mean("td:a", 0.9, 0.1).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+
+        // Out of [0, 1]
+        assert!(matches!(
+            service.tdigest_trimmed_mean("td:a", -0.1, 0.9).await,
+            Err(CacheError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            service.tdigest_trimmed_mean("td:a", 0.1, 1.1).await,
+            Err(CacheError::InvalidInput(_))
+        ));
     }
 }

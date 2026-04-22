@@ -132,6 +132,70 @@ pub struct TopKInfo {
     pub decay: f64,
 }
 
+// ==================== T-Digest Types ====================
+
+/// Simple acknowledgement result for T-Digest commands that only return OK.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TDigestAckResult {
+    /// Key name
+    pub key: String,
+    /// Whether the operation succeeded
+    pub success: bool,
+}
+
+/// Result of TDIGEST.QUANTILE / TDIGEST.BYRANK / TDIGEST.BYREVRANK.
+/// Each Redis Bloom build returns `nan` for empty sketches; we preserve that as `None`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TDigestValuesResult {
+    /// Key name
+    pub key: String,
+    /// Values returned in the same order as the input (None = nan)
+    pub values: Vec<Option<f64>>,
+}
+
+/// Result of TDIGEST.RANK / TDIGEST.REVRANK. Redis returns -2 when key is empty
+/// and -1 when the value is below/above all observations; we pass the raw signed
+/// integers through so callers can distinguish those cases.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TDigestRanksResult {
+    /// Key name
+    pub key: String,
+    /// Rank values in the same order as the input
+    pub ranks: Vec<i64>,
+}
+
+/// Result of TDIGEST.MIN / TDIGEST.MAX / TDIGEST.TRIMMED_MEAN.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TDigestScalarResult {
+    /// Key name
+    pub key: String,
+    /// Scalar value (None = nan, e.g. empty sketch)
+    pub value: Option<f64>,
+}
+
+/// Result of TDIGEST.INFO parsed into structured fields.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TDigestInfo {
+    /// Compression parameter (tracks accuracy/memory trade-off)
+    pub compression: u64,
+    /// Maximum capacity of the sketch
+    pub capacity: u64,
+    /// Number of merged nodes
+    pub merged_nodes: u64,
+    /// Number of unmerged nodes
+    pub unmerged_nodes: u64,
+    /// Total weight of merged nodes
+    pub merged_weight: f64,
+    /// Total weight of unmerged nodes
+    pub unmerged_weight: f64,
+    /// Count of observations added
+    pub observations: u64,
+    /// Number of compressions performed
+    pub total_compressions: u64,
+    /// Estimated memory footprint in bytes
+    pub memory_usage: u64,
+}
+
 // ==================== HyperLogLog Types ====================
 
 /// Result of PFADD operation
@@ -228,6 +292,61 @@ mod tests {
             counts: vec![10, 20, 30],
         };
         assert_eq!(result.counts.len(), 3);
+    }
+
+    #[test]
+    fn test_tdigest_info_serialization() {
+        let info = TDigestInfo {
+            compression: 100,
+            capacity: 610,
+            merged_nodes: 10,
+            unmerged_nodes: 2,
+            merged_weight: 100.0,
+            unmerged_weight: 5.0,
+            observations: 105,
+            total_compressions: 1,
+            memory_usage: 2048,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"compression\":100"));
+        assert!(json.contains("\"memory_usage\":2048"));
+    }
+
+    #[test]
+    fn test_tdigest_values_result() {
+        let result = TDigestValuesResult {
+            key: "td:test".to_string(),
+            values: vec![Some(0.5), None, Some(1.0)],
+        };
+        assert_eq!(result.values.len(), 3);
+        assert_eq!(result.values[1], None);
+    }
+
+    #[test]
+    fn test_tdigest_ranks_result() {
+        let result = TDigestRanksResult {
+            key: "td:test".to_string(),
+            ranks: vec![0, -1, -2],
+        };
+        assert_eq!(result.ranks, vec![0, -1, -2]);
+    }
+
+    #[test]
+    fn test_tdigest_scalar_result() {
+        let result = TDigestScalarResult {
+            key: "td:test".to_string(),
+            value: Some(3.14),
+        };
+        assert_eq!(result.value, Some(3.14));
+    }
+
+    #[test]
+    fn test_tdigest_ack_result() {
+        let result = TDigestAckResult {
+            key: "td:test".to_string(),
+            success: true,
+        };
+        assert!(result.success);
     }
 
     #[test]

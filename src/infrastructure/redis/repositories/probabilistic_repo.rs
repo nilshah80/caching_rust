@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use crate::domain::entities::{
     CmsIncrByResult, CmsInfo, CmsInitResult, CmsMergeResult, CmsQueryResult, PfAddResult,
-    PfCountResult, PfMergeResult, TopKAddResult, TopKCountResult, TopKIncrByResult, TopKInfo,
-    TopKItem, TopKListResult, TopKQueryResult, TopKReserveResult,
+    PfCountResult, PfMergeResult, TDigestAckResult, TDigestInfo, TDigestRanksResult,
+    TDigestScalarResult, TDigestValuesResult, TopKAddResult, TopKCountResult, TopKIncrByResult,
+    TopKInfo, TopKItem, TopKListResult, TopKQueryResult, TopKReserveResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::ProbabilisticRepository;
@@ -49,6 +50,49 @@ impl RedisProbabilisticRepository {
                 .unwrap_or(0.0),
             Value::Int(i) => *i as f64,
             _ => 0.0,
+        }
+    }
+
+    /// Extract an Option<f64> preserving `nan` and `Value::Nil` as None.
+    ///
+    /// T-Digest returns `nan` for operations on empty sketches (e.g. MIN/MAX/QUANTILE)
+    /// and sometimes sends it as the string "nan"; upstream JSON can't carry NaN,
+    /// so we surface that as a JSON `null` at the API boundary.
+    fn extract_optional_f64(value: &Value) -> Option<f64> {
+        match value {
+            Value::Double(f) if f.is_nan() => None,
+            Value::Double(f) => Some(*f),
+            Value::Int(i) => Some(*i as f64),
+            Value::BulkString(bytes) => {
+                let s = String::from_utf8_lossy(bytes);
+                let trimmed = s.trim();
+                if trimmed.eq_ignore_ascii_case("nan") {
+                    None
+                } else {
+                    trimmed.parse::<f64>().ok().and_then(
+                        |v| {
+                            if v.is_nan() { None } else { Some(v) }
+                        },
+                    )
+                }
+            }
+            Value::SimpleString(s) if s.eq_ignore_ascii_case("nan") => None,
+            Value::SimpleString(s) => s.parse::<f64>().ok(),
+            Value::Nil => None,
+            _ => None,
+        }
+    }
+
+    /// Extract a signed 64-bit integer. T-Digest uses -1 (out of range)
+    /// and -2 (empty sketch) as sentinels, so we preserve the sign.
+    fn extract_i64(value: &Value) -> i64 {
+        match value {
+            Value::Int(i) => *i,
+            Value::BulkString(bytes) => String::from_utf8_lossy(bytes)
+                .trim()
+                .parse::<i64>()
+                .unwrap_or(0),
+            _ => 0,
         }
     }
 
@@ -93,6 +137,63 @@ impl RedisProbabilisticRepository {
                 "Invalid CMS.INFO response".to_string(),
             )),
         }
+    }
+
+    /// Parse TDIGEST.INFO response (flat [name, value, name, value, ...] array).
+    ///
+    /// Fields returned by the module vary slightly across versions; we read by name
+    /// and fall back to 0 for fields we don't recognise so newer Redis builds
+    /// don't break older clients.
+    fn parse_tdigest_info(value: Value) -> Result<TDigestInfo, CacheError> {
+        let arr = match value {
+            Value::Array(a) => a,
+            _ => {
+                return Err(CacheError::Internal(
+                    "Invalid TDIGEST.INFO response".to_string(),
+                ));
+            }
+        };
+
+        let mut info = TDigestInfo {
+            compression: 0,
+            capacity: 0,
+            merged_nodes: 0,
+            unmerged_nodes: 0,
+            merged_weight: 0.0,
+            unmerged_weight: 0.0,
+            observations: 0,
+            total_compressions: 0,
+            memory_usage: 0,
+        };
+
+        let mut iter = arr.iter();
+        while let Some(key) = iter.next() {
+            let key_str = match key {
+                Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
+                Value::SimpleString(s) => s.clone(),
+                _ => continue,
+            };
+            let Some(val) = iter.next() else { break };
+            let key_lower = key_str.to_ascii_lowercase();
+            match key_lower.as_str() {
+                "compression" => info.compression = Self::extract_u64(val),
+                "capacity" => info.capacity = Self::extract_u64(val),
+                "merged nodes" | "merged_nodes" => info.merged_nodes = Self::extract_u64(val),
+                "unmerged nodes" | "unmerged_nodes" => info.unmerged_nodes = Self::extract_u64(val),
+                "merged weight" | "merged_weight" => info.merged_weight = Self::extract_f64(val),
+                "unmerged weight" | "unmerged_weight" => {
+                    info.unmerged_weight = Self::extract_f64(val);
+                }
+                "observations" => info.observations = Self::extract_u64(val),
+                "total compressions" | "total_compressions" => {
+                    info.total_compressions = Self::extract_u64(val);
+                }
+                "memory usage" | "memory_usage" => info.memory_usage = Self::extract_u64(val),
+                _ => {}
+            }
+        }
+
+        Ok(info)
     }
 
     /// Parse TOPK.INFO response
@@ -493,6 +594,341 @@ impl ProbabilisticRepository for RedisProbabilisticRepository {
         Self::parse_topk_info(result)
     }
 
+    // ==================== T-Digest Operations ====================
+
+    async fn tdigest_create(
+        &self,
+        key: &str,
+        compression: Option<u64>,
+    ) -> Result<TDigestAckResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.CREATE");
+        command.arg(key);
+        if let Some(c) = compression {
+            command.arg("COMPRESSION").arg(c);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Ok(TDigestAckResult {
+            key: key.to_string(),
+            success: matches!(result, Value::Okay),
+        })
+    }
+
+    async fn tdigest_add(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestAckResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.ADD");
+        command.arg(key);
+        for v in &values {
+            command.arg(*v);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Ok(TDigestAckResult {
+            key: key.to_string(),
+            success: matches!(result, Value::Okay),
+        })
+    }
+
+    async fn tdigest_quantile(
+        &self,
+        key: &str,
+        quantiles: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.QUANTILE");
+        command.arg(key);
+        for q in &quantiles {
+            command.arg(*q);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        let values = match result {
+            Value::Array(arr) => arr.iter().map(Self::extract_optional_f64).collect(),
+            _ => vec![],
+        };
+
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values,
+        })
+    }
+
+    async fn tdigest_cdf(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.CDF");
+        command.arg(key);
+        for v in &values {
+            command.arg(*v);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        let parsed = match result {
+            Value::Array(arr) => arr.iter().map(Self::extract_optional_f64).collect(),
+            _ => vec![],
+        };
+
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values: parsed,
+        })
+    }
+
+    async fn tdigest_rank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.RANK");
+        command.arg(key);
+        for v in &values {
+            command.arg(*v);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        let ranks = match result {
+            Value::Array(arr) => arr.iter().map(Self::extract_i64).collect(),
+            _ => vec![],
+        };
+
+        Ok(TDigestRanksResult {
+            key: key.to_string(),
+            ranks,
+        })
+    }
+
+    async fn tdigest_revrank(
+        &self,
+        key: &str,
+        values: Vec<f64>,
+    ) -> Result<TDigestRanksResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.REVRANK");
+        command.arg(key);
+        for v in &values {
+            command.arg(*v);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        let ranks = match result {
+            Value::Array(arr) => arr.iter().map(Self::extract_i64).collect(),
+            _ => vec![],
+        };
+
+        Ok(TDigestRanksResult {
+            key: key.to_string(),
+            ranks,
+        })
+    }
+
+    async fn tdigest_byrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.BYRANK");
+        command.arg(key);
+        for r in &ranks {
+            command.arg(*r);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        let values = match result {
+            Value::Array(arr) => arr.iter().map(Self::extract_optional_f64).collect(),
+            _ => vec![],
+        };
+
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values,
+        })
+    }
+
+    async fn tdigest_byrevrank(
+        &self,
+        key: &str,
+        ranks: Vec<u64>,
+    ) -> Result<TDigestValuesResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.BYREVRANK");
+        command.arg(key);
+        for r in &ranks {
+            command.arg(*r);
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        let values = match result {
+            Value::Array(arr) => arr.iter().map(Self::extract_optional_f64).collect(),
+            _ => vec![],
+        };
+
+        Ok(TDigestValuesResult {
+            key: key.to_string(),
+            values,
+        })
+    }
+
+    async fn tdigest_min(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: Value = cmd("TDIGEST.MIN")
+            .arg(key)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Ok(TDigestScalarResult {
+            key: key.to_string(),
+            value: Self::extract_optional_f64(&result),
+        })
+    }
+
+    async fn tdigest_max(&self, key: &str) -> Result<TDigestScalarResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: Value = cmd("TDIGEST.MAX")
+            .arg(key)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Ok(TDigestScalarResult {
+            key: key.to_string(),
+            value: Self::extract_optional_f64(&result),
+        })
+    }
+
+    async fn tdigest_info(&self, key: &str) -> Result<TDigestInfo, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: Value = cmd("TDIGEST.INFO")
+            .arg(key)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Self::parse_tdigest_info(result)
+    }
+
+    async fn tdigest_merge(
+        &self,
+        dest: &str,
+        sources: Vec<String>,
+        compression: Option<u64>,
+        override_existing: bool,
+    ) -> Result<TDigestAckResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let mut command = cmd("TDIGEST.MERGE");
+        command.arg(dest).arg(sources.len());
+        for source in &sources {
+            command.arg(source);
+        }
+        if let Some(c) = compression {
+            command.arg("COMPRESSION").arg(c);
+        }
+        if override_existing {
+            command.arg("OVERRIDE");
+        }
+
+        let result: Value = command
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Ok(TDigestAckResult {
+            key: dest.to_string(),
+            success: matches!(result, Value::Okay),
+        })
+    }
+
+    async fn tdigest_reset(&self, key: &str) -> Result<TDigestAckResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: Value = cmd("TDIGEST.RESET")
+            .arg(key)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Ok(TDigestAckResult {
+            key: key.to_string(),
+            success: matches!(result, Value::Okay),
+        })
+    }
+
+    async fn tdigest_trimmed_mean(
+        &self,
+        key: &str,
+        low_cut_quantile: f64,
+        high_cut_quantile: f64,
+    ) -> Result<TDigestScalarResult, CacheError> {
+        let mut conn = self.pool.get().await?;
+
+        let result: Value = cmd("TDIGEST.TRIMMED_MEAN")
+            .arg(key)
+            .arg(low_cut_quantile)
+            .arg(high_cut_quantile)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::from)?;
+
+        Ok(TDigestScalarResult {
+            key: key.to_string(),
+            value: Self::extract_optional_f64(&result),
+        })
+    }
+
     // ==================== HyperLogLog Operations ====================
 
     async fn pf_add(&self, key: &str, elements: Vec<String>) -> Result<PfAddResult, CacheError> {
@@ -612,6 +1048,113 @@ mod tests {
         assert_eq!(info.width, 2000);
         assert_eq!(info.depth, 5);
         assert_eq!(info.count, 1000);
+    }
+
+    #[test]
+    fn test_extract_optional_f64_nan_becomes_none() {
+        assert_eq!(
+            RedisProbabilisticRepository::extract_optional_f64(&Value::Double(f64::NAN)),
+            None
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_optional_f64(&Value::Double(1.5)),
+            Some(1.5)
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_optional_f64(&Value::BulkString(b"nan".to_vec())),
+            None
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_optional_f64(&Value::BulkString(b"NaN".to_vec())),
+            None
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_optional_f64(&Value::BulkString(b"2.5".to_vec())),
+            Some(2.5)
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_optional_f64(&Value::Int(7)),
+            Some(7.0)
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_optional_f64(&Value::Nil),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_i64_handles_sentinels() {
+        assert_eq!(
+            RedisProbabilisticRepository::extract_i64(&Value::Int(-2)),
+            -2
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_i64(&Value::Int(-1)),
+            -1
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_i64(&Value::Int(42)),
+            42
+        );
+        assert_eq!(
+            RedisProbabilisticRepository::extract_i64(&Value::BulkString(b"-1".to_vec())),
+            -1
+        );
+    }
+
+    #[test]
+    fn test_parse_tdigest_info() {
+        let value = Value::Array(vec![
+            Value::BulkString(b"Compression".to_vec()),
+            Value::Int(100),
+            Value::BulkString(b"Capacity".to_vec()),
+            Value::Int(610),
+            Value::BulkString(b"Merged nodes".to_vec()),
+            Value::Int(10),
+            Value::BulkString(b"Unmerged nodes".to_vec()),
+            Value::Int(2),
+            Value::BulkString(b"Merged weight".to_vec()),
+            Value::Double(100.0),
+            Value::BulkString(b"Unmerged weight".to_vec()),
+            Value::Double(5.0),
+            Value::BulkString(b"Observations".to_vec()),
+            Value::Int(105),
+            Value::BulkString(b"Total compressions".to_vec()),
+            Value::Int(1),
+            Value::BulkString(b"Memory usage".to_vec()),
+            Value::Int(2048),
+        ]);
+        let info = RedisProbabilisticRepository::parse_tdigest_info(value).unwrap();
+        assert_eq!(info.compression, 100);
+        assert_eq!(info.capacity, 610);
+        assert_eq!(info.merged_nodes, 10);
+        assert_eq!(info.unmerged_nodes, 2);
+        assert_eq!(info.merged_weight, 100.0);
+        assert_eq!(info.unmerged_weight, 5.0);
+        assert_eq!(info.observations, 105);
+        assert_eq!(info.total_compressions, 1);
+        assert_eq!(info.memory_usage, 2048);
+    }
+
+    #[test]
+    fn test_parse_tdigest_info_tolerates_unknown_and_missing_fields() {
+        // Only compression provided — other fields should default to 0.
+        let value = Value::Array(vec![
+            Value::BulkString(b"Compression".to_vec()),
+            Value::Int(50),
+            Value::BulkString(b"Some Future Field".to_vec()),
+            Value::Int(999),
+        ]);
+        let info = RedisProbabilisticRepository::parse_tdigest_info(value).unwrap();
+        assert_eq!(info.compression, 50);
+        assert_eq!(info.capacity, 0);
+        assert_eq!(info.memory_usage, 0);
+    }
+
+    #[test]
+    fn test_parse_tdigest_info_rejects_non_array() {
+        let result = RedisProbabilisticRepository::parse_tdigest_info(Value::Int(0));
+        assert!(result.is_err());
     }
 
     #[test]

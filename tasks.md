@@ -260,11 +260,11 @@
 - [x] **10.3.2**: Implement FT.HYBRID (hybrid text + vector search with RRF)
 - [x] **10.3.3**: Implement FT.CURSOR READ/DEL (aggregation result pagination)
 
-### 10.4 T-Digest (Probabilistic Module) 🟡 MEDIUM PRIORITY
+### 10.4 T-Digest (Probabilistic Module) 🟡 COMPLETED
 
-> Completes probabilistic coverage (Bloom, Cuckoo, CMS, Top-K done). Quantile estimation for latency monitoring. 14 commands.
+> Completes probabilistic coverage (Bloom, Cuckoo, CMS, Top-K done). Quantile estimation for latency monitoring. 14 commands. Gated by the RedisBloom module alongside CMS/TopK.
 
-- [ ] **10.4.1**: Implement T-Digest repository trait
+- [x] **10.4.1**: Implement T-Digest repository trait
 
   | Command | Method |
   |---------|--------|
@@ -283,9 +283,9 @@
   | TDIGEST.RESET | `tdigest_reset` |
   | TDIGEST.TRIMMED_MEAN | `tdigest_trimmed_mean` |
 
-- [ ] **10.4.2**: Create request/response schemas and API routes
-- [ ] **10.4.3**: Add unit and E2E tests
-- [ ] **10.4.4**: Add OpenAPI documentation and capability-based route filtering
+- [x] **10.4.2**: Create request/response schemas and API routes
+- [x] **10.4.3**: Add unit and E2E tests
+- [x] **10.4.4**: Add OpenAPI documentation and capability-based route filtering
 
 ### 10.5 New String/Key Commands (Redis 8.4+) 🟡 MEDIUM PRIORITY
 
@@ -293,10 +293,10 @@
 - [ ] **10.5.2**: Implement DELEX (conditional delete by value/digest) and DIGEST (XXH3 hash)
 - [ ] **10.5.3**: Add unit and E2E tests
 
-### 10.6 JSON.MSET (JSON v2.6+) 🟢 LOW PRIORITY
+### 10.6 JSON.MSET (JSON v2.6+) 🟢 COMPLETED
 
-- [ ] **10.6.1**: Implement JSON.MSET (atomic multi-key JSON set)
-- [ ] **10.6.2**: Add unit and E2E tests
+- [x] **10.6.1**: Implement JSON.MSET (atomic multi-key JSON set)
+- [x] **10.6.2**: Add unit and E2E tests
 
 ### 10.7 Admin/Monitoring Enhancements 🟢 LOW PRIORITY
 
@@ -322,9 +322,9 @@
 | 10.1 | Vector Sets | 13 | 🔴 High | Completed |
 | 10.2 | Hash Atomic Ops (HGETDEL/HGETEX/HSETEX) | 3 | 🟡 Medium-High | Completed |
 | 10.3 | Search (FT.CONFIG, FT.HYBRID, FT.CURSOR) | 5 | 🟡 Medium | Completed |
-| 10.4 | T-Digest | 14 | 🟡 Medium | Planned |
+| 10.4 | T-Digest | 14 | 🟡 Medium | Completed |
 | 10.5 | MSETEX / DELEX / DIGEST | 3 | 🟡 Medium | Planned |
-| 10.6 | JSON.MSET | 1 | 🟢 Low | Planned |
+| 10.6 | JSON.MSET | 1 | 🟢 Low | Completed |
 | 10.7 | Admin Monitoring Enhancements | 4 | 🟢 Low | Planned |
 | 10.8 | TimeSeries Missing Options | 3 opts | 🟢 Low | Planned |
 | 10.9 | Stream XACKDEL | 1 | 🟢 Low | Planned |
