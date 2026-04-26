@@ -742,6 +742,11 @@ check "MEMORY USAGE" "200" "$status" "$body"
 IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/server/memory/doctor")
 check "MEMORY DOCTOR" "200" "$status" "$body"
 
+# MEMORY MALLOC-STATS — Redis 4.0+, no capability gate. Always 200 even on
+# non-jemalloc builds (Redis returns a benign payload).
+IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/server/memory/malloc-stats")
+check "MEMORY MALLOC-STATS" "200" "$status" "$body"
+
 echo ""
 
 # ==========================================================================
@@ -758,6 +763,16 @@ check "LATENCY DOCTOR" "200" "$status" "$body"
 IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/latency/graph" \
     '{"event":"command"}')
 check_any "LATENCY GRAPH" "$status" "$body" 200 500
+
+# LATENCY HISTOGRAM — Redis 7.0+, gated. Empty list means "all commands".
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/latency/histogram" \
+    '{"commands":[]}')
+check_any "LATENCY HISTOGRAM (all commands)" "$status" "$body" 200 501
+
+# Auth check: missing X-Admin-Api-Key returns 401
+IFS='|' read -r status body < <(do_request POST "/api/v1/admin/latency/histogram" \
+    '{"commands":[]}')
+check "LATENCY HISTOGRAM (rejects no auth)" "401" "$status" "$body"
 
 echo ""
 
@@ -844,6 +859,18 @@ check "COMMAND COUNT" "200" "$status" "$body"
 
 IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/commands")
 check "COMMAND LIST" "200" "$status" "$body"
+
+# COMMAND GETKEYSANDFLAGS — Redis 7.0+, gated by command_docs.
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/commands/getkeysandflags" \
+    '{"command":["SET","foo","bar"]}')
+check_any "COMMAND GETKEYSANDFLAGS" "$status" "$body" 200 501
+
+if [[ "$status" == "200" ]]; then
+    # Empty command vec is rejected at the service layer (400).
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/commands/getkeysandflags" \
+        '{"command":[]}')
+    check "COMMAND GETKEYSANDFLAGS (rejects empty command)" "400" "$status" "$body"
+fi
 
 echo ""
 

@@ -41,9 +41,12 @@ use crate::api::http::routes::admin::{
     // Command introspection
     CommandCountResponse,
     CommandDocsRequest,
+    CommandGetKeysAndFlagsRequest,
+    CommandGetKeysAndFlagsResponse,
     CommandGetKeysRequest,
     CommandGetKeysResponse,
     CommandInfoRequest,
+    CommandKeyAndFlagsSchema,
     CommandListQuery,
     CommandListResponse,
     // Config operations
@@ -64,12 +67,15 @@ use crate::api::http::routes::admin::{
     LastSaveResponse,
     LatencyDoctorResponse,
     LatencyGraphResponse,
+    LatencyHistogramRequest,
+    LatencyHistogramResponse,
     LatencyHistoryRequest,
     LatencyHistoryResponse,
     LatencyLatestResponse,
     LatencyResetRequest,
     LatencyResetResponse,
     MemoryDoctorResponse,
+    MemoryMallocStatsResponse,
     MemoryPurgeResponse,
     // Memory operations
     MemoryUsageRequest,
@@ -103,6 +109,7 @@ use crate::api::http::schemas::bloom::{
     CuckooLoadChunkRequest, CuckooLoadChunkResponse, CuckooReserveRequest, CuckooReserveResponse,
     CuckooScanDumpParams, CuckooScanDumpResponse,
 };
+use crate::api::http::schemas::cluster::{SlotStatsQuery, SlotStatsResponse, SlotStatsSchema};
 use crate::api::http::schemas::common::{KeyInfo, PaginationParams, TtlInfo};
 use crate::api::http::schemas::functions::{
     FunctionCallRequest, FunctionCallResponse, FunctionDumpResponse, FunctionFlushModeSchema,
@@ -697,6 +704,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::get_memory_usage,
         crate::api::http::routes::admin::memory_doctor,
         crate::api::http::routes::admin::memory_purge,
+        crate::api::http::routes::admin::memory_malloc_stats,
         // Admin - Database operations
         crate::api::http::routes::admin::flush_db,
         crate::api::http::routes::admin::flush_all,
@@ -731,6 +739,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::latency_doctor,
         crate::api::http::routes::admin::latency_reset,
         crate::api::http::routes::admin::latency_graph,
+        crate::api::http::routes::admin::latency_histogram,
         // Admin - ACL
         crate::api::http::routes::admin::acl_list,
         crate::api::http::routes::admin::acl_users,
@@ -749,6 +758,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::command_docs,
         crate::api::http::routes::admin::command_info,
         crate::api::http::routes::admin::command_getkeys,
+        crate::api::http::routes::admin::command_getkeysandflags,
         // RedisTimeSeries endpoints
         crate::api::http::routes::timeseries::ts_create,
         crate::api::http::routes::timeseries::ts_alter,
@@ -781,6 +791,8 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::vectors::vinfo,
         crate::api::http::routes::vectors::vgetattr,
         crate::api::http::routes::vectors::vsetattr,
+        // Cluster endpoints (10.7 — only this one is documented for now)
+        crate::api::http::routes::cluster::cluster_slot_stats,
     ),
     components(
         schemas(
@@ -1057,6 +1069,7 @@ use crate::shared::app_state::AppState;
             MemoryUsage,
             MemoryDoctorResponse,
             MemoryPurgeResponse,
+            MemoryMallocStatsResponse,
             // Admin - Database operations (domain entity + request/response schemas)
             FlushDbRequest,
             FlushResult,
@@ -1104,6 +1117,8 @@ use crate::shared::app_state::AppState;
             LatencyResetRequest,
             LatencyResetResponse,
             LatencyGraphResponse,
+            LatencyHistogramRequest,
+            LatencyHistogramResponse,
             // Admin - ACL
             AclListResponse,
             AclUsersResponse,
@@ -1138,6 +1153,13 @@ use crate::shared::app_state::AppState;
             CommandInfoRequest,
             CommandGetKeysRequest,
             CommandGetKeysResponse,
+            CommandGetKeysAndFlagsRequest,
+            CommandGetKeysAndFlagsResponse,
+            CommandKeyAndFlagsSchema,
+            // Cluster — Slot stats (10.7)
+            SlotStatsQuery,
+            SlotStatsResponse,
+            SlotStatsSchema,
             // JSON schemas (RedisJSON module)
             JsonSetRequest,
             JsonSetResponse,

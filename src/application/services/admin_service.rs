@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent, MemoryStats,
-    MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, KeyAndFlags, LatencyEvent,
+    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -464,6 +464,31 @@ impl AdminService {
         }
         self.repository.command_getkeys(command).await
     }
+
+    /// Extract keys + access flags from a command (Redis 7.0+)
+    pub async fn command_getkeysandflags(
+        &self,
+        command: &[String],
+    ) -> Result<Vec<KeyAndFlags>, CacheError> {
+        if command.is_empty() {
+            return Err(CacheError::InvalidInput("Command is required".to_string()));
+        }
+        self.repository.command_getkeysandflags(command).await
+    }
+
+    /// Per-command cumulative latency histogram (Redis 7.0+).
+    /// Empty input means "all commands" — Redis accepts no arguments.
+    pub async fn latency_histogram(
+        &self,
+        commands: &[String],
+    ) -> Result<serde_json::Value, CacheError> {
+        self.repository.latency_histogram(commands).await
+    }
+
+    /// jemalloc allocator statistics (Redis 4.0+)
+    pub async fn memory_malloc_stats(&self) -> Result<String, CacheError> {
+        self.repository.memory_malloc_stats().await
+    }
 }
 
 #[cfg(test)]
@@ -697,6 +722,27 @@ mod tests {
         async fn command_getkeys(&self, _command: &[String]) -> Result<Vec<String>, CacheError> {
             Ok(vec!["key".to_string()])
         }
+
+        async fn command_getkeysandflags(
+            &self,
+            _command: &[String],
+        ) -> Result<Vec<KeyAndFlags>, CacheError> {
+            Ok(vec![KeyAndFlags {
+                key: "key".to_string(),
+                flags: vec!["RO".to_string()],
+            }])
+        }
+
+        async fn latency_histogram(
+            &self,
+            _commands: &[String],
+        ) -> Result<serde_json::Value, CacheError> {
+            Ok(serde_json::json!({}))
+        }
+
+        async fn memory_malloc_stats(&self) -> Result<String, CacheError> {
+            Ok(String::from("---OK---"))
+        }
     }
 
     #[tokio::test]
@@ -773,6 +819,10 @@ mod tests {
 
         // command_info with empty commands
         let err = service.command_info(&[]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        // command_getkeysandflags with empty command
+        let err = service.command_getkeysandflags(&[]).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         // command_getkeys with empty command

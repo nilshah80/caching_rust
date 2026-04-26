@@ -498,6 +498,48 @@ pub struct CommandGetKeysResponse {
     pub keys: Vec<String>,
 }
 
+/// COMMAND GETKEYSANDFLAGS request — same shape as GETKEYS.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CommandGetKeysAndFlagsRequest {
+    /// Full command with arguments (e.g., `["SET", "k", "v"]`).
+    pub command: Vec<String>,
+}
+
+/// One key + access-flag tuple from `COMMAND GETKEYSANDFLAGS`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CommandKeyAndFlagsSchema {
+    pub key: String,
+    pub flags: Vec<String>,
+}
+
+/// COMMAND GETKEYSANDFLAGS response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CommandGetKeysAndFlagsResponse {
+    pub results: Vec<CommandKeyAndFlagsSchema>,
+}
+
+/// LATENCY HISTOGRAM request.
+///
+/// `commands` is optional — an empty list means "all commands", matching the
+/// no-arg form of the Redis command.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct LatencyHistogramRequest {
+    #[serde(default)]
+    pub commands: Vec<String>,
+}
+
+/// LATENCY HISTOGRAM response — opaque passthrough of the Redis reply.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LatencyHistogramResponse {
+    pub data: serde_json::Value,
+}
+
+/// MEMORY MALLOC-STATS response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MemoryMallocStatsResponse {
+    pub stats: String,
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -521,6 +563,10 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/server/memory/usage", post(get_memory_usage))
         .route("/api/v1/admin/server/memory/doctor", get(memory_doctor))
         .route("/api/v1/admin/server/memory/purge", post(memory_purge))
+        .route(
+            "/api/v1/admin/server/memory/malloc-stats",
+            get(memory_malloc_stats),
+        )
         // Database operations (protected)
         .route("/api/v1/admin/db/flush", delete(flush_db))
         .route("/api/v1/admin/db/flushall", delete(flush_all))
@@ -555,6 +601,7 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/latency/doctor", get(latency_doctor))
         .route("/api/v1/admin/latency/reset", post(latency_reset))
         .route("/api/v1/admin/latency/graph", post(latency_graph))
+        .route("/api/v1/admin/latency/histogram", post(latency_histogram))
         // ACL operations (protected)
         .route("/api/v1/admin/acl/list", get(acl_list))
         .route("/api/v1/admin/acl/users", get(acl_users))
@@ -573,6 +620,10 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/commands/docs", post(command_docs))
         .route("/api/v1/admin/commands/info", post(command_info))
         .route("/api/v1/admin/commands/getkeys", post(command_getkeys))
+        .route(
+            "/api/v1/admin/commands/getkeysandflags",
+            post(command_getkeysandflags),
+        )
 }
 
 // ============================================================================
@@ -890,6 +941,33 @@ pub async fn memory_purge(
         .memory_purge()
         .await
         .map(|_| ApiResponse::success(MemoryPurgeResponse { success: true }))
+        .map_err(to_status_code)
+}
+
+/// GET /api/v1/admin/server/memory/malloc-stats
+///
+/// Allocator statistics report (MEMORY MALLOC-STATS, Redis 4.0+). Returns a
+/// jemalloc dump when running under jemalloc, otherwise a benign payload.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/server/memory/malloc-stats",
+    responses(
+        (status = 200, description = "Allocator statistics report", body = MemoryMallocStatsResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn memory_malloc_stats(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<MemoryMallocStatsResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .memory_malloc_stats()
+        .await
+        .map(|stats| ApiResponse::success(MemoryMallocStatsResponse { stats }))
         .map_err(to_status_code)
 }
 
@@ -1627,6 +1705,40 @@ pub async fn latency_graph(
         .map_err(to_status_code)
 }
 
+/// POST /api/v1/admin/latency/histogram
+///
+/// Per-command cumulative latency histogram (LATENCY HISTOGRAM, Redis 7.0+).
+/// Pass an empty `commands` array to retrieve every tracked command. Requires
+/// `latency-tracking yes` in the Redis config for non-empty results.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/latency/histogram",
+    request_body = LatencyHistogramRequest,
+    responses(
+        (status = 200, description = "Latency histogram (raw Redis reply)", body = LatencyHistogramResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "LATENCY HISTOGRAM requires Redis 7.0+")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn latency_histogram(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<LatencyHistogramRequest>,
+) -> Result<ApiResponse<LatencyHistogramResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    if !state.capabilities.features.latency_histogram {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    state
+        .admin_service
+        .latency_histogram(&request.commands)
+        .await
+        .map(|data| ApiResponse::success(LatencyHistogramResponse { data }))
+        .map_err(to_status_code)
+}
+
 // ============================================================================
 // ACL Operations
 // ============================================================================
@@ -2056,6 +2168,51 @@ pub async fn command_getkeys(
         .map_err(to_status_code)
 }
 
+/// POST /api/v1/admin/commands/getkeysandflags
+///
+/// Extract keys + per-key access flags from a Redis command (COMMAND
+/// GETKEYSANDFLAGS, Redis 7.0+). Reuses the `command_docs` capability gate
+/// since both arrived in 7.0.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/commands/getkeysandflags",
+    request_body = CommandGetKeysAndFlagsRequest,
+    responses(
+        (status = 200, description = "Keys and flags extracted from the command", body = CommandGetKeysAndFlagsResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "COMMAND GETKEYSANDFLAGS requires Redis 7.0+")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn command_getkeysandflags(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CommandGetKeysAndFlagsRequest>,
+) -> Result<ApiResponse<CommandGetKeysAndFlagsResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    if !state.capabilities.features.command_docs {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    state
+        .admin_service
+        .command_getkeysandflags(&request.command)
+        .await
+        .map(|results| {
+            ApiResponse::success(CommandGetKeysAndFlagsResponse {
+                results: results
+                    .into_iter()
+                    .map(|kf| CommandKeyAndFlagsSchema {
+                        key: kf.key,
+                        flags: kf.flags,
+                    })
+                    .collect(),
+            })
+        })
+        .map_err(to_status_code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2430,5 +2587,109 @@ mod tests {
         )
         .await;
         assert!(err.is_err());
+    }
+
+    fn enable_command_introspection(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.command_docs = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    fn enable_latency_histogram(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.latency_histogram = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    #[tokio::test]
+    async fn test_memory_malloc_stats_returns_string() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = memory_malloc_stats(State(state), auth)
+            .await
+            .expect("response");
+        assert!(!response.data.unwrap().stats.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_memory_malloc_stats_requires_auth() {
+        let (state, _, _, _) = test_state();
+        let result = memory_malloc_stats(State(state), HeaderMap::new()).await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
+    }
+
+    #[tokio::test]
+    async fn test_latency_histogram_returns_passthrough() {
+        let (mut state, _, _, _) = test_state();
+        enable_latency_histogram(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response =
+            latency_histogram(State(state), auth, Json(LatencyHistogramRequest::default()))
+                .await
+                .expect("response");
+        // Mock returns a non-empty JSON object.
+        assert!(response.data.unwrap().data.is_object());
+    }
+
+    #[tokio::test]
+    async fn test_latency_histogram_returns_501_when_capability_off() {
+        let (state, _, _, _) = test_state();
+        // Default test_state() has latency_histogram disabled.
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result =
+            latency_histogram(State(state), auth, Json(LatencyHistogramRequest::default())).await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    #[tokio::test]
+    async fn test_command_getkeysandflags_returns_pairs() {
+        let (mut state, _, _, _) = test_state();
+        enable_command_introspection(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = command_getkeysandflags(
+            State(state),
+            auth,
+            Json(CommandGetKeysAndFlagsRequest {
+                command: vec!["SET".to_string(), "k".to_string(), "v".to_string()],
+            }),
+        )
+        .await
+        .expect("response");
+        let body = response.data.expect("body");
+        assert!(!body.results.is_empty());
+        assert!(!body.results[0].flags.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_command_getkeysandflags_rejects_empty_command() {
+        let (mut state, _, _, _) = test_state();
+        enable_command_introspection(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = command_getkeysandflags(
+            State(state),
+            auth,
+            Json(CommandGetKeysAndFlagsRequest { command: vec![] }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn test_command_getkeysandflags_returns_501_when_capability_off() {
+        let (mut state, _, _, _) = test_state();
+        // Disable command_docs to confirm getkeysandflags surfaces 501.
+        let mut caps = (*state.capabilities).clone();
+        caps.features.command_docs = false;
+        state.capabilities = std::sync::Arc::new(caps);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = command_getkeysandflags(
+            State(state),
+            auth,
+            Json(CommandGetKeysAndFlagsRequest {
+                command: vec!["GET".to_string(), "k".to_string()],
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
     }
 }

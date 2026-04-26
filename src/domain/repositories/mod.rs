@@ -30,6 +30,7 @@ pub use bitmap_repository::{
 pub use bloom_repository::BloomRepository;
 pub use cluster_repository::{
     ClusterEndpoint, ClusterInfo, ClusterNode, ClusterRepository, ClusterSlotRange,
+    ClusterSlotStatsFilter, SlotStats, SlotStatsMetric, SlotStatsOrder,
 };
 pub use function_repository::{FunctionFlushMode, FunctionRepository, FunctionRestorePolicy};
 pub use geo_repository::{

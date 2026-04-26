@@ -68,6 +68,12 @@ pub struct FeatureCapabilities {
     /// Redis 8.4 string commands (MSETEX, DELEX, DIGEST)
     pub string_8_4_commands: bool,
 
+    /// LATENCY HISTOGRAM support (Redis 7.0+)
+    pub latency_histogram: bool,
+
+    /// CLUSTER SLOT-STATS support (Redis 8.2+, requires cluster mode)
+    pub cluster_slot_stats: bool,
+
     /// Redis 8.0 vector sets commands (VADD, VSIM, etc.)
     pub vectors: bool,
 
@@ -99,6 +105,8 @@ impl RedisCapabilities {
                 hash_field_expiration: true,
                 hash_8_commands: true,
                 string_8_4_commands: false, // Only enabled when Redis ≥ 8.4
+                latency_histogram: false,   // Only enabled when Redis ≥ 7.0
+                cluster_slot_stats: false,  // Only enabled in cluster mode on Redis ≥ 8.2
                 vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
                 vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
                 cluster: false,
@@ -156,6 +164,8 @@ impl Default for FeatureCapabilities {
             hash_field_expiration: true,
             hash_8_commands: true,
             string_8_4_commands: false, // Only enabled when Redis ≥ 8.4
+            latency_histogram: false,   // Only enabled when Redis ≥ 7.0
+            cluster_slot_stats: false,  // Only enabled in cluster mode on Redis ≥ 8.2
             vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
             vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
             cluster: false,

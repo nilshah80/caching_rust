@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent, MemoryStats,
-    MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, KeyAndFlags, LatencyEvent,
+    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 
@@ -224,4 +224,28 @@ pub trait AdminRepository: Send + Sync {
 
     /// Extract keys from a command (COMMAND GETKEYS command, Redis 2.8.13+)
     async fn command_getkeys(&self, command: &[String]) -> Result<Vec<String>, CacheError>;
+
+    /// Extract keys + per-key access flags (COMMAND GETKEYSANDFLAGS, Redis 7.0+)
+    async fn command_getkeysandflags(
+        &self,
+        command: &[String],
+    ) -> Result<Vec<KeyAndFlags>, CacheError>;
+
+    // ========================================================================
+    // Latency / Memory introspection (10.7)
+    // ========================================================================
+
+    /// Per-command cumulative latency histogram (LATENCY HISTOGRAM, Redis 7.0+).
+    ///
+    /// Pass an empty slice to retrieve the full set. The reply structure is
+    /// nested and open-ended, so the trait returns the parsed JSON verbatim
+    /// (matching the precedent set by `command_docs` / `command_info`).
+    async fn latency_histogram(&self, commands: &[String])
+    -> Result<serde_json::Value, CacheError>;
+
+    /// Allocator statistics report (MEMORY MALLOC-STATS, Redis 4.0+).
+    ///
+    /// Returns a long bulk string when running under jemalloc, an empty/benign
+    /// payload otherwise. Mirrors `memory_doctor`.
+    async fn memory_malloc_stats(&self) -> Result<String, CacheError>;
 }

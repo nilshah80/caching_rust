@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, LatencyEvent, MemoryStats,
-    MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, KeyAndFlags, LatencyEvent,
+    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -765,6 +765,97 @@ impl AdminRepository for RedisAdminRepository {
         let result: Vec<String> = cmd.query_async(&mut conn).await?;
         Ok(result)
     }
+
+    async fn command_getkeysandflags(
+        &self,
+        command: &[String],
+    ) -> Result<Vec<KeyAndFlags>, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let mut cmd = redis::cmd("COMMAND");
+        cmd.arg("GETKEYSANDFLAGS");
+        for arg in command {
+            cmd.arg(arg.as_str());
+        }
+        let result: redis::Value = cmd.query_async(&mut conn).await?;
+        parse_keys_and_flags(result)
+    }
+
+    async fn latency_histogram(
+        &self,
+        commands: &[String],
+    ) -> Result<serde_json::Value, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let mut cmd = redis::cmd("LATENCY");
+        cmd.arg("HISTOGRAM");
+        for c in commands {
+            cmd.arg(c.as_str());
+        }
+        let result: redis::Value = cmd.query_async(&mut conn).await?;
+        Ok(redis_value_to_json(result))
+    }
+
+    async fn memory_malloc_stats(&self) -> Result<String, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let stats: String = redis::cmd("MEMORY")
+            .arg("MALLOC-STATS")
+            .query_async(&mut conn)
+            .await?;
+        Ok(stats)
+    }
+}
+
+/// Parse the array reply from `COMMAND GETKEYSANDFLAGS` into typed entries.
+///
+/// Redis returns an outer array where each item is `[key_bulk, [flag_bulk...]]`.
+/// Anything that doesn't match that shape is treated as an unexpected reply.
+fn parse_keys_and_flags(value: redis::Value) -> Result<Vec<KeyAndFlags>, CacheError> {
+    let outer = match value {
+        redis::Value::Array(items) => items,
+        _ => {
+            return Err(CacheError::Internal(
+                "Unexpected reply shape from COMMAND GETKEYSANDFLAGS".to_string(),
+            ));
+        }
+    };
+
+    let mut out = Vec::with_capacity(outer.len());
+    for entry in outer {
+        let parts = match entry {
+            redis::Value::Array(p) if p.len() >= 2 => p,
+            _ => {
+                return Err(CacheError::Internal(
+                    "Malformed COMMAND GETKEYSANDFLAGS entry".to_string(),
+                ));
+            }
+        };
+
+        let key = match &parts[0] {
+            redis::Value::BulkString(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+            redis::Value::SimpleString(s) => s.clone(),
+            _ => {
+                return Err(CacheError::Internal(
+                    "Expected bulk string for key in COMMAND GETKEYSANDFLAGS".to_string(),
+                ));
+            }
+        };
+
+        let flags = match &parts[1] {
+            redis::Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| match v {
+                    redis::Value::BulkString(bytes) => {
+                        Some(String::from_utf8_lossy(bytes).into_owned())
+                    }
+                    redis::Value::SimpleString(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        out.push(KeyAndFlags { key, flags });
+    }
+    Ok(out)
 }
 
 // ============================================================================

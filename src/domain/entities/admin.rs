@@ -283,6 +283,17 @@ pub struct FlushResult {
     pub mode: String,
 }
 
+/// One key extracted from a command together with its usage flags.
+///
+/// Reply shape from `COMMAND GETKEYSANDFLAGS` (Redis 7.0+).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct KeyAndFlags {
+    /// Key name as parsed from the command arguments.
+    pub key: String,
+    /// Per-key access flags (e.g. `RO`, `RW`, `OW`, `RM`, `access`, `update`).
+    pub flags: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

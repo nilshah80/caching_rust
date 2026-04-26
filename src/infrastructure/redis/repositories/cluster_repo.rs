@@ -6,6 +6,7 @@
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     ClusterEndpoint, ClusterInfo, ClusterNode, ClusterRepository, ClusterSlotRange,
+    ClusterSlotStatsFilter, SlotStats,
 };
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use async_trait::async_trait;
@@ -78,6 +79,100 @@ impl ClusterRepository for RedisClusterRepository {
 
         Ok(slot)
     }
+
+    async fn cluster_slot_stats(
+        &self,
+        filter: ClusterSlotStatsFilter,
+    ) -> Result<Vec<SlotStats>, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let mut cmd = redis::cmd("CLUSTER");
+        cmd.arg("SLOT-STATS");
+        match filter {
+            ClusterSlotStatsFilter::Range { start, end } => {
+                cmd.arg("SLOTSRANGE").arg(start).arg(end);
+            }
+            ClusterSlotStatsFilter::OrderBy {
+                metric,
+                limit,
+                order,
+            } => {
+                cmd.arg("ORDERBY").arg(metric.as_str());
+                if let Some(n) = limit {
+                    cmd.arg("LIMIT").arg(n);
+                }
+                cmd.arg(order.as_str());
+            }
+        }
+        let raw: redis::Value = cmd
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::RedisError)?;
+        parse_slot_stats(raw)
+    }
+}
+
+/// Parse the CLUSTER SLOT-STATS reply into typed slot records.
+///
+/// Outer array contains entries shaped as `[slot_int, [name, value, name, value, ...]]`.
+/// Metric names use hyphens (`key-count`, `cpu-usec`, `memory-bytes`,
+/// `network-bytes-in`, `network-bytes-out`); unknown fields are ignored so the
+/// parser stays forward-compatible.
+fn parse_slot_stats(value: redis::Value) -> Result<Vec<SlotStats>, CacheError> {
+    let outer = match value {
+        redis::Value::Array(a) => a,
+        _ => {
+            return Err(CacheError::Internal(
+                "Unexpected reply shape from CLUSTER SLOT-STATS".to_string(),
+            ));
+        }
+    };
+    let mut out = Vec::with_capacity(outer.len());
+    for entry in outer {
+        let parts = match entry {
+            redis::Value::Array(p) if p.len() >= 2 => p,
+            _ => continue,
+        };
+        let slot = match &parts[0] {
+            redis::Value::Int(n) => *n as u16,
+            _ => continue,
+        };
+        let mut stats = SlotStats {
+            slot,
+            key_count: 0,
+            cpu_usec: 0,
+            memory_bytes: 0,
+            network_bytes_in: 0,
+            network_bytes_out: 0,
+        };
+        if let redis::Value::Array(kv) = &parts[1] {
+            let mut iter = kv.iter();
+            while let (Some(name_v), Some(value_v)) = (iter.next(), iter.next()) {
+                let name = match name_v {
+                    redis::Value::BulkString(b) => String::from_utf8_lossy(b).into_owned(),
+                    redis::Value::SimpleString(s) => s.clone(),
+                    _ => continue,
+                };
+                let n = match value_v {
+                    redis::Value::Int(n) => *n,
+                    _ => continue,
+                };
+                // Redis docs spell the metric labels in uppercase
+                // (KEY-COUNT, CPU-USEC, MEMORY-BYTES, …); some builds may
+                // ship them lowercase. Normalize before matching so the
+                // parser is case-insensitive.
+                match name.to_ascii_lowercase().as_str() {
+                    "key-count" => stats.key_count = n,
+                    "cpu-usec" => stats.cpu_usec = n,
+                    "memory-bytes" => stats.memory_bytes = n.max(0) as u64,
+                    "network-bytes-in" => stats.network_bytes_in = n,
+                    "network-bytes-out" => stats.network_bytes_out = n,
+                    _ => {}
+                }
+            }
+        }
+        out.push(stats);
+    }
+    Ok(out)
 }
 
 fn parse_cluster_info(info: &str) -> Result<ClusterInfo, CacheError> {
@@ -261,5 +356,82 @@ cluster_my_epoch:1\r
         let result = parse_cluster_info("").unwrap();
         assert!(result.cluster_state.is_empty());
         assert_eq!(result.cluster_slots_assigned, 0);
+    }
+
+    /// Build one CLUSTER SLOT-STATS slot entry with the given metric label casing.
+    fn slot_entry(slot: i64, label_case: fn(&str) -> String) -> redis::Value {
+        let label = |s: &str| redis::Value::BulkString(label_case(s).into_bytes());
+        redis::Value::Array(vec![
+            redis::Value::Int(slot),
+            redis::Value::Array(vec![
+                label("key-count"),
+                redis::Value::Int(11),
+                label("cpu-usec"),
+                redis::Value::Int(22),
+                label("memory-bytes"),
+                redis::Value::Int(33),
+                label("network-bytes-in"),
+                redis::Value::Int(44),
+                label("network-bytes-out"),
+                redis::Value::Int(55),
+            ]),
+        ])
+    }
+
+    #[test]
+    fn test_parse_slot_stats_uppercase_labels() {
+        // Redis docs spell metric labels in UPPERCASE; the parser must
+        // accept that wire form even though the match arms are lowercase.
+        let reply = redis::Value::Array(vec![slot_entry(7, |s| s.to_ascii_uppercase())]);
+        let stats = parse_slot_stats(reply).expect("parse");
+        assert_eq!(stats.len(), 1);
+        let s = &stats[0];
+        assert_eq!(s.slot, 7);
+        assert_eq!(s.key_count, 11);
+        assert_eq!(s.cpu_usec, 22);
+        assert_eq!(s.memory_bytes, 33);
+        assert_eq!(s.network_bytes_in, 44);
+        assert_eq!(s.network_bytes_out, 55);
+    }
+
+    #[test]
+    fn test_parse_slot_stats_lowercase_labels() {
+        let reply = redis::Value::Array(vec![slot_entry(0, str::to_string)]);
+        let stats = parse_slot_stats(reply).expect("parse");
+        assert_eq!(stats.len(), 1);
+        let s = &stats[0];
+        assert_eq!(s.slot, 0);
+        assert_eq!(s.key_count, 11);
+        assert_eq!(s.memory_bytes, 33);
+        assert_eq!(s.network_bytes_out, 55);
+    }
+
+    #[test]
+    fn test_parse_slot_stats_ignores_unknown_metric() {
+        // Forward-compat: unknown metric names are silently ignored, not
+        // treated as parse errors.
+        let reply = redis::Value::Array(vec![redis::Value::Array(vec![
+            redis::Value::Int(3),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"key-count".to_vec()),
+                redis::Value::Int(9),
+                redis::Value::BulkString(b"FUTURE-METRIC".to_vec()),
+                redis::Value::Int(123_456),
+            ]),
+        ])]);
+        let stats = parse_slot_stats(reply).expect("parse");
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].slot, 3);
+        assert_eq!(stats[0].key_count, 9);
+        assert_eq!(stats[0].cpu_usec, 0);
+    }
+
+    #[test]
+    fn test_parse_slot_stats_rejects_non_array_top_level() {
+        let err = parse_slot_stats(redis::Value::Int(5)).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::domain::errors::CacheError::Internal(_)
+        ));
     }
 }

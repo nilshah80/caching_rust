@@ -102,6 +102,8 @@ use crate::domain::entities::{
     JsonStrLenResult,
     JsonToggleResult,
     JsonTypeResult,
+    // Admin entity for COMMAND GETKEYSANDFLAGS (10.7)
+    KeyAndFlags,
     KeyInfo,
     LatencyEvent,
     MGetResult,
@@ -643,17 +645,13 @@ impl StringRepository for MockStringRepository {
     ) -> Result<bool, CacheError> {
         let mut store = self.store.lock().expect("store lock");
         match options.existence {
-            Some(MSetExExistence::Nx) => {
-                if pairs.iter().any(|(k, _)| store.contains_key(k)) {
-                    return Ok(false);
-                }
+            Some(MSetExExistence::Nx) if pairs.iter().any(|(k, _)| store.contains_key(k)) => {
+                return Ok(false);
             }
-            Some(MSetExExistence::Xx) => {
-                if !pairs.iter().all(|(k, _)| store.contains_key(k)) {
-                    return Ok(false);
-                }
+            Some(MSetExExistence::Xx) if !pairs.iter().all(|(k, _)| store.contains_key(k)) => {
+                return Ok(false);
             }
-            None => {}
+            _ => {}
         }
         for (key, value) in pairs {
             store.insert(key.clone(), value.clone());
@@ -963,6 +961,29 @@ impl AdminRepository for MockAdminRepository {
 
     async fn command_getkeys(&self, _command: &[String]) -> Result<Vec<String>, CacheError> {
         Ok(vec!["mykey".to_string()])
+    }
+
+    async fn command_getkeysandflags(
+        &self,
+        _command: &[String],
+    ) -> Result<Vec<KeyAndFlags>, CacheError> {
+        Ok(vec![KeyAndFlags {
+            key: "mykey".to_string(),
+            flags: vec!["RW".to_string(), "access".to_string(), "update".to_string()],
+        }])
+    }
+
+    async fn latency_histogram(
+        &self,
+        _commands: &[String],
+    ) -> Result<serde_json::Value, CacheError> {
+        Ok(serde_json::json!({
+            "set": { "calls": 10, "histogram_usec": { "1": 5, "2": 5 } }
+        }))
+    }
+
+    async fn memory_malloc_stats(&self) -> Result<String, CacheError> {
+        Ok("mock allocator stats".to_string())
     }
 }
 
@@ -5784,6 +5805,13 @@ impl ClusterRepository for MockClusterRepository {
     }
 
     async fn cluster_keyslot(&self, _key: &str) -> Result<u16, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_slot_stats(
+        &self,
+        _filter: crate::domain::repositories::ClusterSlotStatsFilter,
+    ) -> Result<Vec<crate::domain::repositories::SlotStats>, CacheError> {
         Err(CacheError::Internal("not in cluster mode".to_string()))
     }
 }

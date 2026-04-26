@@ -298,10 +298,10 @@
 - [x] **10.6.1**: Implement JSON.MSET (atomic multi-key JSON set)
 - [x] **10.6.2**: Add unit and E2E tests
 
-### 10.7 Admin/Monitoring Enhancements 🟢 LOW PRIORITY
+### 10.7 Admin/Monitoring Enhancements 🟢 COMPLETED
 
-- [ ] **10.7.1**: Implement LATENCY HISTOGRAM, MEMORY MALLOC-STATS, COMMAND GETKEYSANDFLAGS
-- [ ] **10.7.2**: Implement CLUSTER SLOT-STATS (Redis 8.2)
+- [x] **10.7.1**: Implement LATENCY HISTOGRAM, MEMORY MALLOC-STATS, COMMAND GETKEYSANDFLAGS
+- [x] **10.7.2**: Implement CLUSTER SLOT-STATS (Redis 8.2)
 
 ### 10.8 TimeSeries Missing Options 🟢 LOW PRIORITY
 
@@ -325,7 +325,7 @@
 | 10.4 | T-Digest | 14 | 🟡 Medium | Completed |
 | 10.5 | MSETEX / DELEX / DIGEST | 3 | 🟡 Medium | Completed |
 | 10.6 | JSON.MSET | 1 | 🟢 Low | Completed |
-| 10.7 | Admin Monitoring Enhancements | 4 | 🟢 Low | Planned |
+| 10.7 | Admin Monitoring Enhancements | 4 | 🟢 Low | Completed |
 | 10.8 | TimeSeries Missing Options | 3 opts | 🟢 Low | Planned |
 | 10.9 | Stream XACKDEL | 1 | 🟢 Low | Planned |
 | **Total** | | **~47 commands** | | |

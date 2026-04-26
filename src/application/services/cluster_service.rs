@@ -3,7 +3,10 @@
 //! Application service for Redis Cluster operations.
 
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::{ClusterInfo, ClusterNode, ClusterRepository, ClusterSlotRange};
+use crate::domain::repositories::{
+    ClusterInfo, ClusterNode, ClusterRepository, ClusterSlotRange, ClusterSlotStatsFilter,
+    SlotStats,
+};
 use std::sync::Arc;
 
 pub struct ClusterService {
@@ -38,6 +41,39 @@ impl ClusterService {
     /// Get hash slot for a key
     pub async fn cluster_keyslot(&self, key: &str) -> Result<u16, CacheError> {
         self.repository.cluster_keyslot(key).await
+    }
+
+    /// Per-slot usage statistics for slots assigned to the connected node
+    /// (CLUSTER SLOT-STATS, Redis 8.2+).
+    ///
+    /// Validates the filter contents before dispatch — Redis rejects bare
+    /// invocations, and a SLOTSRANGE with `start > end` or `end > 16383` is
+    /// rejected upstream.
+    pub async fn cluster_slot_stats(
+        &self,
+        filter: ClusterSlotStatsFilter,
+    ) -> Result<Vec<SlotStats>, CacheError> {
+        if let ClusterSlotStatsFilter::Range { start, end } = &filter {
+            if start > end {
+                return Err(CacheError::InvalidInput(
+                    "slot_start must be <= slot_end".to_string(),
+                ));
+            }
+            if *end > 16383 {
+                return Err(CacheError::InvalidInput(
+                    "slot range exceeds the maximum slot index 16383".to_string(),
+                ));
+            }
+        }
+        if let ClusterSlotStatsFilter::OrderBy { limit, .. } = &filter
+            && let Some(n) = limit
+            && *n <= 0
+        {
+            return Err(CacheError::InvalidInput(
+                "limit must be a positive integer".to_string(),
+            ));
+        }
+        self.repository.cluster_slot_stats(filter).await
     }
 }
 
@@ -89,6 +125,20 @@ mod tests {
         async fn cluster_keyslot(&self, _key: &str) -> Result<u16, CacheError> {
             Ok(12539)
         }
+
+        async fn cluster_slot_stats(
+            &self,
+            _filter: ClusterSlotStatsFilter,
+        ) -> Result<Vec<SlotStats>, CacheError> {
+            Ok(vec![SlotStats {
+                slot: 0,
+                key_count: 1,
+                cpu_usec: 0,
+                memory_bytes: 64,
+                network_bytes_in: 0,
+                network_bytes_out: 0,
+            }])
+        }
     }
 
     #[tokio::test]
@@ -126,5 +176,54 @@ mod tests {
         let service = ClusterService::new(Arc::new(MockClusterRepo));
         let shards = service.cluster_shards().await.unwrap();
         assert!(matches!(shards, redis::Value::Array(v) if v.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn test_slot_stats_range_dispatches_to_repo() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let stats = service
+            .cluster_slot_stats(ClusterSlotStatsFilter::Range { start: 0, end: 100 })
+            .await
+            .expect("range succeeds");
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].slot, 0);
+    }
+
+    #[tokio::test]
+    async fn test_slot_stats_rejects_inverted_range() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let err = service
+            .cluster_slot_stats(ClusterSlotStatsFilter::Range { start: 50, end: 10 })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_slot_stats_rejects_out_of_range_end() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let err = service
+            .cluster_slot_stats(ClusterSlotStatsFilter::Range {
+                start: 0,
+                end: 16384,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_slot_stats_rejects_zero_limit() {
+        use crate::domain::repositories::{SlotStatsMetric, SlotStatsOrder};
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let err = service
+            .cluster_slot_stats(ClusterSlotStatsFilter::OrderBy {
+                metric: SlotStatsMetric::KeyCount,
+                limit: Some(0),
+                order: SlotStatsOrder::Desc,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 }

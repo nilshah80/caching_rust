@@ -28,6 +28,19 @@ assert_contains() {
   fi
 }
 
+assert_status_in() {
+  name=$1; actual=$2; shift 2
+  for s in "$@"; do
+    if [ "$actual" = "$s" ]; then
+      echo "  PASS  $name (HTTP $actual)"
+      PASSED=$((PASSED + 1))
+      return
+    fi
+  done
+  echo "  FAIL  $name (expected one of [$*], got $actual)"
+  FAILED=$((FAILED + 1))
+}
+
 echo "============================================================"
 echo " E2E Cluster Tests"
 echo " Target: $BASE_URL"
@@ -120,6 +133,35 @@ echo ""
 echo "--- Admin uses standalone (not cluster-routed) ---"
 body=$(curl -sf -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/admin/server/info" || echo "{}")
 assert_contains "Admin INFO has redis_version" "$body" '"redis_version"'
+
+echo ""
+echo "--- Cluster Slot-Stats (Redis 8.2+; 501 on older builds) ---"
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" \
+  "$BASE_URL/api/v1/cluster/slot-stats?slot_start=0&slot_end=100")
+assert_status_in "CLUSTER SLOT-STATS (range)" "$status" "200" "501"
+
+# Auth check: missing key returns 401 regardless of capability
+status=$(curl -so /dev/null -w "%{http_code}" \
+  "$BASE_URL/api/v1/cluster/slot-stats?slot_start=0&slot_end=100")
+assert_status "CLUSTER SLOT-STATS rejects no auth" "401" "$status"
+
+# Empty filter is rejected with 400 (capability-on) or 501 (capability-off)
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/slot-stats")
+assert_status_in "CLUSTER SLOT-STATS rejects empty filter" "$status" "400" "501"
+
+# ORDERBY with limit + desc — accepted form
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" \
+  "$BASE_URL/api/v1/cluster/slot-stats?order_by=key_count&limit=5&order=desc")
+assert_status_in "CLUSTER SLOT-STATS (orderby)" "$status" "200" "501"
+
+# Mixed mode is rejected with 400 (capability-on) or 501 (capability-off)
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" \
+  "$BASE_URL/api/v1/cluster/slot-stats?slot_start=0&slot_end=10&order_by=cpu_usec")
+assert_status_in "CLUSTER SLOT-STATS rejects mixed mode" "$status" "400" "501"
 
 echo ""
 echo "--- Cleanup ---"

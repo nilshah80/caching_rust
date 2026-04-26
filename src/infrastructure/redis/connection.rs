@@ -909,6 +909,11 @@ impl InstrumentedPool {
             hash_8_commands: RedisCapabilities::version_gte(&redis_version, "7.9.0"),
             // MSETEX/DELEX/DIGEST landed in Redis 8.4 GA
             string_8_4_commands: RedisCapabilities::version_gte(&redis_version, "8.4.0"),
+            // LATENCY HISTOGRAM exists since Redis 7.0
+            latency_histogram: RedisCapabilities::version_gte(&redis_version, "7.0.0"),
+            // CLUSTER SLOT-STATS landed in Redis 8.2 and only makes sense in cluster mode
+            cluster_slot_stats: cluster_enabled
+                && RedisCapabilities::version_gte(&redis_version, "8.2.0"),
             vectors: vectors_available,
             vector_range: vector_range_available,
             cluster: cluster_enabled,

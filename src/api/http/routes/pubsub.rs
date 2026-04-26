@@ -560,6 +560,8 @@ async fn handle_subscribe(
                 match client_msg {
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(Message::Ping(data))) => {
+                        // The Pong path is fast — no benefit to collapsing into a guard.
+                        #[allow(clippy::collapsible_match)]
                         if send_ws(&mut socket, Message::Pong(data)).await.is_err() {
                             break;
                         }
@@ -654,6 +656,7 @@ async fn handle_psubscribe(
                 match client_msg {
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(Message::Ping(data))) => {
+                        #[allow(clippy::collapsible_match)]
                         if send_ws(&mut socket, Message::Pong(data)).await.is_err() {
                             break;
                         }
