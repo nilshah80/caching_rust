@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
-    TimeSeriesRepository, TimeSeriesSample, TsAggregation,
+    TimeSeriesAddOptions, TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions,
+    TimeSeriesRangeResult, TimeSeriesRepository, TimeSeriesSample, TsAggregation, TsIgnore,
 };
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisTimeSeriesRepository;
@@ -27,6 +27,7 @@ impl TimeSeriesService {
         options: TimeSeriesCreateOptions,
     ) -> Result<(), CacheError> {
         Self::validate_key(key)?;
+        Self::validate_create_options(&options)?;
         self.repository.ts_create(key, options).await
     }
 
@@ -36,13 +37,20 @@ impl TimeSeriesService {
         options: TimeSeriesCreateOptions,
     ) -> Result<(), CacheError> {
         Self::validate_key(key)?;
+        Self::validate_create_options(&options)?;
         self.repository.ts_alter(key, options).await
     }
 
-    pub async fn ts_add(&self, key: &str, sample: TimeSeriesSample) -> Result<i64, CacheError> {
+    pub async fn ts_add(
+        &self,
+        key: &str,
+        sample: TimeSeriesSample,
+        options: TimeSeriesAddOptions,
+    ) -> Result<i64, CacheError> {
         Self::validate_key(key)?;
         Self::validate_sample(&sample)?;
-        self.repository.ts_add(key, sample).await
+        Self::validate_add_options(&options)?;
+        self.repository.ts_add(key, sample, options).await
     }
 
     pub async fn ts_madd(
@@ -178,6 +186,7 @@ impl TimeSeriesService {
         dest: &str,
         aggregation: TsAggregation,
         bucket_duration_ms: u64,
+        align_timestamp_ms: Option<i64>,
     ) -> Result<(), CacheError> {
         Self::validate_key(source)?;
         Self::validate_key(dest)?;
@@ -186,8 +195,17 @@ impl TimeSeriesService {
                 "Bucket duration must be positive".to_string(),
             ));
         }
+        if let Some(align) = align_timestamp_ms {
+            Self::validate_align_timestamp(align)?;
+        }
         self.repository
-            .ts_create_rule(source, dest, aggregation, bucket_duration_ms)
+            .ts_create_rule(
+                source,
+                dest,
+                aggregation,
+                bucket_duration_ms,
+                align_timestamp_ms,
+            )
             .await
     }
 
@@ -195,6 +213,46 @@ impl TimeSeriesService {
         Self::validate_key(source)?;
         Self::validate_key(dest)?;
         self.repository.ts_delete_rule(source, dest).await
+    }
+
+    /// Service-level guards for the 10.8 IGNORE option (negative thresholds
+    /// would be silently treated as zero by Redis, but rejecting at the API
+    /// edge gives a clearer 400).
+    fn validate_ignore(ignore: &TsIgnore) -> Result<(), CacheError> {
+        if ignore.max_time_diff < 0 {
+            return Err(CacheError::InvalidInput(
+                "ignore.max_time_diff must be non-negative".to_string(),
+            ));
+        }
+        if !ignore.max_val_diff.is_finite() || ignore.max_val_diff < 0.0 {
+            return Err(CacheError::InvalidInput(
+                "ignore.max_val_diff must be a non-negative finite number".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_create_options(options: &TimeSeriesCreateOptions) -> Result<(), CacheError> {
+        if let Some(ref ig) = options.ignore {
+            Self::validate_ignore(ig)?;
+        }
+        Ok(())
+    }
+
+    fn validate_add_options(options: &TimeSeriesAddOptions) -> Result<(), CacheError> {
+        if let Some(ref ig) = options.ignore {
+            Self::validate_ignore(ig)?;
+        }
+        Ok(())
+    }
+
+    fn validate_align_timestamp(align: i64) -> Result<(), CacheError> {
+        if align < 0 {
+            return Err(CacheError::InvalidInput(
+                "align_timestamp_ms must be non-negative".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     fn validate_key(key: &str) -> Result<(), CacheError> {
@@ -299,7 +357,12 @@ mod tests {
             Ok(())
         }
 
-        async fn ts_add(&self, key: &str, _sample: TimeSeriesSample) -> Result<i64, CacheError> {
+        async fn ts_add(
+            &self,
+            key: &str,
+            _sample: TimeSeriesSample,
+            _options: TimeSeriesAddOptions,
+        ) -> Result<i64, CacheError> {
             *self.added_key.lock().expect("lock") = Some(key.to_string());
             Ok(123)
         }
@@ -422,6 +485,7 @@ mod tests {
             _dest: &str,
             _aggregation: TsAggregation,
             _bucket_duration_ms: u64,
+            _align_timestamp_ms: Option<i64>,
         ) -> Result<(), CacheError> {
             Ok(())
         }
@@ -514,6 +578,7 @@ mod tests {
                     timestamp: 123,
                     value: 1.5,
                 },
+                TimeSeriesAddOptions::default(),
             )
             .await
             .expect("add");
@@ -661,7 +726,7 @@ mod tests {
         let service =
             TimeSeriesService::new_with_repository(Arc::new(CaptureTimeSeriesRepo::default()));
         service
-            .ts_create_rule("source", "dest", TsAggregation::Avg, 60000)
+            .ts_create_rule("source", "dest", TsAggregation::Avg, 60000, None)
             .await
             .expect("create_rule");
     }
@@ -672,7 +737,7 @@ mod tests {
             TimeSeriesService::new_with_repository(Arc::new(CaptureTimeSeriesRepo::default()));
         assert!(matches!(
             service
-                .ts_create_rule("source", "dest", TsAggregation::Avg, 0)
+                .ts_create_rule("source", "dest", TsAggregation::Avg, 0, None)
                 .await,
             Err(CacheError::InvalidInput(_))
         ));
@@ -717,6 +782,7 @@ mod tests {
                     chunk_size: None,
                     duplicate_policy: None,
                     labels,
+                    ignore: None,
                 },
             )
             .await
@@ -728,6 +794,7 @@ mod tests {
                     timestamp: 1000,
                     value: 21.5,
                 },
+                TimeSeriesAddOptions::default(),
             )
             .await
             .expect("add1");
@@ -738,6 +805,7 @@ mod tests {
                     timestamp: 2000,
                     value: 22.0,
                 },
+                TimeSeriesAddOptions::default(),
             )
             .await
             .expect("add2");
@@ -773,6 +841,7 @@ mod tests {
                         chunk_size: None,
                         duplicate_policy: None,
                         labels,
+                        ignore: None,
                     },
                 )
                 .await
@@ -784,6 +853,7 @@ mod tests {
                         timestamp: 1000,
                         value: 1.0,
                     },
+                    TimeSeriesAddOptions::default(),
                 )
                 .await
                 .expect("add");
@@ -827,6 +897,7 @@ mod tests {
                     retention_ms: None,
                     chunk_size: None,
                     duplicate_policy: None,
+                    ignore: None,
                     labels: labels.clone(),
                 },
             )
@@ -840,6 +911,7 @@ mod tests {
                     chunk_size: None,
                     duplicate_policy: None,
                     labels,
+                    ignore: None,
                 },
             )
             .await
@@ -849,7 +921,7 @@ mod tests {
         assert!(info.is_object() || info.is_array());
 
         service
-            .ts_create_rule("source", "dest", TsAggregation::Avg, 60000)
+            .ts_create_rule("source", "dest", TsAggregation::Avg, 60000, None)
             .await
             .expect("create rule");
         service
@@ -888,5 +960,94 @@ mod tests {
                 .await,
             Err(CacheError::InvalidInput(_))
         ));
+    }
+
+    // ─── 10.8 service-level validation tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn test_ts_create_rejects_negative_ignore_time_diff() {
+        let service =
+            TimeSeriesService::new_with_repository(Arc::new(CaptureTimeSeriesRepo::default()));
+        let options = TimeSeriesCreateOptions {
+            retention_ms: None,
+            chunk_size: None,
+            duplicate_policy: None,
+            ignore: Some(TsIgnore {
+                max_time_diff: -5,
+                max_val_diff: 0.0,
+            }),
+            labels: HashMap::new(),
+        };
+        let err = service.ts_create("k", options).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_ts_alter_rejects_non_finite_ignore_val_diff() {
+        let service =
+            TimeSeriesService::new_with_repository(Arc::new(CaptureTimeSeriesRepo::default()));
+        let options = TimeSeriesCreateOptions {
+            retention_ms: None,
+            chunk_size: None,
+            duplicate_policy: None,
+            ignore: Some(TsIgnore {
+                max_time_diff: 0,
+                max_val_diff: f64::NAN,
+            }),
+            labels: HashMap::new(),
+        };
+        let err = service.ts_alter("k", options).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_ts_add_rejects_negative_ignore_val_diff() {
+        let service =
+            TimeSeriesService::new_with_repository(Arc::new(CaptureTimeSeriesRepo::default()));
+        let err = service
+            .ts_add(
+                "k",
+                TimeSeriesSample {
+                    timestamp: 1,
+                    value: 1.0,
+                },
+                TimeSeriesAddOptions {
+                    on_duplicate: None,
+                    ignore: Some(TsIgnore {
+                        max_time_diff: 0,
+                        max_val_diff: -1.0,
+                    }),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_ts_create_rule_rejects_negative_align() {
+        let service =
+            TimeSeriesService::new_with_repository(Arc::new(CaptureTimeSeriesRepo::default()));
+        let err = service
+            .ts_create_rule("src", "dst", TsAggregation::Avg, 60_000, Some(-1))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_ts_create_rule_accepts_align_zero_and_none() {
+        let service =
+            TimeSeriesService::new_with_repository(Arc::new(CaptureTimeSeriesRepo::default()));
+        // Without align — existing happy path.
+        service
+            .ts_create_rule("src", "dst", TsAggregation::Avg, 60_000, None)
+            .await
+            .expect("rule without align");
+        // With align = 0 — explicitly allowed (epoch-aligned per Redis docs).
+        service
+            .ts_create_rule("src", "dst", TsAggregation::Avg, 60_000, Some(0))
+            .await
+            .expect("rule with zero align");
     }
 }

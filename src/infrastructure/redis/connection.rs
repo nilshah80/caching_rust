@@ -914,6 +914,8 @@ impl InstrumentedPool {
             // CLUSTER SLOT-STATS landed in Redis 8.2 and only makes sense in cluster mode
             cluster_slot_stats: cluster_enabled
                 && RedisCapabilities::version_gte(&redis_version, "8.2.0"),
+            // XACKDEL — atomic ack+delete on streams, Redis 8.2+
+            xackdel: RedisCapabilities::version_gte(&redis_version, "8.2.0"),
             vectors: vectors_available,
             vector_range: vector_range_available,
             cluster: cluster_enabled,

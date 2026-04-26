@@ -18,8 +18,8 @@ use crate::api::http::schemas::timeseries::{
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    TimeSeriesCreateOptions, TimeSeriesRangeOptions, TimeSeriesSample, TsAggregation,
-    TsDuplicatePolicy,
+    TimeSeriesAddOptions, TimeSeriesCreateOptions, TimeSeriesRangeOptions, TimeSeriesSample,
+    TsAggregation, TsDuplicatePolicy, TsIgnore,
 };
 use crate::shared::app_state::AppState;
 use crate::shared::response::ApiResponse;
@@ -112,6 +112,7 @@ pub async fn ts_create(
         retention_ms: request.retention_ms,
         chunk_size: request.chunk_size,
         duplicate_policy: request.duplicate_policy.map(to_duplicate_policy),
+        ignore: request.ignore.map(TsIgnore::from),
         labels: request.labels,
     };
     state
@@ -148,6 +149,10 @@ pub async fn ts_add(
     sample
         .validate()
         .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let add_options = TimeSeriesAddOptions {
+        on_duplicate: request.on_duplicate.map(to_duplicate_policy),
+        ignore: request.ignore.map(TsIgnore::from),
+    };
     let timestamp = state
         .timeseries_service
         .ts_add(
@@ -156,6 +161,7 @@ pub async fn ts_add(
                 timestamp: request.timestamp,
                 value: request.value,
             },
+            add_options,
         )
         .await?;
     Ok(Json(ApiResponse::success(TimeSeriesWriteResponse {
@@ -346,6 +352,7 @@ pub async fn ts_alter(
         retention_ms: request.retention_ms,
         chunk_size: request.chunk_size,
         duplicate_policy: request.duplicate_policy.map(to_duplicate_policy),
+        ignore: request.ignore.map(TsIgnore::from),
         labels: request.labels,
     };
     state.timeseries_service.ts_alter(&key, options).await?;
@@ -648,6 +655,7 @@ pub async fn ts_create_rule(
             &request.dest_key,
             to_aggregation(request.aggregation),
             request.bucket_duration_ms,
+            request.align_timestamp_ms,
         )
         .await?;
     Ok(Json(ApiResponse::success(FunctionSuccessResponse {
@@ -703,6 +711,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -721,6 +730,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -733,6 +743,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 100,
                 value: 1.5,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await
@@ -755,6 +767,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -766,6 +779,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 100,
                 value: 1.0,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await
@@ -776,6 +791,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 200,
                 value: 2.0,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await
@@ -835,6 +852,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -854,6 +872,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 100,
                 value: 1.0,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await;
@@ -931,6 +951,7 @@ mod tests {
                 chunk_size: Some(4096),
                 duplicate_policy: Some(DuplicatePolicy::Last),
                 labels,
+                ignore: None,
             }),
         )
         .await
@@ -948,6 +969,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -959,6 +981,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 100,
                 value: 1.0,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await
@@ -1000,6 +1024,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -1012,6 +1037,7 @@ mod tests {
                 retention_ms: Some(120000),
                 chunk_size: None,
                 duplicate_policy: Some(DuplicatePolicy::Last),
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -1033,6 +1059,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -1164,6 +1191,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -1175,6 +1203,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 50,
                 value: 1.0,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await
@@ -1215,6 +1245,7 @@ mod tests {
                 retention_ms: None,
                 chunk_size: None,
                 duplicate_policy: None,
+                ignore: None,
                 labels: std::collections::HashMap::new(),
             }),
         )
@@ -1226,6 +1257,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 100,
                 value: 1.0,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await
@@ -1236,6 +1269,8 @@ mod tests {
             Json(TimeSeriesAddRequest {
                 timestamp: 200,
                 value: 2.0,
+                on_duplicate: None,
+                ignore: None,
             }),
         )
         .await
@@ -1384,6 +1419,7 @@ mod tests {
                 dest_key: "dest".to_string(),
                 aggregation: Aggregation::Avg,
                 bucket_duration_ms: 60000,
+                align_timestamp_ms: None,
             }),
         )
         .await
@@ -1404,6 +1440,7 @@ mod tests {
                 dest_key: "dest".to_string(),
                 aggregation: Aggregation::Avg,
                 bucket_duration_ms: 60000,
+                align_timestamp_ms: None,
             }),
         )
         .await;

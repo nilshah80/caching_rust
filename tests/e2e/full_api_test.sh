@@ -624,6 +624,44 @@ if [[ "$status" == "200" ]]; then
     # TS.INFO: GET /api/v1/timeseries/{key}/info
     IFS='|' read -r status body < <(do_request GET "/api/v1/timeseries/${P}_ts/info")
     check "TS.INFO" "200" "$status" "$body"
+
+    # ─── 10.8 additions: IGNORE / ON_DUPLICATE / alignTimestamp ─────────
+    # TS.CREATE with IGNORE thresholds. Older RTS may reject the IGNORE arg
+    # entirely → check_any 200/500. Schema validation (negative thresholds)
+    # is exercised separately with a 400 assertion below.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/timeseries" \
+        "{\"key\":\"${P}_ts_ignore\",\"retention_ms\":60000,\"ignore\":{\"max_time_diff\":100,\"max_val_diff\":0.5}}")
+    check_any "TS.CREATE with IGNORE" "$status" "$body" 200 500
+
+    # Negative IGNORE thresholds rejected at the schema layer regardless of RTS version.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/timeseries" \
+        "{\"key\":\"${P}_ts_bad_ignore\",\"ignore\":{\"max_time_diff\":-1,\"max_val_diff\":0.0}}")
+    check "TS.CREATE rejects negative IGNORE max_time_diff" "400" "$status" "$body"
+
+    # TS.ADD with ON_DUPLICATE LAST overrides default policy for one sample.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/timeseries/${P}_ts/samples" \
+        '{"timestamp":0,"value":99.0,"on_duplicate":"LAST"}')
+    check_any "TS.ADD with ON_DUPLICATE LAST" "$status" "$body" 200 500
+
+    # TS.ADD accepts IGNORE on the wire — per Redis docs the option is only
+    # honored when TS.ADD creates the series; on an existing series it is
+    # silently ignored. We just verify the route accepts the body.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/timeseries/${P}_ts/samples" \
+        '{"timestamp":0,"value":99.5,"ignore":{"max_time_diff":50,"max_val_diff":1.0}}')
+    check_any "TS.ADD accepts IGNORE (applied only on series creation)" "$status" "$body" 200 500
+
+    # TS.CREATERULE with alignTimestamp (RedisTimeSeries 1.8+; older RTS errors).
+    IFS='|' read -r status body < <(do_request POST "/api/v1/timeseries" \
+        "{\"key\":\"${P}_ts_dst\"}")
+    check_any "TS.CREATE (rule destination)" "$status" "$body" 200 500
+    IFS='|' read -r status body < <(do_request POST "/api/v1/timeseries/${P}_ts/rules" \
+        "{\"dest_key\":\"${P}_ts_dst\",\"aggregation\":\"avg\",\"bucket_duration_ms\":86400000,\"align_timestamp_ms\":21600000}")
+    check_any "TS.CREATERULE with alignTimestamp" "$status" "$body" 200 500
+
+    # Negative alignTimestamp rejected at schema layer.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/timeseries/${P}_ts/rules" \
+        "{\"dest_key\":\"${P}_ts_dst\",\"aggregation\":\"avg\",\"bucket_duration_ms\":86400000,\"align_timestamp_ms\":-1}")
+    check "TS.CREATERULE rejects negative alignTimestamp" "400" "$status" "$body"
 else
     SKIP=$((SKIP + 3))
     echo "  SKIP  TS.ADD, TS.GET, TS.INFO (module not available)"
@@ -702,6 +740,75 @@ if [[ "$status" == "200" ]]; then
 else
     SKIP=$((SKIP + 9))
     echo "  SKIP  MSETEX/DELEX/DIGEST follow-ups (Redis 8.4+ required)"
+fi
+
+echo ""
+
+# ==========================================================================
+# Streams — XACKDEL (Redis 8.2+) — 10.9
+# ==========================================================================
+echo "--- Streams XACKDEL (Redis 8.2+) ---"
+
+# Drive a real ack/del round-trip: XADD → XGROUP CREATE → XREADGROUP > → XACKDEL.
+STREAM_KEY="${P}_xackdel_stream"
+GROUP_NAME="${P}_grp"
+CONSUMER_NAME="${P}_consumer"
+
+# 1. XADD an entry → POST /api/v1/streams/{key}/add
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_KEY}/add" \
+    "{\"fields\":{\"foo\":\"bar\"}}")
+check_any "XADD (seed for XACKDEL)" "$status" "$body" 200 400 501
+ENTRY_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+if [[ "$status" == "200" && -n "$ENTRY_ID" ]]; then
+    # 2. XGROUP CREATE → POST /api/v1/streams/{key}/groups (admin route)
+    IFS='|' read -r status body < <(admin_request POST \
+        "/api/v1/streams/${STREAM_KEY}/groups" \
+        "{\"group\":\"${GROUP_NAME}\",\"id\":\"0\",\"mkstream\":false}")
+    check_any "XGROUP CREATE (for XACKDEL)" "$status" "$body" 200 400 401
+
+    # 3. XREADGROUP > → entry becomes pending in the group
+    IFS='|' read -r status body < <(do_request POST \
+        "/api/v1/streams/${STREAM_KEY}/groups/${GROUP_NAME}/read" \
+        "{\"consumer\":\"${CONSUMER_NAME}\",\"streams\":[{\"key\":\"${STREAM_KEY}\",\"id\":\">\"}],\"count\":10}")
+    check_any "XREADGROUP (make pending)" "$status" "$body" 200 204
+
+    # 4. XACKDEL on the now-pending entry — capability flag gates the route.
+    IFS='|' read -r status body < <(do_request POST \
+        "/api/v1/streams/${STREAM_KEY}/groups/${GROUP_NAME}/ackdel" \
+        "{\"ids\":[\"${ENTRY_ID}\"],\"mode\":\"keepref\"}")
+    check_any "XACKDEL (KEEPREF)" "$status" "$body" 200 501
+
+    # 5. Empty IDs are rejected at the schema layer regardless of capability.
+    IFS='|' read -r status body < <(do_request POST \
+        "/api/v1/streams/${STREAM_KEY}/groups/${GROUP_NAME}/ackdel" \
+        '{"ids":[]}')
+    check_any "XACKDEL rejects empty ids" "$status" "$body" 400 501
+
+    # 6. DELREF mode — deletes references in every group's PEL.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_KEY}/add" \
+        "{\"fields\":{\"baz\":\"qux\"}}")
+    SECOND_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    if [[ -n "$SECOND_ID" ]]; then
+        # Re-read with the correct body shape and ASSERT it puts the second
+        # entry into the PEL — otherwise the DELREF assertion below would
+        # report "missing" instead of exercising the cross-group path.
+        IFS='|' read -r status body < <(do_request POST \
+            "/api/v1/streams/${STREAM_KEY}/groups/${GROUP_NAME}/read" \
+            "{\"consumer\":\"${CONSUMER_NAME}\",\"streams\":[{\"key\":\"${STREAM_KEY}\",\"id\":\">\"}],\"count\":10}")
+        check "XREADGROUP (seed second entry into PEL)" "200" "$status" "$body"
+
+        IFS='|' read -r status body < <(do_request POST \
+            "/api/v1/streams/${STREAM_KEY}/groups/${GROUP_NAME}/ackdel" \
+            "{\"ids\":[\"${SECOND_ID}\"],\"mode\":\"delref\"}")
+        check_any "XACKDEL (DELREF)" "$status" "$body" 200 501
+    else
+        SKIP=$((SKIP + 2))
+        echo "  SKIP  XACKDEL DELREF (could not seed second entry)"
+    fi
+else
+    SKIP=$((SKIP + 5))
+    echo "  SKIP  XACKDEL flow (XADD seed failed)"
 fi
 
 echo ""

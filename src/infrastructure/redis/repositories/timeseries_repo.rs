@@ -5,8 +5,9 @@ use async_trait::async_trait;
 
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
-    TimeSeriesRepository, TimeSeriesSample, TsAggregation, TsDuplicatePolicy,
+    TimeSeriesAddOptions, TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions,
+    TimeSeriesRangeResult, TimeSeriesRepository, TimeSeriesSample, TsAggregation,
+    TsDuplicatePolicy,
 };
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::shared::redis_value::redis_value_to_json;
@@ -29,20 +30,29 @@ impl RedisTimeSeriesRepository {
             cmd.arg("CHUNK_SIZE").arg(chunk_size);
         }
         if let Some(policy) = options.duplicate_policy {
-            cmd.arg("DUPLICATE_POLICY").arg(match policy {
-                TsDuplicatePolicy::Block => "BLOCK",
-                TsDuplicatePolicy::First => "FIRST",
-                TsDuplicatePolicy::Last => "LAST",
-                TsDuplicatePolicy::Min => "MIN",
-                TsDuplicatePolicy::Max => "MAX",
-                TsDuplicatePolicy::Sum => "SUM",
-            });
+            cmd.arg("DUPLICATE_POLICY")
+                .arg(duplicate_policy_token(policy));
+        }
+        if let Some(ig) = &options.ignore {
+            cmd.arg("IGNORE").arg(ig.max_time_diff).arg(ig.max_val_diff);
         }
         if !options.labels.is_empty() {
             cmd.arg("LABELS");
             for (key, value) in &options.labels {
                 cmd.arg(key).arg(value);
             }
+        }
+    }
+
+    /// Append the TS.ADD options surfaced by the API (10.8 additions only):
+    /// `ON_DUPLICATE` is per-call; `IGNORE` is only honored when TS.ADD
+    /// creates the series — Redis silently drops it on an existing series.
+    fn apply_add_options(cmd: &mut redis::Cmd, options: &TimeSeriesAddOptions) {
+        if let Some(policy) = options.on_duplicate {
+            cmd.arg("ON_DUPLICATE").arg(duplicate_policy_token(policy));
+        }
+        if let Some(ig) = &options.ignore {
+            cmd.arg("IGNORE").arg(ig.max_time_diff).arg(ig.max_val_diff);
         }
     }
 
@@ -53,21 +63,7 @@ impl RedisTimeSeriesRepository {
         if let (Some(aggregation), Some(bucket)) = (options.aggregation, options.bucket_duration_ms)
         {
             cmd.arg("AGGREGATION")
-                .arg(match aggregation {
-                    TsAggregation::Avg => "avg",
-                    TsAggregation::Sum => "sum",
-                    TsAggregation::Min => "min",
-                    TsAggregation::Max => "max",
-                    TsAggregation::Range => "range",
-                    TsAggregation::Count => "count",
-                    TsAggregation::First => "first",
-                    TsAggregation::Last => "last",
-                    TsAggregation::StdP => "std.p",
-                    TsAggregation::StdS => "std.s",
-                    TsAggregation::VarP => "var.p",
-                    TsAggregation::VarS => "var.s",
-                    TsAggregation::Twa => "twa",
-                })
+                .arg(aggregation_token(aggregation))
                 .arg(bucket);
         }
     }
@@ -101,14 +97,17 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         Ok(())
     }
 
-    async fn ts_add(&self, key: &str, sample: TimeSeriesSample) -> Result<i64, CacheError> {
+    async fn ts_add(
+        &self,
+        key: &str,
+        sample: TimeSeriesSample,
+        options: TimeSeriesAddOptions,
+    ) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
-        let timestamp: i64 = redis::cmd("TS.ADD")
-            .arg(key)
-            .arg(sample.timestamp)
-            .arg(sample.value)
-            .query_async(&mut conn)
-            .await?;
+        let mut cmd = redis::cmd("TS.ADD");
+        cmd.arg(key).arg(sample.timestamp).arg(sample.value);
+        Self::apply_add_options(&mut cmd, &options);
+        let timestamp: i64 = cmd.query_async(&mut conn).await?;
         Ok(timestamp)
     }
 
@@ -284,30 +283,22 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
         dest: &str,
         aggregation: TsAggregation,
         bucket_duration_ms: u64,
+        align_timestamp_ms: Option<i64>,
     ) -> Result<(), CacheError> {
         let mut conn = self.pool.get().await?;
-        let _: () = redis::cmd("TS.CREATERULE")
-            .arg(source)
+        let mut cmd = redis::cmd("TS.CREATERULE");
+        cmd.arg(source)
             .arg(dest)
             .arg("AGGREGATION")
-            .arg(match aggregation {
-                TsAggregation::Avg => "avg",
-                TsAggregation::Sum => "sum",
-                TsAggregation::Min => "min",
-                TsAggregation::Max => "max",
-                TsAggregation::Range => "range",
-                TsAggregation::Count => "count",
-                TsAggregation::First => "first",
-                TsAggregation::Last => "last",
-                TsAggregation::StdP => "std.p",
-                TsAggregation::StdS => "std.s",
-                TsAggregation::VarP => "var.p",
-                TsAggregation::VarS => "var.s",
-                TsAggregation::Twa => "twa",
-            })
-            .arg(bucket_duration_ms)
-            .query_async(&mut conn)
-            .await?;
+            .arg(aggregation_token(aggregation))
+            .arg(bucket_duration_ms);
+        // alignTimestamp is a trailing positional arg in TS.CREATERULE,
+        // present since RedisTimeSeries 1.8. Older RTS will reject it
+        // with "wrong number of arguments" — surfaced as a Redis error.
+        if let Some(align) = align_timestamp_ms {
+            cmd.arg(align);
+        }
+        let _: () = cmd.query_async(&mut conn).await?;
         Ok(())
     }
 
@@ -319,6 +310,39 @@ impl TimeSeriesRepository for RedisTimeSeriesRepository {
             .query_async(&mut conn)
             .await?;
         Ok(())
+    }
+}
+
+/// Wire token for a `TsDuplicatePolicy`, shared by DUPLICATE_POLICY (CREATE/ALTER)
+/// and ON_DUPLICATE (ADD).
+fn duplicate_policy_token(policy: TsDuplicatePolicy) -> &'static str {
+    match policy {
+        TsDuplicatePolicy::Block => "BLOCK",
+        TsDuplicatePolicy::First => "FIRST",
+        TsDuplicatePolicy::Last => "LAST",
+        TsDuplicatePolicy::Min => "MIN",
+        TsDuplicatePolicy::Max => "MAX",
+        TsDuplicatePolicy::Sum => "SUM",
+    }
+}
+
+/// Wire token for a `TsAggregation`, shared by AGGREGATION clauses in
+/// range queries and CREATERULE.
+fn aggregation_token(aggregation: TsAggregation) -> &'static str {
+    match aggregation {
+        TsAggregation::Avg => "avg",
+        TsAggregation::Sum => "sum",
+        TsAggregation::Min => "min",
+        TsAggregation::Max => "max",
+        TsAggregation::Range => "range",
+        TsAggregation::Count => "count",
+        TsAggregation::First => "first",
+        TsAggregation::Last => "last",
+        TsAggregation::StdP => "std.p",
+        TsAggregation::StdS => "std.s",
+        TsAggregation::VarP => "var.p",
+        TsAggregation::VarS => "var.s",
+        TsAggregation::Twa => "twa",
     }
 }
 

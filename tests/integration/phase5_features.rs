@@ -272,6 +272,7 @@ async fn test_timeseries_lifecycle() {
                 timestamp: 1000,
                 value: 25.5,
             },
+            redis_caching_service::domain::repositories::TimeSeriesAddOptions::default(),
         )
         .await
         .unwrap();
@@ -284,6 +285,7 @@ async fn test_timeseries_lifecycle() {
                 timestamp: 2000,
                 value: 26.0,
             },
+            redis_caching_service::domain::repositories::TimeSeriesAddOptions::default(),
         )
         .await
         .unwrap();

@@ -74,6 +74,9 @@ pub struct FeatureCapabilities {
     /// CLUSTER SLOT-STATS support (Redis 8.2+, requires cluster mode)
     pub cluster_slot_stats: bool,
 
+    /// XACKDEL stream command (Redis 8.2+) — atomic acknowledge + delete
+    pub xackdel: bool,
+
     /// Redis 8.0 vector sets commands (VADD, VSIM, etc.)
     pub vectors: bool,
 
@@ -107,6 +110,7 @@ impl RedisCapabilities {
                 string_8_4_commands: false, // Only enabled when Redis ≥ 8.4
                 latency_histogram: false,   // Only enabled when Redis ≥ 7.0
                 cluster_slot_stats: false,  // Only enabled in cluster mode on Redis ≥ 8.2
+                xackdel: false,             // Only enabled when Redis ≥ 8.2
                 vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
                 vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
                 cluster: false,
@@ -166,6 +170,7 @@ impl Default for FeatureCapabilities {
             string_8_4_commands: false, // Only enabled when Redis ≥ 8.4
             latency_histogram: false,   // Only enabled when Redis ≥ 7.0
             cluster_slot_stats: false,  // Only enabled in cluster mode on Redis ≥ 8.2
+            xackdel: false,             // Only enabled when Redis ≥ 8.2
             vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
             vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
             cluster: false,

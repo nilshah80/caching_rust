@@ -303,15 +303,15 @@
 - [x] **10.7.1**: Implement LATENCY HISTOGRAM, MEMORY MALLOC-STATS, COMMAND GETKEYSANDFLAGS
 - [x] **10.7.2**: Implement CLUSTER SLOT-STATS (Redis 8.2)
 
-### 10.8 TimeSeries Missing Options 🟢 LOW PRIORITY
+### 10.8 TimeSeries Missing Options 🟢 COMPLETED
 
-- [ ] **10.8.1**: Add IGNORE (ignoreMaxTimediff/ignoreMaxValDiff) to TS.CREATE, TS.ALTER, TS.ADD
-- [ ] **10.8.2**: Add alignTimestamp to TS.CREATERULE
-- [ ] **10.8.3**: Add ON_DUPLICATE per-sample policy to TS.ADD
+- [x] **10.8.1**: Add IGNORE (ignoreMaxTimediff/ignoreMaxValDiff) to TS.CREATE, TS.ALTER, TS.ADD
+- [x] **10.8.2**: Add alignTimestamp to TS.CREATERULE
+- [x] **10.8.3**: Add ON_DUPLICATE per-sample policy to TS.ADD
 
-### 10.9 Stream Enhancements (Redis 8.2+) 🟢 LOW PRIORITY
+### 10.9 Stream Enhancements (Redis 8.2+) 🟢 COMPLETED
 
-- [ ] **10.9.1**: Implement XACKDEL (acknowledge + delete atomically)
+- [x] **10.9.1**: Implement XACKDEL (acknowledge + delete atomically)
 
 ---
 
@@ -326,8 +326,8 @@
 | 10.5 | MSETEX / DELEX / DIGEST | 3 | 🟡 Medium | Completed |
 | 10.6 | JSON.MSET | 1 | 🟢 Low | Completed |
 | 10.7 | Admin Monitoring Enhancements | 4 | 🟢 Low | Completed |
-| 10.8 | TimeSeries Missing Options | 3 opts | 🟢 Low | Planned |
-| 10.9 | Stream XACKDEL | 1 | 🟢 Low | Planned |
+| 10.8 | TimeSeries Missing Options | 3 opts | 🟢 Low | Completed |
+| 10.9 | Stream XACKDEL | 1 | 🟢 Low | Completed |
 | **Total** | | **~47 commands** | | |
 
 ### Not Planned (Intentionally Out of Scope)

@@ -414,6 +414,69 @@ pub struct StreamAckResponse {
     pub acknowledged: i64,
 }
 
+// ========== XACKDEL Schemas (Redis 8.2+) ==========
+
+/// XACKDEL mode (mirrors `entities::XAckDelMode`).
+///
+/// Default is `KEEPREF` to match Redis's own default. Lowercase JSON tokens
+/// keep the wire form ergonomic; the wire token is generated centrally.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum XAckDelModeSchema {
+    #[default]
+    KeepRef,
+    DelRef,
+    Acked,
+}
+
+impl From<XAckDelModeSchema> for crate::domain::entities::XAckDelMode {
+    fn from(s: XAckDelModeSchema) -> Self {
+        match s {
+            XAckDelModeSchema::KeepRef => crate::domain::entities::XAckDelMode::KeepRef,
+            XAckDelModeSchema::DelRef => crate::domain::entities::XAckDelMode::DelRef,
+            XAckDelModeSchema::Acked => crate::domain::entities::XAckDelMode::Acked,
+        }
+    }
+}
+
+/// Request body for XACKDEL.
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct StreamAckDelRequest {
+    /// Entry IDs to acknowledge + delete. Must be non-empty (Redis requires
+    /// `numids ≥ 1`).
+    #[validate(length(min = 1, message = "At least one ID is required"))]
+    pub ids: Vec<String>,
+    /// Optional mode flag. Defaults to `keepref`.
+    #[serde(default)]
+    pub mode: Option<XAckDelModeSchema>,
+}
+
+/// Per-entry result schema (mirrors `XAckDelEntryResult`).
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StreamAckDelEntrySchema {
+    pub id: String,
+    /// Raw Redis status code: 1 = deleted, -1 = missing, 2 = dangling.
+    pub status: i64,
+    /// Human-readable label derived from `status`.
+    pub status_label: String,
+}
+
+impl From<crate::domain::entities::XAckDelEntryResult> for StreamAckDelEntrySchema {
+    fn from(e: crate::domain::entities::XAckDelEntryResult) -> Self {
+        Self {
+            id: e.id,
+            status: e.status,
+            status_label: e.status_label,
+        }
+    }
+}
+
+/// Response body for XACKDEL.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StreamAckDelResponse {
+    pub results: Vec<StreamAckDelEntrySchema>,
+}
+
 // ========== XPENDING Schemas ==========
 
 /// Query parameters for XPENDING detail

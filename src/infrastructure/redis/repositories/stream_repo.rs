@@ -11,8 +11,9 @@ use std::time::Duration;
 
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-    StreamEntry, StreamInfo, StreamReadResult, XAddOptions, XAutoClaimOptions, XClaimOptions,
-    XGroupCreateOptions, XPendingOptions, XReadGroupOptions, XReadOptions, XTrimStrategy,
+    StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddOptions,
+    XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions, XReadGroupOptions,
+    XReadOptions, XTrimStrategy,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StreamRepository;
@@ -502,6 +503,42 @@ impl StreamRepository for RedisStreamRepository {
         }
         let result: i64 = cmd.query_async(&mut conn).await?;
         Ok(result)
+    }
+
+    async fn xackdel(
+        &self,
+        key: &str,
+        group: &str,
+        mode: XAckDelMode,
+        ids: &[String],
+    ) -> Result<Vec<XAckDelEntryResult>, CacheError> {
+        if ids.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "XACKDEL requires at least one entry id".to_string(),
+            ));
+        }
+        let mut conn = self.pool.get().await?;
+        // Wire form: XACKDEL key group [KEEPREF | DELREF | ACKED] IDS numids id [id ...]
+        let mut cmd = redis::cmd("XACKDEL");
+        cmd.arg(key).arg(group).arg(mode.as_str());
+        cmd.arg("IDS").arg(ids.len());
+        for id in ids {
+            cmd.arg(id);
+        }
+        // Reply: array of integer status codes, one per id, in input order.
+        let statuses: Vec<i64> = cmd.query_async(&mut conn).await?;
+        if statuses.len() != ids.len() {
+            return Err(CacheError::Internal(format!(
+                "XACKDEL returned {} statuses for {} ids — Redis reply shape mismatch",
+                statuses.len(),
+                ids.len()
+            )));
+        }
+        Ok(ids
+            .iter()
+            .zip(statuses)
+            .map(|(id, status)| XAckDelEntryResult::new(id.clone(), status))
+            .collect())
     }
 
     // ========== Pending Entry Operations ==========

@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-    StreamEntry, StreamInfo, StreamReadResult, XAddOptions, XAutoClaimOptions, XClaimOptions,
-    XGroupCreateOptions, XPendingOptions, XReadGroupOptions, XReadOptions, XTrimStrategy,
+    StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddOptions,
+    XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions, XReadGroupOptions,
+    XReadOptions, XTrimStrategy,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StreamRepository;
@@ -325,6 +326,20 @@ impl StreamService {
         self.repository.xack(key, group, &ids).await
     }
 
+    /// XACKDEL - Atomically acknowledge + delete entries (Redis 8.2+).
+    pub async fn xackdel(
+        &self,
+        key: &str,
+        group: &str,
+        mode: XAckDelMode,
+        ids: Vec<String>,
+    ) -> Result<Vec<XAckDelEntryResult>, CacheError> {
+        if ids.is_empty() {
+            return Err(CacheError::InvalidInput("IDs cannot be empty".to_string()));
+        }
+        self.repository.xackdel(key, group, mode, &ids).await
+    }
+
     // ========== Pending Entry Operations ==========
 
     /// XPENDING - Get pending entries summary
@@ -564,6 +579,19 @@ mod tests {
 
         async fn xack(&self, _key: &str, _group: &str, ids: &[String]) -> Result<i64, CacheError> {
             Ok(ids.len() as i64)
+        }
+
+        async fn xackdel(
+            &self,
+            _key: &str,
+            _group: &str,
+            _mode: XAckDelMode,
+            ids: &[String],
+        ) -> Result<Vec<XAckDelEntryResult>, CacheError> {
+            Ok(ids
+                .iter()
+                .map(|id| XAckDelEntryResult::new(id.clone(), 1))
+                .collect())
         }
 
         async fn xpending_summary(

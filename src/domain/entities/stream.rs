@@ -264,6 +264,63 @@ pub struct XAutoClaimOptions {
     pub just_id: bool,
 }
 
+/// XACKDEL — controls how consumer-group references are handled when the
+/// entry is deleted (Redis 8.2+).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum XAckDelMode {
+    /// Acknowledge in the current group, delete from the stream, but keep
+    /// existing references in *other* groups' PEL. Redis default.
+    #[default]
+    KeepRef,
+    /// Acknowledge + delete + remove all references from every group's PEL.
+    DelRef,
+    /// Only delete the entry if every group has already acknowledged it.
+    /// Otherwise leave it intact and return the `dangling` status.
+    Acked,
+}
+
+impl XAckDelMode {
+    /// Wire token for the optional `KEEPREF | DELREF | ACKED` flag.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            XAckDelMode::KeepRef => "KEEPREF",
+            XAckDelMode::DelRef => "DELREF",
+            XAckDelMode::Acked => "ACKED",
+        }
+    }
+}
+
+/// Per-entry result for XACKDEL.
+///
+/// `status` is forwarded verbatim from Redis (1 = deleted, -1 = missing,
+/// 2 = dangling, any future code surfaced as-is). `status_label` is a
+/// human-readable rendering — handy for clients that don't want to interpret
+/// integers, while still keeping the int around for forward compatibility.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XAckDelEntryResult {
+    pub id: String,
+    pub status: i64,
+    pub status_label: String,
+}
+
+impl XAckDelEntryResult {
+    /// Build a result, deriving the human label from the numeric status.
+    pub fn new(id: String, status: i64) -> Self {
+        let status_label = match status {
+            1 => "deleted",
+            -1 => "missing",
+            2 => "dangling",
+            _ => "unknown",
+        }
+        .to_string();
+        Self {
+            id,
+            status,
+            status_label,
+        }
+    }
+}
+
 /// Options for XPENDING command
 #[derive(Debug, Clone, Default)]
 pub struct XPendingOptions {
@@ -330,5 +387,29 @@ mod tests {
         assert!(opts.maxlen.is_none());
         assert!(!opts.approximate);
         assert!(!opts.no_mkstream);
+    }
+
+    #[test]
+    fn test_xackdel_mode_wire_tokens() {
+        assert_eq!(XAckDelMode::KeepRef.as_str(), "KEEPREF");
+        assert_eq!(XAckDelMode::DelRef.as_str(), "DELREF");
+        assert_eq!(XAckDelMode::Acked.as_str(), "ACKED");
+        assert_eq!(XAckDelMode::default(), XAckDelMode::KeepRef);
+    }
+
+    #[test]
+    fn test_xackdel_entry_result_status_labels() {
+        let cases = [
+            (1, "deleted"),
+            (-1, "missing"),
+            (2, "dangling"),
+            (99, "unknown"),
+            (0, "unknown"),
+        ];
+        for (status, label) in cases {
+            let entry = XAckDelEntryResult::new("1-0".to_string(), status);
+            assert_eq!(entry.status, status);
+            assert_eq!(entry.status_label, label, "status code {status}");
+        }
     }
 }

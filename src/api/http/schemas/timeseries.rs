@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use utoipa::ToSchema;
 use validator::Validate;
 
+use crate::domain::repositories::TsIgnore;
+
 /// A single time-series sample.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct Sample {
@@ -48,6 +50,28 @@ pub enum Aggregation {
     Twa,
 }
 
+/// IGNORE thresholds for TS.CREATE / TS.ALTER / TS.ADD (RedisTimeSeries 1.12+).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, Validate)]
+pub struct TsIgnoreSchema {
+    /// Maximum allowed timestamp delta from the current max for a sample to
+    /// be considered a duplicate. Must be non-negative.
+    #[validate(range(min = 0, message = "max_time_diff must be non-negative"))]
+    pub max_time_diff: i64,
+    /// Maximum allowed absolute value delta from the previous max-timestamp
+    /// sample. Must be non-negative.
+    #[validate(range(min = 0.0, message = "max_val_diff must be non-negative"))]
+    pub max_val_diff: f64,
+}
+
+impl From<TsIgnoreSchema> for TsIgnore {
+    fn from(s: TsIgnoreSchema) -> Self {
+        TsIgnore {
+            max_time_diff: s.max_time_diff,
+            max_val_diff: s.max_val_diff,
+        }
+    }
+}
+
 /// Create time-series key request.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct TimeSeriesCreateRequest {
@@ -59,6 +83,11 @@ pub struct TimeSeriesCreateRequest {
     pub chunk_size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duplicate_policy: Option<DuplicatePolicy>,
+    /// IGNORE thresholds (10.8). Both fields are required when present;
+    /// the validator runs nested.
+    #[validate(nested)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<TsIgnoreSchema>,
     #[serde(default)]
     pub labels: HashMap<String, String>,
 }
@@ -69,6 +98,17 @@ pub struct TimeSeriesAddRequest {
     #[validate(range(min = 0, message = "Timestamp must be non-negative"))]
     pub timestamp: i64,
     pub value: f64,
+    /// Override the configured DUPLICATE_POLICY for this single sample
+    /// (TS.ADD `ON_DUPLICATE`, 10.8). Applies on every TS.ADD call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_duplicate: Option<DuplicatePolicy>,
+    /// IGNORE thresholds for TS.ADD (10.8). Per Redis docs these are applied
+    /// only when TS.ADD creates the series; on an existing series the field
+    /// is silently ignored. Use TS.ALTER with `ignore` set to update an
+    /// existing series.
+    #[validate(nested)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<TsIgnoreSchema>,
 }
 
 /// Range query parameters.
@@ -167,6 +207,10 @@ pub struct TsAlterRequest {
     pub chunk_size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duplicate_policy: Option<DuplicatePolicy>,
+    /// IGNORE thresholds (10.8). Validated nested.
+    #[validate(nested)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<TsIgnoreSchema>,
     #[serde(default)]
     pub labels: HashMap<String, String>,
 }
@@ -261,6 +305,11 @@ pub struct TsCreateRuleRequest {
     pub aggregation: Aggregation,
     #[validate(range(min = 1, message = "bucket_duration_ms must be positive"))]
     pub bucket_duration_ms: u64,
+    /// Optional `alignTimestamp` (RedisTimeSeries 1.8+, expressed in ms).
+    /// When set, every bucket starts at exactly `alignTimestamp + n * bucket_duration_ms`.
+    #[validate(range(min = 0, message = "align_timestamp_ms must be non-negative"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub align_timestamp_ms: Option<i64>,
 }
 
 #[cfg(test)]
@@ -275,6 +324,7 @@ mod tests {
             chunk_size: None,
             duplicate_policy: None,
             labels: HashMap::new(),
+            ignore: None,
         };
         assert!(request.validate().is_err());
     }
@@ -286,6 +336,95 @@ mod tests {
             value: 1.0,
         };
         assert!(sample.validate().is_err());
+    }
+
+    // ─── 10.8 IGNORE / ON_DUPLICATE / alignTimestamp validation ──────────────
+
+    #[test]
+    fn test_ignore_schema_rejects_negative_time_diff() {
+        let ig = TsIgnoreSchema {
+            max_time_diff: -1,
+            max_val_diff: 0.0,
+        };
+        assert!(ig.validate().is_err());
+    }
+
+    #[test]
+    fn test_ignore_schema_rejects_negative_val_diff() {
+        let ig = TsIgnoreSchema {
+            max_time_diff: 0,
+            max_val_diff: -0.5,
+        };
+        assert!(ig.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_request_propagates_nested_ignore_validation() {
+        // Nested validation must trigger when the parent is validated.
+        let request = TimeSeriesCreateRequest {
+            key: "k".to_string(),
+            retention_ms: None,
+            chunk_size: None,
+            duplicate_policy: None,
+            ignore: Some(TsIgnoreSchema {
+                max_time_diff: -10,
+                max_val_diff: 0.0,
+            }),
+            labels: HashMap::new(),
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_alter_request_propagates_nested_ignore_validation() {
+        let request = TsAlterRequest {
+            retention_ms: None,
+            chunk_size: None,
+            duplicate_policy: None,
+            ignore: Some(TsIgnoreSchema {
+                max_time_diff: 0,
+                max_val_diff: -2.0,
+            }),
+            labels: HashMap::new(),
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_add_request_propagates_nested_ignore_validation() {
+        let request = TimeSeriesAddRequest {
+            timestamp: 0,
+            value: 1.0,
+            on_duplicate: Some(DuplicatePolicy::Last),
+            ignore: Some(TsIgnoreSchema {
+                max_time_diff: -1,
+                max_val_diff: 0.0,
+            }),
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_rule_request_rejects_negative_align() {
+        let request = TsCreateRuleRequest {
+            dest_key: "dst".to_string(),
+            aggregation: Aggregation::Avg,
+            bucket_duration_ms: 60_000,
+            align_timestamp_ms: Some(-1),
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_create_rule_request_accepts_zero_align() {
+        // 0 means "aligned with the epoch" per Redis docs — explicitly allowed.
+        let request = TsCreateRuleRequest {
+            dest_key: "dst".to_string(),
+            aggregation: Aggregation::Avg,
+            bucket_duration_ms: 60_000,
+            align_timestamp_ms: Some(0),
+        };
+        assert!(request.validate().is_ok());
     }
 
     #[test]

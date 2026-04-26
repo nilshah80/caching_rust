@@ -178,10 +178,10 @@ use crate::domain::repositories::{
     LcsResult, LexRange, ListDirection, ListRepository, MSetExExistence, MSetExOptions,
     NumSubResult, ProbabilisticRepository, PubSubRepository, PublishResult, ScoreRange,
     ScoredMember, SearchRepository, SetRepository, SetScanResult, SortOptions, SortedSetRepository,
-    StreamRepository, StringRepository, TimeSeriesCreateOptions, TimeSeriesMGetResult,
-    TimeSeriesRangeOptions, TimeSeriesRangeResult, TimeSeriesRepository, TimeSeriesSample,
-    TsAggregation, ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
-    ZSetAlgebraOptions,
+    StreamRepository, StringRepository, TimeSeriesAddOptions, TimeSeriesCreateOptions,
+    TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult, TimeSeriesRepository,
+    TimeSeriesSample, TsAggregation, ZAddOptions, ZAddResult, ZPopDirection, ZPopResult,
+    ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -1091,7 +1091,12 @@ impl TimeSeriesRepository for MockTimeSeriesRepository {
         Ok(())
     }
 
-    async fn ts_add(&self, key: &str, sample: TimeSeriesSample) -> Result<i64, CacheError> {
+    async fn ts_add(
+        &self,
+        key: &str,
+        sample: TimeSeriesSample,
+        _options: TimeSeriesAddOptions,
+    ) -> Result<i64, CacheError> {
         self.data
             .lock()
             .expect("lock")
@@ -1244,6 +1249,7 @@ impl TimeSeriesRepository for MockTimeSeriesRepository {
         _dest: &str,
         _aggregation: TsAggregation,
         _bucket_duration_ms: u64,
+        _align_timestamp_ms: Option<i64>,
     ) -> Result<(), CacheError> {
         Ok(())
     }
@@ -3955,6 +3961,20 @@ impl StreamRepository for MockStreamRepository {
 
     async fn xack(&self, _key: &str, _group: &str, ids: &[String]) -> Result<i64, CacheError> {
         Ok(ids.len() as i64)
+    }
+
+    async fn xackdel(
+        &self,
+        _key: &str,
+        _group: &str,
+        _mode: crate::domain::entities::XAckDelMode,
+        ids: &[String],
+    ) -> Result<Vec<crate::domain::entities::XAckDelEntryResult>, CacheError> {
+        // Mock returns "deleted" for every supplied id, in order.
+        Ok(ids
+            .iter()
+            .map(|id| crate::domain::entities::XAckDelEntryResult::new(id.clone(), 1))
+            .collect())
     }
 
     async fn xpending_summary(

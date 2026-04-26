@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-    StreamEntry, StreamInfo, StreamReadResult, XAddOptions, XAutoClaimOptions, XClaimOptions,
-    XGroupCreateOptions, XPendingOptions, XReadGroupOptions, XReadOptions, XTrimStrategy,
+    StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddOptions,
+    XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions, XReadGroupOptions,
+    XReadOptions, XTrimStrategy,
 };
 use crate::domain::errors::CacheError;
 
@@ -158,6 +159,18 @@ pub trait StreamRepository: Send + Sync {
     /// XACK - Acknowledge one or more entries
     /// Returns the number of entries acknowledged
     async fn xack(&self, key: &str, group: &str, ids: &[String]) -> Result<i64, CacheError>;
+
+    /// XACKDEL - Atomically acknowledge + delete entries (Redis 8.2+).
+    ///
+    /// `mode` controls how cross-group references are treated; `ids` must be
+    /// non-empty (Redis requires `numids ≥ 1`).
+    async fn xackdel(
+        &self,
+        key: &str,
+        group: &str,
+        mode: XAckDelMode,
+        ids: &[String],
+    ) -> Result<Vec<XAckDelEntryResult>, CacheError>;
 
     // ========== Pending Entry Operations ==========
 

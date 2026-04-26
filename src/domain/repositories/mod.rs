@@ -57,7 +57,8 @@ pub use string_repository::{
     MSetExOptions, StringRepository,
 };
 pub use timeseries_repository::{
-    TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
-    TimeSeriesRepository, TimeSeriesSample, TsAggregation, TsDuplicatePolicy,
+    TimeSeriesAddOptions, TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions,
+    TimeSeriesRangeResult, TimeSeriesRepository, TimeSeriesSample, TsAggregation,
+    TsDuplicatePolicy, TsIgnore,
 };
 pub use vector_repository::VectorRepository;

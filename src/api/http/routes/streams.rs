@@ -23,13 +23,13 @@ use crate::api::http::schemas::streams::{
     ConsumerCreateRequest, ConsumerGroupCreateRequest, ConsumerGroupCreateResponse,
     ConsumerGroupInfoResponse, ConsumerGroupSetIdRequest, ConsumerInfoResponse,
     ConsumerOperationResponse, PendingEntriesResponse, PendingQuery, PendingSummaryResponse,
-    StreamAckRequest, StreamAckResponse, StreamAddRequest, StreamAddResponse,
-    StreamAutoClaimRequest, StreamAutoClaimResponse, StreamClaimRequest, StreamClaimResponse,
-    StreamDeleteRequest, StreamDeleteResponse, StreamEntriesResponse, StreamGroupSubscribeQuery,
-    StreamInfoQuery, StreamInfoResponse, StreamLengthResponse, StreamRangeQuery,
-    StreamReadBlockingRequest, StreamReadGroupBlockingRequest, StreamReadGroupRequest,
-    StreamReadRequest, StreamReadResponse, StreamSetIdRequest, StreamSubscribeQuery,
-    StreamTrimRequest, StreamTrimResponse,
+    StreamAckDelEntrySchema, StreamAckDelRequest, StreamAckDelResponse, StreamAckRequest,
+    StreamAckResponse, StreamAddRequest, StreamAddResponse, StreamAutoClaimRequest,
+    StreamAutoClaimResponse, StreamClaimRequest, StreamClaimResponse, StreamDeleteRequest,
+    StreamDeleteResponse, StreamEntriesResponse, StreamGroupSubscribeQuery, StreamInfoQuery,
+    StreamInfoResponse, StreamLengthResponse, StreamRangeQuery, StreamReadBlockingRequest,
+    StreamReadGroupBlockingRequest, StreamReadGroupRequest, StreamReadRequest, StreamReadResponse,
+    StreamSetIdRequest, StreamSubscribeQuery, StreamTrimRequest, StreamTrimResponse,
 };
 use crate::domain::errors::CacheError;
 use crate::shared::app_state::AppState;
@@ -76,6 +76,7 @@ pub fn stream_routes() -> Router<AppState> {
             post(xreadgroup_blocking),
         )
         .route("/api/v1/streams/{key}/groups/{group}/ack", post(xack))
+        .route("/api/v1/streams/{key}/groups/{group}/ackdel", post(xackdel))
         // Pending entries
         .route(
             "/api/v1/streams/{key}/groups/{group}/pending",
@@ -647,6 +648,51 @@ pub async fn xack(
     let acknowledged = state.stream_service.xack(&key, &group, req.ids).await?;
     Ok(Json(ApiResponse::success(StreamAckResponse {
         acknowledged,
+    })))
+}
+
+/// POST /api/v1/streams/{key}/groups/{group}/ackdel
+///
+/// Atomically acknowledge + delete entries (XACKDEL, Redis 8.2+). Returns one
+/// status per ID: `1` deleted, `-1` missing, `2` dangling (only when `mode`
+/// is `acked` and the entry is still pending in another group).
+#[utoipa::path(
+    post,
+    path = "/api/v1/streams/{key}/groups/{group}/ackdel",
+    params(
+        ("key" = String, Path, description = "The stream key"),
+        ("group" = String, Path, description = "The consumer group name")
+    ),
+    request_body = StreamAckDelRequest,
+    responses(
+        (status = 200, description = "Per-entry ack+delete results", body = StreamAckDelResponse),
+        (status = 400, description = "Invalid request — empty ids"),
+        (status = 501, description = "XACKDEL requires Redis 8.2+")
+    ),
+    tag = "Streams"
+)]
+pub async fn xackdel(
+    State(state): State<AppState>,
+    Path((key, group)): Path<(String, String)>,
+    Json(req): Json<StreamAckDelRequest>,
+) -> Result<Json<ApiResponse<StreamAckDelResponse>>, CacheError> {
+    if !state.capabilities.features.xackdel {
+        return Err(CacheError::ModuleNotAvailable(
+            "XACKDEL requires Redis 8.2+".to_string(),
+        ));
+    }
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let mode = req.mode.unwrap_or_default().into();
+    let entries = state
+        .stream_service
+        .xackdel(&key, &group, mode, req.ids)
+        .await?;
+    Ok(Json(ApiResponse::success(StreamAckDelResponse {
+        results: entries
+            .into_iter()
+            .map(StreamAckDelEntrySchema::from)
+            .collect(),
     })))
 }
 
@@ -1337,6 +1383,16 @@ mod tests {
 
         async fn xack(&self, key: &str, group: &str, ids: &[String]) -> Result<i64, CacheError> {
             self.base.xack(key, group, ids).await
+        }
+
+        async fn xackdel(
+            &self,
+            key: &str,
+            group: &str,
+            mode: crate::domain::entities::XAckDelMode,
+            ids: &[String],
+        ) -> Result<Vec<crate::domain::entities::XAckDelEntryResult>, CacheError> {
+            self.base.xackdel(key, group, mode, ids).await
         }
 
         async fn xpending_summary(
@@ -2313,5 +2369,67 @@ mod tests {
 
         // Should return CacheError::SubscriptionLimitReached
         assert!(matches!(result, Err(CacheError::SubscriptionLimitReached)));
+    }
+
+    // ─── 10.9 XACKDEL route tests ───────────────────────────────────────────
+
+    use crate::api::http::schemas::streams::XAckDelModeSchema;
+
+    fn enable_xackdel(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.xackdel = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    #[tokio::test]
+    async fn test_xackdel_returns_501_when_capability_off() {
+        let state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        let result = xackdel(
+            State(state),
+            Path(("stream".to_string(), "grp".to_string())),
+            Json(StreamAckDelRequest {
+                ids: vec!["1-0".to_string()],
+                mode: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xackdel_rejects_empty_ids_with_400() {
+        let mut state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        enable_xackdel(&mut state);
+        let result = xackdel(
+            State(state),
+            Path(("stream".to_string(), "grp".to_string())),
+            Json(StreamAckDelRequest {
+                ids: vec![],
+                mode: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xackdel_success_path_through_mock() {
+        let mut state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        enable_xackdel(&mut state);
+        let response = xackdel(
+            State(state),
+            Path(("stream".to_string(), "grp".to_string())),
+            Json(StreamAckDelRequest {
+                ids: vec!["1-0".to_string(), "2-0".to_string()],
+                mode: Some(XAckDelModeSchema::DelRef),
+            }),
+        )
+        .await
+        .expect("response");
+        let body = response.0.data.expect("body");
+        assert_eq!(body.results.len(), 2);
+        assert_eq!(body.results[0].id, "1-0");
+        assert_eq!(body.results[0].status, 1);
+        assert_eq!(body.results[0].status_label, "deleted");
     }
 }
