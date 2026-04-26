@@ -180,7 +180,7 @@
 - [x] **6.4.1–6.4.2**: SAVE, BGSAVE, BGREWRITEAOF
 
 ### 6.5 Client Operations ✅
-- [x] **6.5.1–6.5.2**: CLIENT LIST/KILL/SETNAME/GETNAME/PAUSE/UNPAUSE/ID/INFO/NO-EVICT
+- [x] **6.5.1–6.5.2**: CLIENT LIST/KILL/SETNAME/GETNAME/PAUSE/UNPAUSE/ID/INFO
 
 ### 6.6 Monitoring Operations ✅
 - [x] **6.6.1–6.6.2**: SLOWLOG GET/LEN/RESET, LATENCY LATEST/GRAPH/HISTORY/DOCTOR
@@ -330,14 +330,77 @@
 | 10.9 | Stream XACKDEL | 1 | 🟢 Low | Completed |
 | **Total** | | **~47 commands** | | |
 
+---
+
+## Phase 11: Remaining Redis 8.6+ Gap Closure (Planned)
+
+> Remaining implementation gaps confirmed by code audit against the Redis 8.6 command reference.
+> These are not currently present in repository traits, Redis implementations, HTTP schemas/routes, or E2E tests.
+
+### 11.1 Stream Deletion, Reference Policy, and IDMP (Redis 8.2/8.6) 🟡 MEDIUM PRIORITY
+
+- [ ] **11.1.1**: Implement XDELEX with `KEEPREF | DELREF | ACKED`
+- [ ] **11.1.2**: Add `KEEPREF | DELREF | ACKED` reference policy options to XTRIM
+- [ ] **11.1.3**: Add `KEEPREF | DELREF | ACKED` reference policy options to XADD
+- [ ] **11.1.4**: Implement XCFGSET for stream IDMP configuration (`IDMP-DURATION`, `IDMP-MAXSIZE`)
+- [ ] **11.1.5**: Add Redis 8.6 XADD IDMP options (`IDMPAUTO producer-id`, `IDMP producer-id idempotent-id`)
+- [ ] **11.1.6**: Add capability gates, OpenAPI entries, unit tests, and E2E coverage for the stream 8.2/8.6 additions
+
+### 11.2 Hot Key Monitoring (Redis 8.6) 🟡 MEDIUM PRIORITY
+
+- [ ] **11.2.1**: Implement HOTKEYS START
+- [ ] **11.2.2**: Implement HOTKEYS STOP
+- [ ] **11.2.3**: Implement HOTKEYS GET
+- [ ] **11.2.4**: Implement HOTKEYS RESET
+- [ ] **11.2.5**: Add `hotkeys` capability detection (`version_gte("8.6.0")`), admin routes, OpenAPI, and E2E tests
+
+### 11.3 Durability and Key Restore Options 🟢 LOW PRIORITY
+
+- [ ] **11.3.1**: Implement WAITAOF (`WAITAOF numlocal numreplicas timeout`)
+- [ ] **11.3.2**: Add BGSAVE `SCHEDULE` option
+- [ ] **11.3.3**: Add RESTORE options: `ABSTTL`, `IDLETIME seconds`, `FREQ frequency`
+- [ ] **11.3.4**: Decide whether RESTORE-ASKING is in scope for cluster migration workflows; implement only if exposed as an admin-only endpoint
+
+### 11.4 Client Admin Cleanup 🟢 LOW PRIORITY
+
+- [ ] **11.4.1**: Implement CLIENT NO-EVICT (`ON | OFF`) or explicitly mark it out of scope
+- [ ] **11.4.2**: Implement CLIENT SETINFO (`LIB-NAME`, `LIB-VER`) if useful for connection metadata
+- [ ] **11.4.3**: Implement CLIENT UNBLOCK (`TIMEOUT | ERROR`) as an admin-only operation
+
+### 11.5 String Command Option Parity (Redis 8.4) 🟢 LOW PRIORITY
+
+- [ ] **11.5.1**: Add conditional SET predicates: `IFEQ`, `IFNE`, `IFDEQ`, `IFDNE`
+- [ ] **11.5.2**: Add schema/service validation so SET predicates remain mutually exclusive with `NX`/`XX` where Redis requires it
+
+### 11.6 Optional Literal Command Parity 🟢 LOW PRIORITY
+
+- [ ] **11.6.1**: Expose MODULE LIST as a read-only admin endpoint (MODULE LOAD/LOADEX/UNLOAD remain out of scope)
+- [ ] **11.6.2**: Expose read-only cluster identity/introspection commands if desired: CLUSTER MYID, MYSHARDID, LINKS, REPLICAS, COUNTKEYSINSLOT, GETKEYSINSLOT
+
+### Phase 11 Summary
+
+| Task | Feature | Commands/options | Priority | Status |
+|------|---------|------------------|----------|--------|
+| 11.1 | Streams 8.2/8.6 | 2 commands + 3 option groups | 🟡 Medium | Planned |
+| 11.2 | HOTKEYS | 4 commands | 🟡 Medium | Planned |
+| 11.3 | Durability/key restore | 2 commands + RESTORE options | 🟢 Low | Planned |
+| 11.4 | Client admin cleanup | 3 commands | 🟢 Low | Planned |
+| 11.5 | SET predicate parity | 4 options | 🟢 Low | Planned |
+| 11.6 | Optional read-only parity | MODULE LIST + cluster introspection | 🟢 Low | Planned |
+
 ### Not Planned (Intentionally Out of Scope)
 
 | Feature | Reason |
 |---------|--------|
-| Client tracking (CLIENT CACHING/GETREDIR/NO-TOUCH/TRACKING) | Server-assisted client-side caching; not REST-appropriate |
-| Replica management (FAILOVER, REPLICAOF, ROLE) | Not relevant for a caching service API |
-| Module management (MODULE LOAD/UNLOAD) | Admin-level server management |
-| Connection-level (ECHO, HELLO, RESET, QUIT, AUTH, PING) | Handled by Redis driver |
+| Client tracking (CLIENT CACHING/GETREDIR/NO-TOUCH/TRACKING/TRACKINGINFO) | Server-assisted client-side caching; not REST-appropriate |
+| Client reply mode (CLIENT REPLY) | Mutates protocol replies for the pooled connection; unsafe for shared REST handlers |
+| Replica management (FAILOVER, REPLICAOF/SLAVEOF, ROLE) | Not relevant for a caching service API |
+| Cluster mutation (CLUSTER ADDSLOTS/DELSLOTS/MEET/FORGET/REPLICATE/RESET/SETSLOT/etc.) | Topology-changing operations should remain outside this REST API |
+| Module management (MODULE LOAD/LOADEX/UNLOAD) | Admin-level server extension management; MODULE LIST may be exposed read-only in Phase 11 |
+| Connection-level (ECHO, HELLO, RESET, QUIT, AUTH, PING, READONLY, READWRITE, ASKING) | Handled by Redis driver or cluster client behavior |
+| Key migration (MIGRATE, RESTORE-ASKING) | Migration workflows are operationally risky; RESTORE-ASKING is tracked only as a Phase 11 decision item |
 | Internal replication (PSYNC, SYNC, REPLCONF) | Never exposed via API |
+| Debug/test commands (PFDEBUG, PFSELFTEST, MONITOR) | Internal diagnostics or unbounded streaming; not suitable for public API |
+| Deprecated aliases (SUBSTR, JSON.FORGET, GEORADIUS_RO, GEORADIUSBYMEMBER_RO) | Covered by canonical commands (`GETRANGE`, `JSON.DEL`, `GEOSEARCH`) unless literal alias parity is required |
 | SSUBSCRIBE (WebSocket) | Redis crate limitation |
 | LOLWUT | Easter egg |

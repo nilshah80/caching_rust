@@ -68,7 +68,7 @@ For detailed architectural decisions, see [docs/architecture.md](docs/architectu
 ### Prerequisites
 
 - Docker and Docker Compose
-- Rust 1.92+ (for local development)
+- Rust 1.95+ (for local development)
 
 ### Running with Docker
 

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.94-slim AS chef
+FROM rust:1.95-slim AS chef
 
 WORKDIR /app
 

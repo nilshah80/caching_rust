@@ -37,7 +37,11 @@ impl ClusterPool {
         }
 
         if config.cluster_read_from_replicas {
-            builder = builder.read_from_replicas();
+            // `read_from_replicas()` was deprecated in redis 1.2 in favour of
+            // a strategy-based API. `RandomReplicaStrategy` preserves the
+            // original "any replica" routing behavior.
+            builder = builder
+                .read_routing_strategy(redis::cluster_read_routing::RandomReplicaStrategy);
         }
 
         let client = builder.build()?;
