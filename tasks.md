@@ -287,11 +287,11 @@
 - [x] **10.4.3**: Add unit and E2E tests
 - [x] **10.4.4**: Add OpenAPI documentation and capability-based route filtering
 
-### 10.5 New String/Key Commands (Redis 8.4+) 🟡 MEDIUM PRIORITY
+### 10.5 New String/Key Commands (Redis 8.4+) 🟢 COMPLETED
 
-- [ ] **10.5.1**: Implement MSETEX (atomic multi-key SET with shared TTL)
-- [ ] **10.5.2**: Implement DELEX (conditional delete by value/digest) and DIGEST (XXH3 hash)
-- [ ] **10.5.3**: Add unit and E2E tests
+- [x] **10.5.1**: Implement MSETEX (atomic multi-key SET with shared TTL)
+- [x] **10.5.2**: Implement DELEX (conditional delete by value/digest) and DIGEST (XXH3 hash)
+- [x] **10.5.3**: Add unit and E2E tests
 
 ### 10.6 JSON.MSET (JSON v2.6+) 🟢 COMPLETED
 
@@ -323,7 +323,7 @@
 | 10.2 | Hash Atomic Ops (HGETDEL/HGETEX/HSETEX) | 3 | 🟡 Medium-High | Completed |
 | 10.3 | Search (FT.CONFIG, FT.HYBRID, FT.CURSOR) | 5 | 🟡 Medium | Completed |
 | 10.4 | T-Digest | 14 | 🟡 Medium | Completed |
-| 10.5 | MSETEX / DELEX / DIGEST | 3 | 🟡 Medium | Planned |
+| 10.5 | MSETEX / DELEX / DIGEST | 3 | 🟡 Medium | Completed |
 | 10.6 | JSON.MSET | 1 | 🟢 Low | Completed |
 | 10.7 | Admin Monitoring Enhancements | 4 | 🟢 Low | Planned |
 | 10.8 | TimeSeries Missing Options | 3 opts | 🟢 Low | Planned |

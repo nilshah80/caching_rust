@@ -7,8 +7,8 @@ use serde::Serialize;
 use std::time::Duration;
 
 use crate::domain::entities::{
-    AppendResult, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult, SetResult,
-    StringValue,
+    AppendResult, ExpiryMode, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult,
+    SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
 
@@ -54,6 +54,44 @@ pub struct LcsMatch {
     pub key2_range: (i64, i64),
     /// Length of this match (only if WITHMATCHLEN)
     pub match_len: Option<i64>,
+}
+
+/// Existence condition for the MSETEX command (Redis 8.4+)
+#[derive(Debug, Clone, Copy)]
+pub enum MSetExExistence {
+    /// Set only if none of the keys exist (NX)
+    Nx,
+    /// Set only if all of the keys exist (XX)
+    Xx,
+}
+
+/// Options for the MSETEX command (Redis 8.4+)
+#[derive(Debug, Clone, Default)]
+pub struct MSetExOptions {
+    /// NX/XX condition (mutually exclusive)
+    pub existence: Option<MSetExExistence>,
+    /// Expiry mode (EX, PX, EXAT, PXAT). Mutually exclusive with `keep_ttl`.
+    pub expiry_mode: Option<ExpiryMode>,
+    /// Expiry value paired with `expiry_mode`.
+    pub expiry_value: Option<u64>,
+    /// Retain existing TTL on each key (KEEPTTL)
+    pub keep_ttl: bool,
+}
+
+/// Conditional predicate for the DELEX command (Redis 8.4+).
+///
+/// At most one variant may be set per request — Redis itself rejects multiple
+/// conditions. Service-layer validation enforces this before dispatch.
+#[derive(Debug, Clone)]
+pub enum DelExCondition {
+    /// IFEQ — delete only when the value equals the supplied string
+    IfEq(String),
+    /// IFNE — delete only when the value is not equal to the supplied string
+    IfNe(String),
+    /// IFDEQ — delete only when the value's XXH3 digest matches
+    IfDeq(String),
+    /// IFDNE — delete only when the value's XXH3 digest does not match
+    IfDne(String),
 }
 
 /// Repository trait for Redis string operations
@@ -135,4 +173,26 @@ pub trait StringRepository: Send + Sync {
         key2: &str,
         options: LcsOptions,
     ) -> Result<LcsResult, CacheError>;
+
+    /// MSETEX - Atomic multi-key SET with shared TTL (Redis 8.4+).
+    ///
+    /// Returns `true` if all keys were set, `false` when an NX/XX precondition
+    /// caused Redis to skip the entire batch.
+    async fn msetex(
+        &self,
+        pairs: &[(String, String)],
+        options: MSetExOptions,
+    ) -> Result<bool, CacheError>;
+
+    /// DELEX - Conditional delete by value or digest (Redis 8.4+).
+    ///
+    /// Returns `true` when the key was deleted, `false` when the key did not
+    /// exist or the supplied condition (if any) was not satisfied.
+    async fn delex(&self, key: &str, condition: Option<DelExCondition>)
+    -> Result<bool, CacheError>;
+
+    /// DIGEST - Compute the XXH3 hash digest of a string value (Redis 8.4+).
+    ///
+    /// Returns `None` when the key does not exist. Errors out on non-string keys.
+    async fn digest(&self, key: &str) -> Result<Option<String>, CacheError>;
 }

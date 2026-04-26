@@ -13,7 +13,8 @@ use crate::domain::entities::{
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    LcsMatch, LcsMatchResult, LcsOptions, LcsResult, StringRepository,
+    DelExCondition, LcsMatch, LcsMatchResult, LcsOptions, LcsResult, MSetExExistence,
+    MSetExOptions, StringRepository,
 };
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
@@ -305,6 +306,76 @@ impl StringRepository for RedisStringRepository {
     async fn get_del(&self, key: &str) -> Result<Option<String>, CacheError> {
         let mut conn = self.pool.get().await?;
         let result: Option<String> = redis::cmd("GETDEL").arg(key).query_async(&mut conn).await?;
+        Ok(result)
+    }
+
+    async fn msetex(
+        &self,
+        pairs: &[(String, String)],
+        options: MSetExOptions,
+    ) -> Result<bool, CacheError> {
+        if pairs.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "MSETEX requires at least one key-value pair".to_string(),
+            ));
+        }
+
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("MSETEX");
+        cmd.arg(pairs.len());
+        for (key, value) in pairs {
+            cmd.arg(key).arg(value);
+        }
+        match options.existence {
+            Some(MSetExExistence::Nx) => {
+                cmd.arg("NX");
+            }
+            Some(MSetExExistence::Xx) => {
+                cmd.arg("XX");
+            }
+            None => {}
+        }
+        if options.keep_ttl {
+            cmd.arg("KEEPTTL");
+        } else if let (Some(mode), Some(val)) = (options.expiry_mode, options.expiry_value) {
+            cmd.arg(mode.as_str()).arg(val);
+        }
+
+        let applied: i64 = cmd.query_async(&mut conn).await?;
+        Ok(applied == 1)
+    }
+
+    async fn delex(
+        &self,
+        key: &str,
+        condition: Option<DelExCondition>,
+    ) -> Result<bool, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let mut cmd = redis::cmd("DELEX");
+        cmd.arg(key);
+        match condition {
+            Some(DelExCondition::IfEq(v)) => {
+                cmd.arg("IFEQ").arg(v);
+            }
+            Some(DelExCondition::IfNe(v)) => {
+                cmd.arg("IFNE").arg(v);
+            }
+            Some(DelExCondition::IfDeq(d)) => {
+                cmd.arg("IFDEQ").arg(d);
+            }
+            Some(DelExCondition::IfDne(d)) => {
+                cmd.arg("IFDNE").arg(d);
+            }
+            None => {}
+        }
+
+        let deleted: i64 = cmd.query_async(&mut conn).await?;
+        Ok(deleted == 1)
+    }
+
+    async fn digest(&self, key: &str) -> Result<Option<String>, CacheError> {
+        let mut conn = self.pool.get().await?;
+        let result: Option<String> = redis::cmd("DIGEST").arg(key).query_async(&mut conn).await?;
         Ok(result)
     }
 

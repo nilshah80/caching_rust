@@ -65,6 +65,9 @@ pub struct FeatureCapabilities {
     /// Redis 8.0 hash commands (HGETEX, HSETEX, HGETDEL)
     pub hash_8_commands: bool,
 
+    /// Redis 8.4 string commands (MSETEX, DELEX, DIGEST)
+    pub string_8_4_commands: bool,
+
     /// Redis 8.0 vector sets commands (VADD, VSIM, etc.)
     pub vectors: bool,
 
@@ -95,8 +98,9 @@ impl RedisCapabilities {
                 command_docs: true,
                 hash_field_expiration: true,
                 hash_8_commands: true,
-                vectors: false, // Only enabled after positive COMMAND INFO VADD probe
-                vector_range: false, // Only enabled after positive COMMAND INFO VRANGE probe
+                string_8_4_commands: false, // Only enabled when Redis ≥ 8.4
+                vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
+                vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
                 cluster: false,
             },
             detected_at: Utc::now(),
@@ -151,8 +155,9 @@ impl Default for FeatureCapabilities {
             command_docs: true,
             hash_field_expiration: true,
             hash_8_commands: true,
-            vectors: false,      // Only enabled after positive COMMAND INFO VADD probe
-            vector_range: false, // Only enabled after positive COMMAND INFO VRANGE probe
+            string_8_4_commands: false, // Only enabled when Redis ≥ 8.4
+            vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
+            vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
             cluster: false,
         }
     }

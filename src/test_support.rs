@@ -170,15 +170,16 @@ use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     AdminRepository, BitMapRepository, BitOperation, BitfieldCommand, BitfieldResult,
     BlockingPopResult, BloomRepository, ClusterInfo, ClusterNode, ClusterRepository,
-    ClusterSlotRange, ExpireCondition, FunctionFlushMode, FunctionRepository,
+    ClusterSlotRange, DelExCondition, ExpireCondition, FunctionFlushMode, FunctionRepository,
     FunctionRestorePolicy, HSetExCondition, HashExpiration, HashRepository, InsertPosition,
     JsonRepository, KeyRepository, LMPopResult, LPosOptions, LcsMatch, LcsMatchResult, LcsOptions,
-    LcsResult, LexRange, ListDirection, ListRepository, NumSubResult, ProbabilisticRepository,
-    PubSubRepository, PublishResult, ScoreRange, ScoredMember, SearchRepository, SetRepository,
-    SetScanResult, SortOptions, SortedSetRepository, StreamRepository, StringRepository,
-    TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
-    TimeSeriesRepository, TimeSeriesSample, TsAggregation, ZAddOptions, ZAddResult, ZPopDirection,
-    ZPopResult, ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
+    LcsResult, LexRange, ListDirection, ListRepository, MSetExExistence, MSetExOptions,
+    NumSubResult, ProbabilisticRepository, PubSubRepository, PublishResult, ScoreRange,
+    ScoredMember, SearchRepository, SetRepository, SetScanResult, SortOptions, SortedSetRepository,
+    StreamRepository, StringRepository, TimeSeriesCreateOptions, TimeSeriesMGetResult,
+    TimeSeriesRangeOptions, TimeSeriesRangeResult, TimeSeriesRepository, TimeSeriesSample,
+    TsAggregation, ZAddOptions, ZAddResult, ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult,
+    ZSetAlgebraOptions,
 };
 use crate::infrastructure::config::Settings;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -298,6 +299,15 @@ impl MockStringRepository {
             .lock()
             .expect("store lock")
             .insert(key.to_string(), value.to_string());
+    }
+
+    /// Deterministic stand-in for the XXH3 digest used by Redis 8.4 DIGEST/DELEX.
+    /// Matches across `digest()` and the IFDEQ/IFDNE arms of `delex()`.
+    pub fn mock_digest(value: &str) -> String {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
     }
 }
 
@@ -624,6 +634,61 @@ impl StringRepository for MockStringRepository {
         } else {
             Ok(LcsResult::String(lcs_string))
         }
+    }
+
+    async fn msetex(
+        &self,
+        pairs: &[(String, String)],
+        options: MSetExOptions,
+    ) -> Result<bool, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        match options.existence {
+            Some(MSetExExistence::Nx) => {
+                if pairs.iter().any(|(k, _)| store.contains_key(k)) {
+                    return Ok(false);
+                }
+            }
+            Some(MSetExExistence::Xx) => {
+                if !pairs.iter().all(|(k, _)| store.contains_key(k)) {
+                    return Ok(false);
+                }
+            }
+            None => {}
+        }
+        for (key, value) in pairs {
+            store.insert(key.clone(), value.clone());
+        }
+        Ok(true)
+    }
+
+    async fn delex(
+        &self,
+        key: &str,
+        condition: Option<DelExCondition>,
+    ) -> Result<bool, CacheError> {
+        let mut store = self.store.lock().expect("store lock");
+        let current = match store.get(key) {
+            Some(v) => v.clone(),
+            None => return Ok(false),
+        };
+        let allowed = match condition {
+            None => true,
+            Some(DelExCondition::IfEq(v)) => current == v,
+            Some(DelExCondition::IfNe(v)) => current != v,
+            Some(DelExCondition::IfDeq(d)) => MockStringRepository::mock_digest(&current) == d,
+            Some(DelExCondition::IfDne(d)) => MockStringRepository::mock_digest(&current) != d,
+        };
+        if allowed {
+            store.remove(key);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn digest(&self, key: &str) -> Result<Option<String>, CacheError> {
+        let store = self.store.lock().expect("store lock");
+        Ok(store.get(key).map(|v| MockStringRepository::mock_digest(v)))
     }
 }
 

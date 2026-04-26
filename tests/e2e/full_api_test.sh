@@ -632,6 +632,81 @@ fi
 echo ""
 
 # ==========================================================================
+# Strings — Redis 8.4+ commands (MSETEX / DELEX / DIGEST)
+# ==========================================================================
+echo "--- Strings (Redis 8.4+) ---"
+
+# Pre-seed values via existing PUT for DELEX/DIGEST checks regardless of 8.4 availability;
+# the 8.4-gated assertions use check_any to allow 501 on older Redis builds.
+do_request PUT "/api/v1/strings/${P}_84_existing" '{"value":"keepme"}' > /dev/null
+
+# MSETEX: POST /api/v1/strings/msetex
+IFS='|' read -r status body < <(do_request POST "/api/v1/strings/msetex" \
+    "{\"pairs\":{\"${P}_84_a\":\"alpha\",\"${P}_84_b\":\"bravo\"},\"ttl_seconds\":120}")
+check_any "MSETEX" "$status" "$body" 200 501
+
+if [[ "$status" == "200" ]]; then
+    # NX returning false (success=false) when one of the keys already exists.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/strings/msetex" \
+        "{\"pairs\":{\"${P}_84_a\":\"new\",\"${P}_84_c\":\"charlie\"},\"ttl_seconds\":60,\"nx\":true}")
+    check "MSETEX NX (precondition fails)" "200" "$status" "$body"
+
+    # KEEPTTL combined with explicit TTL is rejected with 400.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/strings/msetex" \
+        "{\"pairs\":{\"${P}_84_d\":\"x\"},\"ttl_seconds\":10,\"keep_ttl\":true}")
+    check "MSETEX rejects keep_ttl + ttl_seconds" "400" "$status" "$body"
+
+    # NX + XX together is rejected with 400.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/strings/msetex" \
+        "{\"pairs\":{\"${P}_84_d\":\"x\"},\"ttl_seconds\":10,\"nx\":true,\"xx\":true}")
+    check "MSETEX rejects nx + xx" "400" "$status" "$body"
+
+    # DIGEST: GET /api/v1/strings/{key}/digest — present key
+    IFS='|' read -r status body < <(do_request GET "/api/v1/strings/${P}_84_a/digest")
+    check "DIGEST (existing key)" "200" "$status" "$body"
+    DIGEST_VAL=$(echo "$body" | sed -n 's/.*"digest":"\([^"]*\)".*/\1/p')
+
+    # DIGEST: missing key still returns 200 with exists:false
+    IFS='|' read -r status body < <(do_request GET "/api/v1/strings/${P}_84_missing/digest")
+    check "DIGEST (missing key returns 200)" "200" "$status" "$body"
+
+    # DELEX: unconditional delete on a fresh key.
+    do_request PUT "/api/v1/strings/${P}_84_del" '{"value":"bye"}' > /dev/null
+    IFS='|' read -r status body < <(do_request POST "/api/v1/strings/${P}_84_del/delex" '{}')
+    check "DELEX (unconditional)" "200" "$status" "$body"
+
+    # DELEX IFEQ — value mismatch should NOT delete (deleted:false, HTTP 200).
+    IFS='|' read -r status body < <(do_request POST "/api/v1/strings/${P}_84_a/delex" \
+        '{"if_eq":"NOT_THE_VALUE"}')
+    check "DELEX IFEQ (mismatch keeps key)" "200" "$status" "$body"
+
+    # DELEX IFEQ — value match should delete.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/strings/${P}_84_b/delex" \
+        '{"if_eq":"bravo"}')
+    check "DELEX IFEQ (match deletes)" "200" "$status" "$body"
+
+    # DELEX IFDEQ — using the digest captured above against the still-living ${P}_84_a.
+    if [[ -n "$DIGEST_VAL" ]]; then
+        IFS='|' read -r status body < <(do_request POST "/api/v1/strings/${P}_84_a/delex" \
+            "{\"if_deq\":\"$DIGEST_VAL\"}")
+        check "DELEX IFDEQ (digest match)" "200" "$status" "$body"
+    else
+        SKIP=$((SKIP + 1))
+        echo "  SKIP  DELEX IFDEQ (no digest captured)"
+    fi
+
+    # DELEX rejects multiple conditions with 400.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/strings/${P}_84_existing/delex" \
+        '{"if_eq":"a","if_ne":"b"}')
+    check "DELEX rejects multiple conditions" "400" "$status" "$body"
+else
+    SKIP=$((SKIP + 9))
+    echo "  SKIP  MSETEX/DELEX/DIGEST follow-ups (Redis 8.4+ required)"
+fi
+
+echo ""
+
+# ==========================================================================
 # Admin (new endpoints)
 # ==========================================================================
 echo "--- Admin (new endpoints) ---"

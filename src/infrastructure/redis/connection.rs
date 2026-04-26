@@ -907,6 +907,8 @@ impl InstrumentedPool {
             hash_field_expiration: RedisCapabilities::version_gte(&redis_version, "7.4.0"),
             // Redis 8.0 pre-releases report as 7.9.x, so gate at 7.9.0
             hash_8_commands: RedisCapabilities::version_gte(&redis_version, "7.9.0"),
+            // MSETEX/DELEX/DIGEST landed in Redis 8.4 GA
+            string_8_4_commands: RedisCapabilities::version_gte(&redis_version, "8.4.0"),
             vectors: vectors_available,
             vector_range: vector_range_available,
             cluster: cluster_enabled,

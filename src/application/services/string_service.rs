@@ -10,7 +10,9 @@ use crate::domain::entities::{
     SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
-use crate::domain::repositories::{LcsOptions, LcsResult, StringRepository};
+use crate::domain::repositories::{
+    DelExCondition, LcsOptions, LcsResult, MSetExOptions, StringRepository,
+};
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisStringRepository;
 
@@ -211,6 +213,59 @@ impl StringService {
         self.repository.get_del(key).await
     }
 
+    /// Atomically set multiple key-value pairs sharing a TTL (Redis 8.4+).
+    ///
+    /// Returns `true` when every key was written, `false` when an `NX`/`XX`
+    /// precondition aborts the batch.
+    pub async fn msetex(
+        &self,
+        pairs: Vec<(String, String)>,
+        options: MSetExOptions,
+    ) -> Result<bool, CacheError> {
+        if pairs.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Pairs list cannot be empty".to_string(),
+            ));
+        }
+        // Redis MSETEX rejects KEEPTTL alongside an explicit EX/PX/EXAT/PXAT,
+        // but accepts KEEPTTL with NX/XX — guard only the genuine conflict.
+        if options.keep_ttl && options.expiry_mode.is_some() {
+            return Err(CacheError::InvalidInput(
+                "MSETEX KEEPTTL cannot be combined with EX/PX/EXAT/PXAT".to_string(),
+            ));
+        }
+        if options.expiry_mode.is_some() != options.expiry_value.is_some() {
+            return Err(CacheError::InvalidInput(
+                "MSETEX expiry_mode and expiry_value must be set together".to_string(),
+            ));
+        }
+        self.repository.msetex(&pairs, options).await
+    }
+
+    /// Conditionally delete a key by value or digest (Redis 8.4+).
+    pub async fn delex(
+        &self,
+        key: &str,
+        condition: Option<DelExCondition>,
+    ) -> Result<bool, CacheError> {
+        if key.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Key must not be empty".to_string(),
+            ));
+        }
+        self.repository.delex(key, condition).await
+    }
+
+    /// Compute the XXH3 hash digest of a string value (Redis 8.4+).
+    pub async fn digest(&self, key: &str) -> Result<Option<String>, CacheError> {
+        if key.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "Key must not be empty".to_string(),
+            ));
+        }
+        self.repository.digest(key).await
+    }
+
     /// Compute the Longest Common Subsequence of two string keys (Redis 7.0+)
     pub async fn lcs(
         &self,
@@ -407,6 +462,26 @@ mod tests {
         ) -> Result<LcsResult, CacheError> {
             Ok(LcsResult::String("abc".to_string()))
         }
+
+        async fn msetex(
+            &self,
+            _pairs: &[(String, String)],
+            _options: MSetExOptions,
+        ) -> Result<bool, CacheError> {
+            Ok(true)
+        }
+
+        async fn delex(
+            &self,
+            _key: &str,
+            _condition: Option<DelExCondition>,
+        ) -> Result<bool, CacheError> {
+            Ok(true)
+        }
+
+        async fn digest(&self, _key: &str) -> Result<Option<String>, CacheError> {
+            Ok(Some("deadbeef".to_string()))
+        }
     }
 
     #[tokio::test]
@@ -582,6 +657,190 @@ mod tests {
             }
             _ => panic!("Expected LcsResult::Matches"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_msetex_rejects_empty_pairs() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service
+            .msetex(vec![], MSetExOptions::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_msetex_rejects_keep_ttl_with_explicit_expiry() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service
+            .msetex(
+                vec![("k".to_string(), "v".to_string())],
+                MSetExOptions {
+                    keep_ttl: true,
+                    expiry_mode: Some(ExpiryMode::Ex),
+                    expiry_value: Some(60),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_msetex_rejects_partial_expiry() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        // expiry_mode without value
+        let err = service
+            .msetex(
+                vec![("k".to_string(), "v".to_string())],
+                MSetExOptions {
+                    expiry_mode: Some(ExpiryMode::Ex),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_msetex_writes_pairs_through_mock() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo.clone());
+
+        let success = service
+            .msetex(
+                vec![
+                    ("a".to_string(), "1".to_string()),
+                    ("b".to_string(), "2".to_string()),
+                ],
+                MSetExOptions {
+                    expiry_mode: Some(ExpiryMode::Ex),
+                    expiry_value: Some(120),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("msetex");
+        assert!(success);
+
+        let a = service.get("a").await.expect("get a").expect("a");
+        assert_eq!(a.value, "1");
+    }
+
+    #[tokio::test]
+    async fn test_msetex_allows_nx_with_keep_ttl() {
+        // Redis MSETEX accepts NX KEEPTTL together; only EX/PX/EXAT/PXAT conflict
+        // with KEEPTTL. This guards against re-introducing the over-strict check.
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let result = service
+            .msetex(
+                vec![("k".to_string(), "v".to_string())],
+                MSetExOptions {
+                    existence: Some(crate::domain::repositories::MSetExExistence::Nx),
+                    keep_ttl: true,
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(result.is_ok(), "NX + KEEPTTL must be accepted: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn test_msetex_nx_blocks_when_any_key_exists() {
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("a", "old");
+        let service = StringService::new_with_repository(repo);
+
+        let success = service
+            .msetex(
+                vec![
+                    ("a".to_string(), "new".to_string()),
+                    ("b".to_string(), "x".to_string()),
+                ],
+                MSetExOptions {
+                    existence: Some(crate::domain::repositories::MSetExExistence::Nx),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("msetex");
+        assert!(!success);
+    }
+
+    #[tokio::test]
+    async fn test_delex_rejects_empty_key() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service.delex("", None).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_delex_unconditional_deletes_when_present() {
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("k", "v");
+        let service = StringService::new_with_repository(repo);
+
+        assert!(service.delex("k", None).await.expect("delex"));
+        assert!(!service.delex("k", None).await.expect("delex again"));
+    }
+
+    #[tokio::test]
+    async fn test_delex_if_eq_only_deletes_on_match() {
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("k", "v");
+        let service = StringService::new_with_repository(repo);
+
+        let no_match = service
+            .delex("k", Some(DelExCondition::IfEq("other".to_string())))
+            .await
+            .expect("delex");
+        assert!(!no_match);
+
+        let matched = service
+            .delex("k", Some(DelExCondition::IfEq("v".to_string())))
+            .await
+            .expect("delex");
+        assert!(matched);
+    }
+
+    #[tokio::test]
+    async fn test_digest_rejects_empty_key() {
+        let repo = Arc::new(MockStringRepository::new());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service.digest("").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_digest_returns_some_for_existing_key() {
+        let repo = Arc::new(MockStringRepository::new());
+        repo.insert("k", "v");
+        let service = StringService::new_with_repository(repo);
+
+        let digest = service.digest("k").await.expect("digest");
+        assert!(digest.is_some());
+        let d1 = digest.expect("present");
+
+        // Stable: same value yields same digest.
+        let again = service.digest("k").await.expect("digest").expect("present");
+        assert_eq!(d1, again);
+
+        // Missing key yields None.
+        let missing = service.digest("absent").await.expect("digest");
+        assert!(missing.is_none());
     }
 
     #[tokio::test]

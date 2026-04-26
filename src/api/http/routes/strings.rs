@@ -9,12 +9,14 @@ use axum::{
 };
 
 use crate::api::http::schemas::strings::{
-    AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams, GetRangeResponse,
-    IncrementRequest, IncrementResponse, LcsRequest, LcsResponse, MGetRequest, MGetResponse,
-    MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
-    SetStringResponse, StrLenResponse,
+    AppendRequest, AppendResponse, DelExRequest, DelExResponse, DigestResponse, GetDelResponse,
+    GetExParams, GetRangeParams, GetRangeResponse, IncrementRequest, IncrementResponse, LcsRequest,
+    LcsResponse, MGetRequest, MGetResponse, MSetExRequest, MSetExResponse, MSetRequest,
+    MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest, SetStringResponse,
+    StrLenResponse,
 };
-use crate::domain::repositories::LcsOptions;
+use crate::domain::entities::ExpiryMode;
+use crate::domain::repositories::{DelExCondition, LcsOptions, MSetExExistence, MSetExOptions};
 use validator::Validate;
 
 use crate::domain::entities::StringValue;
@@ -32,6 +34,11 @@ pub fn string_routes() -> Router<AppState> {
         // Multi-key operations
         .route("/api/v1/strings/mget", post(mget_strings))
         .route("/api/v1/strings/mset", post(mset_strings))
+        // MSETEX (Redis 8.4+) — atomic multi-key SET with shared TTL
+        .route("/api/v1/strings/msetex", post(msetex_strings))
+        // DELEX / DIGEST (Redis 8.4+) — conditional delete + value digest
+        .route("/api/v1/strings/{key}/delex", post(delex_string))
+        .route("/api/v1/strings/{key}/digest", get(digest_string))
         // Increment/Decrement
         .route("/api/v1/strings/{key}/incr", patch(incr_string))
         .route("/api/v1/strings/{key}/decr", patch(decr_string))
@@ -501,6 +508,218 @@ async fn get_ex_string(
     Ok(Json(ApiResponse::new(value)))
 }
 
+/// POST /api/v1/strings/msetex
+///
+/// Atomically set multiple string keys with an optional shared TTL (Redis 8.4+).
+///
+/// Returns `success: false` (HTTP 200) when an `nx` or `xx` precondition
+/// caused Redis to skip the entire batch. At most one of the expiry options
+/// (`ttl_seconds`, `ttl_ms`, `expire_at_seconds`, `expire_at_ms`, `keep_ttl`)
+/// may be supplied; omitting all of them sets the keys without expiration.
+#[utoipa::path(
+    post,
+    path = "/api/v1/strings/msetex",
+    request_body = MSetExRequest,
+    responses(
+        (status = 200, description = "Batch evaluated; check success/count", body = MSetExResponse),
+        (status = 400, description = "Invalid request — conflicting flags or batch limits exceeded"),
+        (status = 501, description = "MSETEX requires Redis 8.4+")
+    ),
+    tag = "Strings"
+)]
+async fn msetex_strings(
+    State(state): State<AppState>,
+    Json(request): Json<MSetExRequest>,
+) -> Result<Json<ApiResponse<MSetExResponse>>, CacheError> {
+    if !state.capabilities.features.string_8_4_commands {
+        return Err(CacheError::ModuleNotAvailable(
+            "MSETEX requires Redis 8.4+".to_string(),
+        ));
+    }
+    request
+        .validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+
+    if request.nx && request.xx {
+        return Err(CacheError::InvalidInput(
+            "nx and xx are mutually exclusive".to_string(),
+        ));
+    }
+
+    let max_batch_size = state.config.server.max_batch_size;
+    let max_value_size = state.config.server.max_value_size_bytes;
+    let batch_size = request.pairs.len();
+    if batch_size > max_batch_size {
+        return Err(CacheError::InvalidInput(format!(
+            "Batch size {} exceeds maximum allowed size of {}",
+            batch_size, max_batch_size
+        )));
+    }
+    for (key, value) in &request.pairs {
+        if value.len() > max_value_size {
+            return Err(CacheError::InvalidInput(format!(
+                "Value for key '{}' ({} bytes) exceeds maximum allowed size of {} bytes",
+                key,
+                value.len(),
+                max_value_size
+            )));
+        }
+    }
+
+    // At most one expiry source is permitted; KEEPTTL excludes the others.
+    let expiry_sources = [
+        request.ttl_seconds.is_some(),
+        request.ttl_ms.is_some(),
+        request.expire_at_seconds.is_some(),
+        request.expire_at_ms.is_some(),
+    ];
+    let expiry_count = expiry_sources.iter().filter(|set| **set).count();
+    if expiry_count > 1 {
+        return Err(CacheError::InvalidInput(
+            "Only one of ttl_seconds, ttl_ms, expire_at_seconds, expire_at_ms may be set"
+                .to_string(),
+        ));
+    }
+    if request.keep_ttl && expiry_count > 0 {
+        return Err(CacheError::InvalidInput(
+            "keep_ttl cannot be combined with an explicit expiry".to_string(),
+        ));
+    }
+
+    let (expiry_mode, expiry_value) = if let Some(v) = request.ttl_ms {
+        (Some(ExpiryMode::Px), Some(v))
+    } else if let Some(v) = request.ttl_seconds {
+        (Some(ExpiryMode::Ex), Some(v))
+    } else if let Some(v) = request.expire_at_ms {
+        (Some(ExpiryMode::PxAt), Some(v))
+    } else if let Some(v) = request.expire_at_seconds {
+        (Some(ExpiryMode::ExAt), Some(v))
+    } else {
+        (None, None)
+    };
+
+    let existence = if request.nx {
+        Some(MSetExExistence::Nx)
+    } else if request.xx {
+        Some(MSetExExistence::Xx)
+    } else {
+        None
+    };
+
+    let options = MSetExOptions {
+        existence,
+        expiry_mode,
+        expiry_value,
+        keep_ttl: request.keep_ttl,
+    };
+
+    let pairs: Vec<(String, String)> = request.pairs.into_iter().collect();
+    let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
+
+    let success = state.string_service.msetex(pairs, options).await?;
+
+    Ok(Json(ApiResponse::new(MSetExResponse {
+        success,
+        count: if success { keys.len() } else { 0 },
+        keys: if success { keys } else { vec![] },
+    })))
+}
+
+/// POST /api/v1/strings/:key/delex
+///
+/// Conditionally delete a key based on its value or XXH3 digest (Redis 8.4+).
+/// At most one of `if_eq`, `if_ne`, `if_deq`, `if_dne` may be supplied. Returns
+/// `deleted: false` (HTTP 200) when the condition fails or the key is absent.
+#[utoipa::path(
+    post,
+    path = "/api/v1/strings/{key}/delex",
+    params(
+        ("key" = String, Path, description = "The key to conditionally delete")
+    ),
+    request_body = DelExRequest,
+    responses(
+        (status = 200, description = "Condition evaluated", body = DelExResponse),
+        (status = 400, description = "Invalid request — multiple conditions supplied"),
+        (status = 501, description = "DELEX requires Redis 8.4+")
+    ),
+    tag = "Strings"
+)]
+async fn delex_string(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(request): Json<DelExRequest>,
+) -> Result<Json<ApiResponse<DelExResponse>>, CacheError> {
+    if !state.capabilities.features.string_8_4_commands {
+        return Err(CacheError::ModuleNotAvailable(
+            "DELEX requires Redis 8.4+".to_string(),
+        ));
+    }
+
+    let mut condition: Option<DelExCondition> = None;
+    let mut count = 0;
+    if let Some(v) = request.if_eq {
+        condition = Some(DelExCondition::IfEq(v));
+        count += 1;
+    }
+    if let Some(v) = request.if_ne {
+        condition = Some(DelExCondition::IfNe(v));
+        count += 1;
+    }
+    if let Some(v) = request.if_deq {
+        condition = Some(DelExCondition::IfDeq(v));
+        count += 1;
+    }
+    if let Some(v) = request.if_dne {
+        condition = Some(DelExCondition::IfDne(v));
+        count += 1;
+    }
+    if count > 1 {
+        return Err(CacheError::InvalidInput(
+            "At most one of if_eq, if_ne, if_deq, if_dne may be supplied".to_string(),
+        ));
+    }
+
+    let deleted = state.string_service.delex(&key, condition).await?;
+
+    Ok(Json(ApiResponse::new(DelExResponse { key, deleted })))
+}
+
+/// GET /api/v1/strings/:key/digest
+///
+/// Compute the XXH3 hash digest of a string value (Redis 8.4+). Returns HTTP 200
+/// with `exists: false` and the `digest` field omitted from the JSON body when
+/// the key is absent.
+#[utoipa::path(
+    get,
+    path = "/api/v1/strings/{key}/digest",
+    params(
+        ("key" = String, Path, description = "The key to digest")
+    ),
+    responses(
+        (status = 200, description = "Digest result", body = DigestResponse),
+        (status = 501, description = "DIGEST requires Redis 8.4+")
+    ),
+    tag = "Strings"
+)]
+async fn digest_string(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<ApiResponse<DigestResponse>>, CacheError> {
+    if !state.capabilities.features.string_8_4_commands {
+        return Err(CacheError::ModuleNotAvailable(
+            "DIGEST requires Redis 8.4+".to_string(),
+        ));
+    }
+
+    let digest = state.string_service.digest(&key).await?;
+
+    Ok(Json(ApiResponse::new(DigestResponse {
+        key,
+        exists: digest.is_some(),
+        digest,
+    })))
+}
+
 /// POST /api/v1/strings/lcs
 ///
 /// Compute the Longest Common Subsequence of two string keys (Redis 7.0+).
@@ -963,6 +1182,274 @@ mod tests {
             with_match_len: false,
         };
         let result = lcs(state, Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    fn enable_string_8_4(app_state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*app_state.capabilities).clone();
+        caps.features.string_8_4_commands = true;
+        app_state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    #[tokio::test]
+    async fn test_msetex_handler_success_path() {
+        let (mut app_state, string_repo, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("k1".to_string(), "v1".to_string());
+        pairs.insert("k2".to_string(), "v2".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: Some(60),
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+
+        let resp = msetex_strings(state, Json(req)).await.unwrap();
+        let body = resp.0.data.expect("body");
+        assert!(body.success);
+        assert_eq!(body.count, 2);
+        use crate::domain::repositories::StringRepository;
+        let stored = StringRepository::get(string_repo.as_ref(), "k1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.value, "v1");
+    }
+
+    #[tokio::test]
+    async fn test_msetex_returns_501_when_capability_missing() {
+        // Default test_state() leaves string_8_4_commands disabled.
+        let (state, _, _, _) = test_state();
+        let state = State(state);
+        let mut pairs = HashMap::new();
+        pairs.insert("k1".to_string(), "v1".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: Some(10),
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        let result = msetex_strings(state, Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_msetex_rejects_nx_and_xx_together() {
+        let (mut app_state, _, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: true,
+            xx: true,
+            ttl_seconds: Some(10),
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        let result = msetex_strings(state, Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_msetex_rejects_multiple_expiry_sources() {
+        let (mut app_state, _, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: Some(10),
+            ttl_ms: Some(5000),
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        let result = msetex_strings(state, Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_msetex_rejects_zero_ttl_seconds() {
+        let (mut app_state, _, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: Some(0),
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        let result = msetex_strings(state, Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_msetex_allows_nx_with_keep_ttl_through_handler() {
+        // Redis allows NX KEEPTTL together; ensure the handler does not 400.
+        let (mut app_state, _, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: true,
+            xx: false,
+            ttl_seconds: None,
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: true,
+        };
+        let resp = msetex_strings(state, Json(req)).await.unwrap();
+        // Mock writes through and reports success.
+        assert!(resp.0.data.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn test_msetex_rejects_keep_ttl_with_explicit_expiry() {
+        let (mut app_state, _, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: Some(10),
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: true,
+        };
+        let result = msetex_strings(state, Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_delex_handler_unconditional_delete() {
+        let (mut app_state, string_repo, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        string_repo.insert("victim", "v");
+        let state = State(app_state);
+
+        let resp = delex_string(
+            state.clone(),
+            Path("victim".to_string()),
+            Json(DelExRequest::default()),
+        )
+        .await
+        .unwrap();
+        assert!(resp.0.data.unwrap().deleted);
+
+        let resp = delex_string(
+            state,
+            Path("victim".to_string()),
+            Json(DelExRequest::default()),
+        )
+        .await
+        .unwrap();
+        assert!(!resp.0.data.unwrap().deleted);
+    }
+
+    #[tokio::test]
+    async fn test_delex_handler_if_eq_no_match() {
+        let (mut app_state, string_repo, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        string_repo.insert("k", "current");
+        let state = State(app_state);
+
+        let req = DelExRequest {
+            if_eq: Some("other".to_string()),
+            ..Default::default()
+        };
+        let resp = delex_string(state, Path("k".to_string()), Json(req))
+            .await
+            .unwrap();
+        assert!(!resp.0.data.unwrap().deleted);
+    }
+
+    #[tokio::test]
+    async fn test_delex_handler_rejects_multiple_conditions() {
+        let (mut app_state, _, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let req = DelExRequest {
+            if_eq: Some("a".to_string()),
+            if_ne: Some("b".to_string()),
+            ..Default::default()
+        };
+        let result = delex_string(state, Path("k".to_string()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_delex_returns_501_when_capability_missing() {
+        let (state, _, _, _) = test_state();
+        let state = State(state);
+        let result =
+            delex_string(state, Path("k".to_string()), Json(DelExRequest::default())).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_digest_handler_returns_value_and_missing() {
+        let (mut app_state, string_repo, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        string_repo.insert("present", "payload");
+        let state = State(app_state);
+
+        let resp = digest_string(state.clone(), Path("present".to_string()))
+            .await
+            .unwrap();
+        let body = resp.0.data.expect("body");
+        assert!(body.exists);
+        assert!(body.digest.is_some());
+
+        let resp = digest_string(state, Path("absent".to_string()))
+            .await
+            .unwrap();
+        let body = resp.0.data.expect("body");
+        assert!(!body.exists);
+        assert!(body.digest.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_digest_returns_501_when_capability_missing() {
+        let (state, _, _, _) = test_state();
+        let state = State(state);
+        let result = digest_string(state, Path("k".to_string())).await;
         assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
     }
 }

@@ -51,7 +51,10 @@ pub use sorted_set_repository::{
     ZPopDirection, ZPopResult, ZRangeOptions, ZRangeType, ZScanResult, ZSetAlgebraOptions,
 };
 pub use stream_repository::StreamRepository;
-pub use string_repository::{LcsMatch, LcsMatchResult, LcsOptions, LcsResult, StringRepository};
+pub use string_repository::{
+    DelExCondition, LcsMatch, LcsMatchResult, LcsOptions, LcsResult, MSetExExistence,
+    MSetExOptions, StringRepository,
+};
 pub use timeseries_repository::{
     TimeSeriesCreateOptions, TimeSeriesMGetResult, TimeSeriesRangeOptions, TimeSeriesRangeResult,
     TimeSeriesRepository, TimeSeriesSample, TsAggregation, TsDuplicatePolicy,

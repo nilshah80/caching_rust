@@ -218,9 +218,10 @@ use crate::api::http::schemas::streams::{
     StreamTrimRequest, StreamTrimResponse, TrimStrategyParam,
 };
 use crate::api::http::schemas::strings::{
-    AppendRequest, AppendResponse, GetDelResponse, GetExParams, GetRangeParams, GetRangeResponse,
-    IncrementRequest, IncrementResponse, LcsMatchSchema, LcsRequest, LcsResponse, MGetRequest,
-    MGetResponse, MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
+    AppendRequest, AppendResponse, DelExRequest, DelExResponse, DigestResponse, GetDelResponse,
+    GetExParams, GetRangeParams, GetRangeResponse, IncrementRequest, IncrementResponse,
+    LcsMatchSchema, LcsRequest, LcsResponse, MGetRequest, MGetResponse, MSetExRequest,
+    MSetExResponse, MSetRequest, MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest,
     SetStringResponse, StrLenResponse,
 };
 use crate::api::http::schemas::timeseries::{
@@ -382,6 +383,9 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::strings::set_range,
         crate::api::http::routes::strings::get_ex_string,
         crate::api::http::routes::strings::lcs,
+        crate::api::http::routes::strings::msetex_strings,
+        crate::api::http::routes::strings::delex_string,
+        crate::api::http::routes::strings::digest_string,
         // Hash endpoints
         crate::api::http::routes::hashes::hget,
         crate::api::http::routes::hashes::hset,
@@ -839,6 +843,11 @@ use crate::shared::app_state::AppState;
             LcsRequest,
             LcsResponse,
             LcsMatchSchema,
+            MSetExRequest,
+            MSetExResponse,
+            DelExRequest,
+            DelExResponse,
+            DigestResponse,
             // Hash schemas
             SetHashRequest,
             SetHashNxRequest,

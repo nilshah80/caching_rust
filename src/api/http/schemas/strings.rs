@@ -329,6 +329,123 @@ mod tests {
     }
 
     #[test]
+    fn test_msetex_request_rejects_empty_pairs() {
+        let req = MSetExRequest {
+            pairs: HashMap::new(),
+            nx: false,
+            xx: false,
+            ttl_seconds: None,
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_msetex_request_validates_with_pairs() {
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: Some(60),
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_msetex_request_rejects_zero_ttl_seconds() {
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: Some(0),
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_msetex_request_rejects_zero_expire_at_ms() {
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: None,
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: Some(0),
+            keep_ttl: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_msetex_request_allows_no_expiry() {
+        // Redis MSETEX permits omitting all expiry options entirely.
+        let mut pairs = HashMap::new();
+        pairs.insert("k".to_string(), "v".to_string());
+        let req = MSetExRequest {
+            pairs,
+            nx: false,
+            xx: false,
+            ttl_seconds: None,
+            ttl_ms: None,
+            expire_at_seconds: None,
+            expire_at_ms: None,
+            keep_ttl: false,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_delex_request_default_is_unconditional() {
+        let req = DelExRequest::default();
+        assert!(req.if_eq.is_none());
+        assert!(req.if_ne.is_none());
+        assert!(req.if_deq.is_none());
+        assert!(req.if_dne.is_none());
+    }
+
+    #[test]
+    fn test_delex_response_serialization() {
+        let resp = DelExResponse {
+            key: "k".to_string(),
+            deleted: true,
+        };
+        let json = serde_json::to_string(&resp).expect("serialize");
+        assert!(json.contains("\"deleted\":true"));
+        assert!(json.contains("\"key\":\"k\""));
+    }
+
+    #[test]
+    fn test_digest_response_skips_null_digest() {
+        let resp = DigestResponse {
+            key: "k".to_string(),
+            exists: false,
+            digest: None,
+        };
+        let json = serde_json::to_string(&resp).expect("serialize");
+        // None digest is skipped, but exists=false is present.
+        assert!(!json.contains("\"digest\""));
+        assert!(json.contains("\"exists\":false"));
+    }
+
+    #[test]
     fn test_lcs_response_from_matches_result() {
         let result = LcsResult::Matches(LcsMatchResult {
             matches: vec![LcsMatch {
@@ -427,4 +544,109 @@ pub struct StrLenResponse {
 
     /// Length of the string
     pub length: i64,
+}
+
+/// Request for MSETEX (atomic multi-key SET with shared TTL, Redis 8.4+).
+///
+/// At most one expiry option may be supplied: `ttl_seconds`, `ttl_ms`,
+/// `expire_at_seconds`, `expire_at_ms`, or `keep_ttl`. Omitting all of them
+/// sets the keys without an expiration (matching Redis MSETEX semantics).
+/// `nx` and `xx` are mutually exclusive; either may be combined with any of
+/// the expiry options, including `keep_ttl`.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct MSetExRequest {
+    /// Key/value pairs to set atomically.
+    #[validate(length(min = 1, message = "At least one pair is required"))]
+    pub pairs: HashMap<String, String>,
+
+    /// Set only if **none** of the keys exist (NX).
+    #[serde(default)]
+    pub nx: bool,
+
+    /// Set only if **all** of the keys already exist (XX).
+    #[serde(default)]
+    pub xx: bool,
+
+    /// Shared TTL in seconds (EX). Must be a positive integer per Redis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "ttl_seconds must be a positive integer"))]
+    pub ttl_seconds: Option<u64>,
+
+    /// Shared TTL in milliseconds (PX). Must be a positive integer per Redis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "ttl_ms must be a positive integer"))]
+    pub ttl_ms: Option<u64>,
+
+    /// Absolute expiry as Unix timestamp in seconds (EXAT). Must be positive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "expire_at_seconds must be a positive integer"))]
+    pub expire_at_seconds: Option<u64>,
+
+    /// Absolute expiry as Unix timestamp in milliseconds (PXAT). Must be positive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "expire_at_ms must be a positive integer"))]
+    pub expire_at_ms: Option<u64>,
+
+    /// Retain the existing TTL on each key (KEEPTTL).
+    #[serde(default)]
+    pub keep_ttl: bool,
+}
+
+/// Response for MSETEX operation.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MSetExResponse {
+    /// Whether the batch was applied (false when NX/XX preconditions failed).
+    pub success: bool,
+
+    /// Number of keys actually set (matches `pairs` count when `success` is true).
+    pub count: usize,
+
+    /// Keys that were set (empty when `success` is false).
+    pub keys: Vec<String>,
+}
+
+/// Conditional predicate for the DELEX request body. At most one of these
+/// fields may be set; multiple values are rejected with HTTP 400.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct DelExRequest {
+    /// IFEQ — delete only when the value equals this string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_eq: Option<String>,
+
+    /// IFNE — delete only when the value is not equal to this string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_ne: Option<String>,
+
+    /// IFDEQ — delete only when the value's XXH3 digest matches this hex string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_deq: Option<String>,
+
+    /// IFDNE — delete only when the value's XXH3 digest does not match this hex string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_dne: Option<String>,
+}
+
+/// Response for DELEX.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DelExResponse {
+    /// The key targeted by the request.
+    pub key: String,
+
+    /// Whether the key was actually deleted.
+    pub deleted: bool,
+}
+
+/// Response for DIGEST.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DigestResponse {
+    /// The key inspected.
+    pub key: String,
+
+    /// Whether the key existed at query time.
+    pub exists: bool,
+
+    /// Hexadecimal XXH3 digest of the value. Field is omitted from the JSON
+    /// response when the key does not exist (consult `exists` instead).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
 }
