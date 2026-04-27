@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-    StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddOptions,
-    XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions, XReadGroupOptions,
-    XReadOptions, XTrimStrategy,
+    StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddIdmp,
+    XAddOptions, XAutoClaimOptions, XCfgSetOptions, XClaimOptions, XGroupCreateOptions,
+    XPendingOptions, XReadGroupOptions, XReadOptions, XTrimOptions,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StreamRepository;
@@ -79,6 +79,7 @@ impl StreamService {
                 "Fields cannot be empty".to_string(),
             ));
         }
+        Self::validate_xadd_options(&options)?;
         self.repository.xadd(key, &fields, options).await
     }
 
@@ -119,10 +120,31 @@ impl StreamService {
         self.repository.xdel(key, &ids).await
     }
 
-    /// XTRIM - Trim stream to specified length or ID
-    /// Returns the number of entries removed
-    pub async fn xtrim(&self, key: &str, strategy: XTrimStrategy) -> Result<i64, CacheError> {
-        self.repository.xtrim(key, strategy).await
+    /// XTRIM - Trim stream to a length/ID, optionally with `LIMIT` and a
+    /// `KEEPREF | DELREF | ACKED` reference policy (Redis 8.2+).
+    /// Returns the number of entries removed.
+    pub async fn xtrim(&self, key: &str, options: XTrimOptions) -> Result<i64, CacheError> {
+        Self::validate_xtrim_options(&options)?;
+        self.repository.xtrim(key, options).await
+    }
+
+    /// XDELEX - Reference-policy-aware delete (Redis 8.2+).
+    pub async fn xdelex(
+        &self,
+        key: &str,
+        mode: XAckDelMode,
+        ids: Vec<String>,
+    ) -> Result<Vec<XAckDelEntryResult>, CacheError> {
+        if ids.is_empty() {
+            return Err(CacheError::InvalidInput("IDs cannot be empty".to_string()));
+        }
+        self.repository.xdelex(key, mode, &ids).await
+    }
+
+    /// XCFGSET - Set IDMP configuration parameters (Redis 8.6+).
+    pub async fn xcfgset(&self, key: &str, options: XCfgSetOptions) -> Result<(), CacheError> {
+        Self::validate_xcfgset_options(&options)?;
+        self.repository.xcfgset(key, options).await
     }
 
     /// XINFO STREAM - Get information about a stream
@@ -417,11 +439,100 @@ impl StreamService {
             .xsetid(key, last_id, entries_added, max_deleted_id)
             .await
     }
+
+    /// Service-layer guards for XADD options (10.9 + 11.1 additions).
+    fn validate_xadd_options(options: &XAddOptions) -> Result<(), CacheError> {
+        // MAXLEN and MINID are mutually exclusive on the wire — Redis rejects
+        // them together. Catch it at the API edge for a clean 400.
+        if options.maxlen.is_some() && options.minid.is_some() {
+            return Err(CacheError::InvalidInput(
+                "maxlen and minid are mutually exclusive in XADD".to_string(),
+            ));
+        }
+        // reference_policy only acts on the trim sub-clause.
+        if options.reference_policy.is_some() && options.maxlen.is_none() && options.minid.is_none()
+        {
+            return Err(CacheError::InvalidInput(
+                "reference_policy requires maxlen or minid (it only affects trimming)".to_string(),
+            ));
+        }
+        // IDMP / IDMPAUTO require an auto-generated `*` ID.
+        if options.idmp.is_some() && options.id.is_some() {
+            return Err(CacheError::InvalidInput(
+                "idmp/idmpauto require an auto-generated ID — `id` must be unset".to_string(),
+            ));
+        }
+        if let Some(idmp) = &options.idmp {
+            match idmp {
+                XAddIdmp::Manual {
+                    producer_id,
+                    idempotent_id,
+                } => {
+                    if producer_id.trim().is_empty() {
+                        return Err(CacheError::InvalidInput(
+                            "idmp.producer_id must be non-empty".to_string(),
+                        ));
+                    }
+                    if idempotent_id.trim().is_empty() {
+                        return Err(CacheError::InvalidInput(
+                            "idmp.idempotent_id must be non-empty".to_string(),
+                        ));
+                    }
+                }
+                XAddIdmp::Auto { producer_id } => {
+                    if producer_id.trim().is_empty() {
+                        return Err(CacheError::InvalidInput(
+                            "idmp.producer_id must be non-empty".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Service-layer guards for XTRIM options (11.1 additions).
+    fn validate_xtrim_options(options: &XTrimOptions) -> Result<(), CacheError> {
+        if let Some(limit) = options.limit
+            && limit < 0
+        {
+            return Err(CacheError::InvalidInput(
+                "xtrim limit must be non-negative".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Service-layer guards for XCFGSET options (11.1 additions).
+    fn validate_xcfgset_options(options: &XCfgSetOptions) -> Result<(), CacheError> {
+        if options.idmp_duration_seconds.is_none() && options.idmp_max_size.is_none() {
+            return Err(CacheError::InvalidInput(
+                "xcfgset requires at least one of idmp_duration_seconds or idmp_max_size"
+                    .to_string(),
+            ));
+        }
+        if let Some(d) = options.idmp_duration_seconds
+            && !(1..=86_400).contains(&d)
+        {
+            return Err(CacheError::InvalidInput(
+                "idmp_duration_seconds must be in 1..=86400".to_string(),
+            ));
+        }
+        if let Some(n) = options.idmp_max_size
+            && !(1..=10_000).contains(&n)
+        {
+            return Err(CacheError::InvalidInput(
+                "idmp_max_size must be in 1..=10000".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::entities::XTrimStrategy;
 
     // Mock StreamRepository for testing
     struct MockStreamRepository;
@@ -465,7 +576,7 @@ mod tests {
             Ok(ids.len() as i64)
         }
 
-        async fn xtrim(&self, _key: &str, _strategy: XTrimStrategy) -> Result<i64, CacheError> {
+        async fn xtrim(&self, _key: &str, _options: XTrimOptions) -> Result<i64, CacheError> {
             Ok(5)
         }
 
@@ -592,6 +703,22 @@ mod tests {
                 .iter()
                 .map(|id| XAckDelEntryResult::new(id.clone(), 1))
                 .collect())
+        }
+
+        async fn xdelex(
+            &self,
+            _key: &str,
+            _mode: XAckDelMode,
+            ids: &[String],
+        ) -> Result<Vec<XAckDelEntryResult>, CacheError> {
+            Ok(ids
+                .iter()
+                .map(|id| XAckDelEntryResult::new(id.clone(), 1))
+                .collect())
+        }
+
+        async fn xcfgset(&self, _key: &str, _options: XCfgSetOptions) -> Result<(), CacheError> {
+            Ok(())
         }
 
         async fn xpending_summary(
@@ -823,9 +950,13 @@ mod tests {
         let trimmed = service
             .xtrim(
                 "stream",
-                XTrimStrategy::MaxLen {
-                    count: 10,
-                    approximate: true,
+                XTrimOptions {
+                    strategy: XTrimStrategy::MaxLen {
+                        count: 10,
+                        approximate: true,
+                    },
+                    limit: None,
+                    reference_policy: None,
                 },
             )
             .await
@@ -1028,6 +1159,152 @@ mod tests {
     #[test]
     fn test_default_sse_block_ms() {
         assert_eq!(StreamService::default_sse_block_ms(), 5000);
+    }
+
+    // ─── 11.1 service-level validation ──────────────────────────────────────
+
+    #[test]
+    fn test_xadd_rejects_maxlen_and_minid_together() {
+        let opts = XAddOptions {
+            maxlen: Some(10),
+            minid: Some("0-0".into()),
+            ..Default::default()
+        };
+        let err = StreamService::validate_xadd_options(&opts).unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_xadd_rejects_reference_policy_without_trim() {
+        let opts = XAddOptions {
+            reference_policy: Some(XAckDelMode::DelRef),
+            ..Default::default()
+        };
+        let err = StreamService::validate_xadd_options(&opts).unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_xadd_accepts_reference_policy_with_maxlen() {
+        let opts = XAddOptions {
+            maxlen: Some(100),
+            reference_policy: Some(XAckDelMode::Acked),
+            ..Default::default()
+        };
+        assert!(StreamService::validate_xadd_options(&opts).is_ok());
+    }
+
+    #[test]
+    fn test_xadd_rejects_idmp_with_explicit_id() {
+        let opts = XAddOptions {
+            id: Some("1-0".into()),
+            idmp: Some(XAddIdmp::Auto {
+                producer_id: "p1".into(),
+            }),
+            ..Default::default()
+        };
+        let err = StreamService::validate_xadd_options(&opts).unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_xadd_rejects_empty_idmp_producer_id() {
+        let opts_auto = XAddOptions {
+            idmp: Some(XAddIdmp::Auto {
+                producer_id: "  ".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            StreamService::validate_xadd_options(&opts_auto).unwrap_err(),
+            CacheError::InvalidInput(_)
+        ));
+        let opts_manual = XAddOptions {
+            idmp: Some(XAddIdmp::Manual {
+                producer_id: "p1".into(),
+                idempotent_id: "".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            StreamService::validate_xadd_options(&opts_manual).unwrap_err(),
+            CacheError::InvalidInput(_)
+        ));
+    }
+
+    #[test]
+    fn test_xtrim_rejects_negative_limit() {
+        let opts = XTrimOptions {
+            strategy: XTrimStrategy::MaxLen {
+                count: 10,
+                approximate: true,
+            },
+            limit: Some(-5),
+            reference_policy: None,
+        };
+        let err = StreamService::validate_xtrim_options(&opts).unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_xcfgset_rejects_empty_options() {
+        let err = StreamService::validate_xcfgset_options(&XCfgSetOptions::default()).unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_xcfgset_rejects_out_of_range() {
+        // Duration too large.
+        let err = StreamService::validate_xcfgset_options(&XCfgSetOptions {
+            idmp_duration_seconds: Some(86_401),
+            idmp_max_size: None,
+        })
+        .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        // Duration zero.
+        let err = StreamService::validate_xcfgset_options(&XCfgSetOptions {
+            idmp_duration_seconds: Some(0),
+            idmp_max_size: None,
+        })
+        .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        // MaxSize too large.
+        let err = StreamService::validate_xcfgset_options(&XCfgSetOptions {
+            idmp_duration_seconds: None,
+            idmp_max_size: Some(10_001),
+        })
+        .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_xcfgset_accepts_boundaries() {
+        assert!(
+            StreamService::validate_xcfgset_options(&XCfgSetOptions {
+                idmp_duration_seconds: Some(1),
+                idmp_max_size: Some(1),
+            })
+            .is_ok()
+        );
+        assert!(
+            StreamService::validate_xcfgset_options(&XCfgSetOptions {
+                idmp_duration_seconds: Some(86_400),
+                idmp_max_size: Some(10_000),
+            })
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_xdelex_rejects_empty_ids() {
+        let service = create_test_service();
+        let err = service
+            .xdelex("stream", XAckDelMode::KeepRef, vec![])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 }
 

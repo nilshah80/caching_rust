@@ -9,8 +9,8 @@ use std::time::Duration;
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
     StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddOptions,
-    XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions, XReadGroupOptions,
-    XReadOptions, XTrimStrategy,
+    XAutoClaimOptions, XCfgSetOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions,
+    XReadGroupOptions, XReadOptions, XTrimOptions,
 };
 use crate::domain::errors::CacheError;
 
@@ -56,7 +56,10 @@ pub trait StreamRepository: Send + Sync {
 
     /// XTRIM - Trim stream to specified length or ID
     /// Returns the number of entries removed
-    async fn xtrim(&self, key: &str, strategy: XTrimStrategy) -> Result<i64, CacheError>;
+    /// XTRIM with optional `LIMIT` and `KEEPREF | DELREF | ACKED` (Redis 8.2+
+    /// adds the reference-policy flag; older Redis silently ignores it on the
+    /// builder side, but service-layer guards block the call there too).
+    async fn xtrim(&self, key: &str, options: XTrimOptions) -> Result<i64, CacheError>;
 
     /// XINFO STREAM - Get information about a stream
     async fn xinfo_stream(&self, key: &str, full: bool) -> Result<StreamInfo, CacheError>;
@@ -171,6 +174,24 @@ pub trait StreamRepository: Send + Sync {
         mode: XAckDelMode,
         ids: &[String],
     ) -> Result<Vec<XAckDelEntryResult>, CacheError>;
+
+    /// XDELEX - Reference-policy-aware delete (Redis 8.2+).
+    ///
+    /// Like XDEL, but accepts `KEEPREF | DELREF | ACKED` to control how PEL
+    /// references in *other* groups are handled. `ids` must be non-empty.
+    async fn xdelex(
+        &self,
+        key: &str,
+        mode: XAckDelMode,
+        ids: &[String],
+    ) -> Result<Vec<XAckDelEntryResult>, CacheError>;
+
+    /// XCFGSET - Set IDMP configuration parameters (Redis 8.6+).
+    ///
+    /// At least one of `idmp_duration_seconds` / `idmp_max_size` must be
+    /// supplied; the call clears all existing producer IDMP maps for the
+    /// stream. The stream must already exist.
+    async fn xcfgset(&self, key: &str, options: XCfgSetOptions) -> Result<(), CacheError>;
 
     // ========== Pending Entry Operations ==========
 

@@ -25,7 +25,8 @@ use crate::api::http::schemas::streams::{
     ConsumerOperationResponse, PendingEntriesResponse, PendingQuery, PendingSummaryResponse,
     StreamAckDelEntrySchema, StreamAckDelRequest, StreamAckDelResponse, StreamAckRequest,
     StreamAckResponse, StreamAddRequest, StreamAddResponse, StreamAutoClaimRequest,
-    StreamAutoClaimResponse, StreamClaimRequest, StreamClaimResponse, StreamDeleteRequest,
+    StreamAutoClaimResponse, StreamCfgSetRequest, StreamClaimRequest, StreamClaimResponse,
+    StreamDeleteExEntrySchema, StreamDeleteExRequest, StreamDeleteExResponse, StreamDeleteRequest,
     StreamDeleteResponse, StreamEntriesResponse, StreamGroupSubscribeQuery, StreamInfoQuery,
     StreamInfoResponse, StreamLengthResponse, StreamRangeQuery, StreamReadBlockingRequest,
     StreamReadGroupBlockingRequest, StreamReadGroupRequest, StreamReadRequest, StreamReadResponse,
@@ -77,6 +78,13 @@ pub fn stream_routes() -> Router<AppState> {
         )
         .route("/api/v1/streams/{key}/groups/{group}/ack", post(xack))
         .route("/api/v1/streams/{key}/groups/{group}/ackdel", post(xackdel))
+        // 11.1.1 — XDELEX with reference policy (no group)
+        .route("/api/v1/streams/{key}/delex", post(xdelex))
+        // 11.1.4 — XCFGSET (Redis 8.6+ stream IDMP config)
+        .route(
+            "/api/v1/streams/{key}/config",
+            axum::routing::patch(xcfgset),
+        )
         // Pending entries
         .route(
             "/api/v1/streams/{key}/groups/{group}/pending",
@@ -147,10 +155,20 @@ pub async fn xadd(
     Path(key): Path<String>,
     Json(req): Json<StreamAddRequest>,
 ) -> Result<Json<ApiResponse<StreamAddResponse>>, CacheError> {
-    let id = state
-        .stream_service
-        .xadd(&key, req.fields.clone(), req.into())
-        .await?;
+    // Capability gates — only enforced when the optional fields are used so
+    // older clients keep working unchanged.
+    if req.reference_policy.is_some() && !state.capabilities.features.stream_reference_policy {
+        return Err(CacheError::ModuleNotAvailable(
+            "XADD reference_policy (KEEPREF/DELREF/ACKED) requires Redis 8.2+".to_string(),
+        ));
+    }
+    if req.idmp.is_some() && !state.capabilities.features.stream_idmp {
+        return Err(CacheError::ModuleNotAvailable(
+            "XADD idmp (IDMP/IDMPAUTO) requires Redis 8.6+".to_string(),
+        ));
+    }
+    let fields = req.fields.clone();
+    let id = state.stream_service.xadd(&key, fields, req.into()).await?;
     Ok(Json(ApiResponse::success(StreamAddResponse { id })))
 }
 
@@ -279,10 +297,12 @@ pub async fn xtrim(
     Path(key): Path<String>,
     Json(req): Json<StreamTrimRequest>,
 ) -> Result<Json<ApiResponse<StreamTrimResponse>>, CacheError> {
-    let trimmed = state
-        .stream_service
-        .xtrim(&key, req.strategy.into())
-        .await?;
+    if req.reference_policy.is_some() && !state.capabilities.features.stream_reference_policy {
+        return Err(CacheError::ModuleNotAvailable(
+            "XTRIM reference_policy (KEEPREF/DELREF/ACKED) requires Redis 8.2+".to_string(),
+        ));
+    }
+    let trimmed = state.stream_service.xtrim(&key, req.into()).await?;
     Ok(Json(ApiResponse::success(StreamTrimResponse { trimmed })))
 }
 
@@ -694,6 +714,78 @@ pub async fn xackdel(
             .map(StreamAckDelEntrySchema::from)
             .collect(),
     })))
+}
+
+/// POST /api/v1/streams/{key}/delex
+///
+/// Reference-policy-aware delete (XDELEX, Redis 8.2+). Like XDEL but with
+/// `KEEPREF | DELREF | ACKED` to control how PEL references in other groups
+/// are handled. Per-entry status: 1 = deleted, -1 = missing, 2 = dangling.
+#[utoipa::path(
+    post,
+    path = "/api/v1/streams/{key}/delex",
+    params(("key" = String, Path, description = "The stream key")),
+    request_body = StreamDeleteExRequest,
+    responses(
+        (status = 200, description = "Per-entry results", body = StreamDeleteExResponse),
+        (status = 400, description = "Invalid request — empty ids"),
+        (status = 501, description = "XDELEX requires Redis 8.2+")
+    ),
+    tag = "Streams"
+)]
+pub async fn xdelex(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<StreamDeleteExRequest>,
+) -> Result<Json<ApiResponse<StreamDeleteExResponse>>, CacheError> {
+    if !state.capabilities.features.xdelex {
+        return Err(CacheError::ModuleNotAvailable(
+            "XDELEX requires Redis 8.2+".to_string(),
+        ));
+    }
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    let mode = req.mode.unwrap_or_default().into();
+    let entries = state.stream_service.xdelex(&key, mode, req.ids).await?;
+    Ok(Json(ApiResponse::success(StreamDeleteExResponse {
+        results: entries
+            .into_iter()
+            .map(StreamDeleteExEntrySchema::from)
+            .collect(),
+    })))
+}
+
+/// PATCH /api/v1/streams/{key}/config
+///
+/// Set IDMP configuration parameters for a stream (XCFGSET, Redis 8.6+).
+/// At least one of `idmp_duration_seconds` / `idmp_max_size` must be set;
+/// the call clears all existing producer IDMP maps for the stream.
+#[utoipa::path(
+    patch,
+    path = "/api/v1/streams/{key}/config",
+    params(("key" = String, Path, description = "The stream key")),
+    request_body = StreamCfgSetRequest,
+    responses(
+        (status = 200, description = "Configuration set"),
+        (status = 400, description = "Invalid request — out-of-range or empty body"),
+        (status = 501, description = "XCFGSET requires Redis 8.6+")
+    ),
+    tag = "Streams"
+)]
+pub async fn xcfgset(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<StreamCfgSetRequest>,
+) -> Result<Json<ApiResponse<()>>, CacheError> {
+    if !state.capabilities.features.stream_idmp {
+        return Err(CacheError::ModuleNotAvailable(
+            "XCFGSET requires Redis 8.6+".to_string(),
+        ));
+    }
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
+    state.stream_service.xcfgset(&key, req.into()).await?;
+    Ok(Json(ApiResponse::success(())))
 }
 
 // ========== Pending Entry Operations ==========
@@ -1235,9 +1327,26 @@ mod tests {
         async fn xtrim(
             &self,
             key: &str,
-            strategy: crate::domain::entities::XTrimStrategy,
+            options: crate::domain::entities::XTrimOptions,
         ) -> Result<i64, CacheError> {
-            self.base.xtrim(key, strategy).await
+            self.base.xtrim(key, options).await
+        }
+
+        async fn xdelex(
+            &self,
+            key: &str,
+            mode: crate::domain::entities::XAckDelMode,
+            ids: &[String],
+        ) -> Result<Vec<crate::domain::entities::XAckDelEntryResult>, CacheError> {
+            self.base.xdelex(key, mode, ids).await
+        }
+
+        async fn xcfgset(
+            &self,
+            key: &str,
+            options: crate::domain::entities::XCfgSetOptions,
+        ) -> Result<(), CacheError> {
+            self.base.xcfgset(key, options).await
         }
 
         async fn xinfo_stream(&self, key: &str, full: bool) -> Result<StreamInfo, CacheError> {
@@ -2373,7 +2482,9 @@ mod tests {
 
     // ─── 10.9 XACKDEL route tests ───────────────────────────────────────────
 
-    use crate::api::http::schemas::streams::XAckDelModeSchema;
+    use crate::api::http::schemas::streams::{
+        TrimStrategyParam, XAckDelModeSchema, XAddIdmpSchema,
+    };
 
     fn enable_xackdel(state: &mut crate::shared::app_state::AppState) {
         let mut caps = (*state.capabilities).clone();
@@ -2431,5 +2542,199 @@ mod tests {
         assert_eq!(body.results[0].id, "1-0");
         assert_eq!(body.results[0].status, 1);
         assert_eq!(body.results[0].status_label, "deleted");
+    }
+
+    // ─── 11.1 XDELEX / XCFGSET / extended XADD+XTRIM gates ─────────────────
+
+    fn enable_xdelex(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.xdelex = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    fn enable_stream_reference_policy(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.stream_reference_policy = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    fn enable_stream_idmp(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.stream_idmp = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    #[tokio::test]
+    async fn test_xdelex_returns_501_when_capability_off() {
+        let state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        let result = xdelex(
+            State(state),
+            Path("stream".to_string()),
+            Json(StreamDeleteExRequest {
+                ids: vec!["1-0".to_string()],
+                mode: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xdelex_rejects_empty_ids_with_400() {
+        let mut state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        enable_xdelex(&mut state);
+        let result = xdelex(
+            State(state),
+            Path("stream".to_string()),
+            Json(StreamDeleteExRequest {
+                ids: vec![],
+                mode: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xdelex_success_path_through_mock() {
+        let mut state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        enable_xdelex(&mut state);
+        let response = xdelex(
+            State(state),
+            Path("stream".to_string()),
+            Json(StreamDeleteExRequest {
+                ids: vec!["1-0".to_string(), "2-0".to_string()],
+                mode: Some(XAckDelModeSchema::DelRef),
+            }),
+        )
+        .await
+        .expect("response");
+        let body = response.0.data.expect("body");
+        assert_eq!(body.results.len(), 2);
+        assert_eq!(body.results[0].status_label, "deleted");
+    }
+
+    #[tokio::test]
+    async fn test_xcfgset_returns_501_when_capability_off() {
+        let state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        let result = xcfgset(
+            State(state),
+            Path("stream".to_string()),
+            Json(StreamCfgSetRequest {
+                idmp_duration_seconds: Some(60),
+                idmp_max_size: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xcfgset_rejects_empty_body_with_400() {
+        let mut state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        enable_stream_idmp(&mut state);
+        let result = xcfgset(
+            State(state),
+            Path("stream".to_string()),
+            Json(StreamCfgSetRequest {
+                idmp_duration_seconds: None,
+                idmp_max_size: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xcfgset_rejects_out_of_range_with_400() {
+        let mut state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        enable_stream_idmp(&mut state);
+        let result = xcfgset(
+            State(state),
+            Path("stream".to_string()),
+            Json(StreamCfgSetRequest {
+                idmp_duration_seconds: Some(86_401),
+                idmp_max_size: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xadd_reference_policy_gate() {
+        // Without capability, supplying reference_policy → 501.
+        let state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        let mut fields = HashMap::new();
+        fields.insert("k".to_string(), "v".to_string());
+        let req = StreamAddRequest {
+            fields: fields.clone(),
+            id: None,
+            maxlen: Some(10),
+            minid: None,
+            approximate: true,
+            no_mkstream: false,
+            limit: None,
+            reference_policy: Some(XAckDelModeSchema::DelRef),
+            idmp: None,
+        };
+        let result = xadd(State(state), Path("stream".to_string()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xadd_idmp_gate() {
+        let state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        let mut fields = HashMap::new();
+        fields.insert("k".to_string(), "v".to_string());
+        let req = StreamAddRequest {
+            fields: fields.clone(),
+            id: None,
+            maxlen: None,
+            minid: None,
+            approximate: true,
+            no_mkstream: false,
+            limit: None,
+            reference_policy: None,
+            idmp: Some(XAddIdmpSchema::Auto {
+                producer_id: "p1".to_string(),
+            }),
+        };
+        let result = xadd(State(state), Path("stream".to_string()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xtrim_reference_policy_gate() {
+        let state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        let req = StreamTrimRequest {
+            strategy: TrimStrategyParam::Maxlen {
+                count: 100,
+                approximate: true,
+            },
+            limit: None,
+            reference_policy: Some(XAckDelModeSchema::Acked),
+        };
+        let result = xtrim(State(state), Path("stream".to_string()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xtrim_with_policy_succeeds_when_enabled() {
+        let mut state = state_with_stream_repo(Arc::new(MockStreamRepository::new()));
+        enable_stream_reference_policy(&mut state);
+        let req = StreamTrimRequest {
+            strategy: TrimStrategyParam::Maxlen {
+                count: 100,
+                approximate: true,
+            },
+            limit: Some(50),
+            reference_policy: Some(XAckDelModeSchema::DelRef),
+        };
+        let response = xtrim(State(state), Path("stream".to_string()), Json(req))
+            .await
+            .expect("response");
+        // MockStreamRepository::xtrim returns 5 entries trimmed.
+        assert_eq!(response.0.data.unwrap().trimmed, 5);
     }
 }

@@ -77,6 +77,15 @@ pub struct FeatureCapabilities {
     /// XACKDEL stream command (Redis 8.2+) — atomic acknowledge + delete
     pub xackdel: bool,
 
+    /// XDELEX stream command (Redis 8.2+) — XDEL with reference policy
+    pub xdelex: bool,
+
+    /// XADD/XTRIM `KEEPREF | DELREF | ACKED` options (Redis 8.2+).
+    pub stream_reference_policy: bool,
+
+    /// XADD idempotent options + XCFGSET (Redis 8.6+).
+    pub stream_idmp: bool,
+
     /// Redis 8.0 vector sets commands (VADD, VSIM, etc.)
     pub vectors: bool,
 
@@ -111,6 +120,9 @@ impl RedisCapabilities {
                 latency_histogram: false,   // Only enabled when Redis ≥ 7.0
                 cluster_slot_stats: false,  // Only enabled in cluster mode on Redis ≥ 8.2
                 xackdel: false,             // Only enabled when Redis ≥ 8.2
+                xdelex: false,              // Only enabled when Redis ≥ 8.2
+                stream_reference_policy: false, // Only enabled when Redis ≥ 8.2
+                stream_idmp: false,         // Only enabled when Redis ≥ 8.6
                 vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
                 vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
                 cluster: false,
@@ -171,6 +183,9 @@ impl Default for FeatureCapabilities {
             latency_histogram: false,   // Only enabled when Redis ≥ 7.0
             cluster_slot_stats: false,  // Only enabled in cluster mode on Redis ≥ 8.2
             xackdel: false,             // Only enabled when Redis ≥ 8.2
+            xdelex: false,              // Only enabled when Redis ≥ 8.2
+            stream_reference_policy: false, // Only enabled when Redis ≥ 8.2
+            stream_idmp: false,         // Only enabled when Redis ≥ 8.6
             vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
             vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
             cluster: false,

@@ -337,14 +337,14 @@
 > Remaining implementation gaps confirmed by code audit against the Redis 8.6 command reference.
 > These are not currently present in repository traits, Redis implementations, HTTP schemas/routes, or E2E tests.
 
-### 11.1 Stream Deletion, Reference Policy, and IDMP (Redis 8.2/8.6) 🟡 MEDIUM PRIORITY
+### 11.1 Stream Deletion, Reference Policy, and IDMP (Redis 8.2/8.6) 🟢 COMPLETED
 
-- [ ] **11.1.1**: Implement XDELEX with `KEEPREF | DELREF | ACKED`
-- [ ] **11.1.2**: Add `KEEPREF | DELREF | ACKED` reference policy options to XTRIM
-- [ ] **11.1.3**: Add `KEEPREF | DELREF | ACKED` reference policy options to XADD
-- [ ] **11.1.4**: Implement XCFGSET for stream IDMP configuration (`IDMP-DURATION`, `IDMP-MAXSIZE`)
-- [ ] **11.1.5**: Add Redis 8.6 XADD IDMP options (`IDMPAUTO producer-id`, `IDMP producer-id idempotent-id`)
-- [ ] **11.1.6**: Add capability gates, OpenAPI entries, unit tests, and E2E coverage for the stream 8.2/8.6 additions
+- [x] **11.1.1**: Implement XDELEX with `KEEPREF | DELREF | ACKED`
+- [x] **11.1.2**: Add `KEEPREF | DELREF | ACKED` reference policy options to XTRIM
+- [x] **11.1.3**: Add `KEEPREF | DELREF | ACKED` reference policy options to XADD
+- [x] **11.1.4**: Implement XCFGSET for stream IDMP configuration (`IDMP-DURATION`, `IDMP-MAXSIZE`)
+- [x] **11.1.5**: Add Redis 8.6 XADD IDMP options (`IDMPAUTO producer-id`, `IDMP producer-id idempotent-id`)
+- [x] **11.1.6**: Add capability gates, OpenAPI entries, unit tests, and E2E coverage for the stream 8.2/8.6 additions
 
 ### 11.2 Hot Key Monitoring (Redis 8.6) 🟡 MEDIUM PRIORITY
 
@@ -381,7 +381,7 @@
 
 | Task | Feature | Commands/options | Priority | Status |
 |------|---------|------------------|----------|--------|
-| 11.1 | Streams 8.2/8.6 | 2 commands + 3 option groups | 🟡 Medium | Planned |
+| 11.1 | Streams 8.2/8.6 | 2 commands + 3 option groups | 🟡 Medium | Completed |
 | 11.2 | HOTKEYS | 4 commands | 🟡 Medium | Planned |
 | 11.3 | Durability/key restore | 2 commands + RESTORE options | 🟢 Low | Planned |
 | 11.4 | Client admin cleanup | 3 commands | 🟢 Low | Planned |

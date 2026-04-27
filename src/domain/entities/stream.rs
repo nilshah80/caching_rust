@@ -167,7 +167,8 @@ pub struct AutoClaimResult {
 /// Options for XADD command
 #[derive(Debug, Clone, Default)]
 pub struct XAddOptions {
-    /// Use specific ID instead of auto-generated
+    /// Use specific ID instead of auto-generated. **Mutually exclusive with
+    /// `idmp`** — Redis 8.6 IDMP/IDMPAUTO require an auto-generated `*` ID.
     pub id: Option<String>,
 
     /// Approximate trimming with MAXLEN
@@ -184,6 +185,31 @@ pub struct XAddOptions {
 
     /// Limit the number of entries to trim
     pub limit: Option<i64>,
+
+    /// Reference policy for the trim sub-clause (Redis 8.2+). Only meaningful
+    /// when `maxlen` or `minid` is set; service-layer rejects otherwise.
+    pub reference_policy: Option<XAckDelMode>,
+
+    /// Idempotent producer mode (Redis 8.6+). Mutually exclusive with `id`.
+    pub idmp: Option<XAddIdmp>,
+}
+
+/// XADD idempotent-producer mode (Redis 8.6+).
+///
+/// On the wire, encodes as either `IDMPAUTO producer-id` (auto-derived
+/// idempotent id) or `IDMP producer-id idempotent-id` (explicit id). Both
+/// modes require the message be added with an auto-generated `*` stream ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum XAddIdmp {
+    /// `IDMP producer-id idempotent-id` — slightly faster, caller manages
+    /// uniqueness of the idempotent id.
+    Manual {
+        producer_id: String,
+        idempotent_id: String,
+    },
+    /// `IDMPAUTO producer-id` — Redis derives the idempotent id from the
+    /// message body via hash.
+    Auto { producer_id: String },
 }
 
 /// Options for XTRIM command
@@ -194,6 +220,33 @@ pub enum XTrimStrategy {
 
     /// Remove entries older than the given ID
     MinId { id: String, approximate: bool },
+}
+
+/// Options for XTRIM (Redis 8.2+ surface).
+///
+/// `XTrimStrategy` carries the threshold; this wrapper adds the optional
+/// `LIMIT count` and `KEEPREF | DELREF | ACKED` reference-policy flag
+/// introduced in Redis 8.2. Wire order is `XTRIM key STRATEGY [LIMIT n] [POLICY]`.
+#[derive(Debug, Clone)]
+pub struct XTrimOptions {
+    pub strategy: XTrimStrategy,
+    /// `LIMIT count` — soft cap on the number of entries trimmed in one call.
+    pub limit: Option<i64>,
+    /// `KEEPREF | DELREF | ACKED` (Redis 8.2+).
+    pub reference_policy: Option<XAckDelMode>,
+}
+
+/// XCFGSET configuration parameters (Redis 8.6+ stream IDMP config).
+///
+/// At least one of `idmp_duration_seconds` / `idmp_max_size` must be set —
+/// service-layer guards reject empty payloads. Calling XCFGSET clears all
+/// existing producer IDMP maps for the stream.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct XCfgSetOptions {
+    /// `IDMP-DURATION` in seconds, valid range `1..=86400` (default 100).
+    pub idmp_duration_seconds: Option<u64>,
+    /// `IDMP-MAXSIZE` in entries, valid range `1..=10000`.
+    pub idmp_max_size: Option<u64>,
 }
 
 /// Options for XREAD command
@@ -264,8 +317,13 @@ pub struct XAutoClaimOptions {
     pub just_id: bool,
 }
 
-/// XACKDEL — controls how consumer-group references are handled when the
-/// entry is deleted (Redis 8.2+).
+/// Stream reference policy — controls how consumer-group references are
+/// handled when an entry is deleted or trimmed (Redis 8.2+).
+///
+/// Used by `XACKDEL`, `XDELEX`, `XTRIM` (8.2 reference-policy flag), and
+/// `XADD`'s trim sub-clause. The variant name retains the `XAckDel` prefix
+/// for backward compatibility with the public `XAckDelModeSchema` JSON
+/// shape; renaming to `StreamRefPolicy` is tracked as a future cleanup.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum XAckDelMode {
     /// Acknowledge in the current group, delete from the stream, but keep

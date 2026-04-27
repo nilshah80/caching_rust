@@ -9,8 +9,9 @@ use validator::Validate;
 
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-    StreamEntry, StreamInfo, StreamReadResult, XAddOptions, XAutoClaimOptions, XClaimOptions,
-    XGroupCreateOptions, XPendingOptions, XReadGroupOptions, XReadOptions, XTrimStrategy,
+    StreamEntry, StreamInfo, StreamReadResult, XAckDelMode, XAddIdmp, XAddOptions,
+    XAutoClaimOptions, XCfgSetOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions,
+    XReadGroupOptions, XReadOptions, XTrimOptions, XTrimStrategy,
 };
 
 // ========== XADD Schemas ==========
@@ -45,6 +46,70 @@ pub struct StreamAddRequest {
     /// Limit trimming operations
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i64>,
+
+    /// Reference policy for the trim sub-clause (Redis 8.2+).
+    /// Only meaningful when `maxlen` or `minid` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_policy: Option<XAckDelModeSchema>,
+
+    /// Idempotent producer mode (Redis 8.6+). Mutually exclusive with `id`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idmp: Option<XAddIdmpSchema>,
+}
+
+/// XADD idempotent-producer payload (Redis 8.6+).
+///
+/// Tagged on the `mode` field so the JSON shape is unambiguous and OpenAPI
+/// surfaces both variants distinctly.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum XAddIdmpSchema {
+    /// Manual mode — caller supplies both `producer_id` and `idempotent_id`.
+    /// Empty strings are rejected by the service layer.
+    Manual {
+        producer_id: String,
+        idempotent_id: String,
+    },
+    /// Auto mode — Redis derives the idempotent id from the message body.
+    /// Empty `producer_id` is rejected by the service layer.
+    Auto { producer_id: String },
+}
+
+impl From<XAddIdmpSchema> for XAddIdmp {
+    fn from(s: XAddIdmpSchema) -> Self {
+        match s {
+            XAddIdmpSchema::Manual {
+                producer_id,
+                idempotent_id,
+            } => XAddIdmp::Manual {
+                producer_id,
+                idempotent_id,
+            },
+            XAddIdmpSchema::Auto { producer_id } => XAddIdmp::Auto { producer_id },
+        }
+    }
+}
+
+/// Body for `PATCH /api/v1/streams/{key}/config` — XCFGSET (Redis 8.6+).
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct StreamCfgSetRequest {
+    /// `IDMP-DURATION` in seconds, valid range `1..=86400`.
+    #[validate(range(min = 1, max = 86_400, message = "must be 1..=86400 seconds"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idmp_duration_seconds: Option<u64>,
+    /// `IDMP-MAXSIZE` in entries, valid range `1..=10000`.
+    #[validate(range(min = 1, max = 10_000, message = "must be 1..=10000"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idmp_max_size: Option<u64>,
+}
+
+impl From<StreamCfgSetRequest> for XCfgSetOptions {
+    fn from(req: StreamCfgSetRequest) -> Self {
+        XCfgSetOptions {
+            idmp_duration_seconds: req.idmp_duration_seconds,
+            idmp_max_size: req.idmp_max_size,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -60,6 +125,8 @@ impl From<StreamAddRequest> for XAddOptions {
             approximate: req.approximate,
             no_mkstream: req.no_mkstream,
             limit: req.limit,
+            reference_policy: req.reference_policy.map(XAckDelMode::from),
+            idmp: req.idmp.map(XAddIdmp::from),
         }
     }
 }
@@ -173,6 +240,24 @@ pub struct StreamTrimRequest {
     /// Trim strategy
     #[serde(flatten)]
     pub strategy: TrimStrategyParam,
+
+    /// Optional `LIMIT count` (Redis 8.2+ allows it on synchronous trims).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+
+    /// Optional reference policy `KEEPREF | DELREF | ACKED` (Redis 8.2+).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_policy: Option<XAckDelModeSchema>,
+}
+
+impl From<StreamTrimRequest> for XTrimOptions {
+    fn from(req: StreamTrimRequest) -> Self {
+        XTrimOptions {
+            strategy: req.strategy.into(),
+            limit: req.limit,
+            reference_policy: req.reference_policy.map(XAckDelMode::from),
+        }
+    }
 }
 
 /// Response from XTRIM
@@ -477,6 +562,48 @@ pub struct StreamAckDelResponse {
     pub results: Vec<StreamAckDelEntrySchema>,
 }
 
+// ========== XDELEX Schemas (Redis 8.2+) ==========
+
+/// Request body for XDELEX. Same shape as XACKDEL but no `group` field
+/// (XDELEX is the no-group counterpart that operates on the stream itself).
+#[derive(Debug, Serialize, Deserialize, ToSchema, Validate)]
+pub struct StreamDeleteExRequest {
+    /// Entry IDs to delete with reference-policy semantics.
+    #[validate(length(min = 1, message = "At least one ID is required"))]
+    pub ids: Vec<String>,
+    /// Optional reference policy. Defaults to `keepref`.
+    #[serde(default)]
+    pub mode: Option<XAckDelModeSchema>,
+}
+
+/// Per-entry result schema for XDELEX. Wire shape matches XACKDEL exactly,
+/// so this is structurally identical to `StreamAckDelEntrySchema` — kept as
+/// its own type for OpenAPI clarity.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StreamDeleteExEntrySchema {
+    pub id: String,
+    /// Raw Redis status code: 1 = deleted, -1 = missing, 2 = dangling.
+    pub status: i64,
+    /// Human-readable label derived from `status`.
+    pub status_label: String,
+}
+
+impl From<crate::domain::entities::XAckDelEntryResult> for StreamDeleteExEntrySchema {
+    fn from(e: crate::domain::entities::XAckDelEntryResult) -> Self {
+        Self {
+            id: e.id,
+            status: e.status,
+            status_label: e.status_label,
+        }
+    }
+}
+
+/// Response body for XDELEX.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StreamDeleteExResponse {
+    pub results: Vec<StreamDeleteExEntrySchema>,
+}
+
 // ========== XPENDING Schemas ==========
 
 /// Query parameters for XPENDING detail
@@ -770,6 +897,8 @@ mod tests {
             approximate: false,
             no_mkstream: true,
             limit: Some(5),
+            reference_policy: None,
+            idmp: None,
         };
         let opts: XAddOptions = req.into();
         assert_eq!(opts.id.as_deref(), Some("1-0"));

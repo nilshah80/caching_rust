@@ -166,7 +166,7 @@ use crate::domain::entities::{
     XPendingOptions,
     XReadGroupOptions,
     XReadOptions,
-    XTrimStrategy,
+    XTrimOptions,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
@@ -3847,8 +3847,28 @@ impl StreamRepository for MockStreamRepository {
         Ok(ids.len() as i64)
     }
 
-    async fn xtrim(&self, _key: &str, _strategy: XTrimStrategy) -> Result<i64, CacheError> {
+    async fn xtrim(&self, _key: &str, _options: XTrimOptions) -> Result<i64, CacheError> {
         Ok(5)
+    }
+
+    async fn xdelex(
+        &self,
+        _key: &str,
+        _mode: crate::domain::entities::XAckDelMode,
+        ids: &[String],
+    ) -> Result<Vec<crate::domain::entities::XAckDelEntryResult>, CacheError> {
+        Ok(ids
+            .iter()
+            .map(|id| crate::domain::entities::XAckDelEntryResult::new(id.clone(), 1))
+            .collect())
+    }
+
+    async fn xcfgset(
+        &self,
+        _key: &str,
+        _options: crate::domain::entities::XCfgSetOptions,
+    ) -> Result<(), CacheError> {
+        Ok(())
     }
 
     async fn xinfo_stream(&self, _key: &str, _full: bool) -> Result<StreamInfo, CacheError> {

@@ -814,6 +814,171 @@ fi
 echo ""
 
 # ==========================================================================
+# Streams 11.1 — XDELEX / XCFGSET / XADD-IDMP / XTRIM reference policy
+# ==========================================================================
+echo "--- Streams 11.1 (XDELEX / XCFGSET / IDMP) ---"
+
+STREAM_11_1="${P}_s11_1"
+
+# Seed an entry to delete via XDELEX.
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+    '{"fields":{"k":"v"}}')
+check_any "XADD (seed for XDELEX)" "$status" "$body" 200 400 501
+DEL_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+if [[ "$status" == "200" && -n "$DEL_ID" ]]; then
+    # XDELEX with default keepref mode.
+    IFS='|' read -r status body < <(do_request POST \
+        "/api/v1/streams/${STREAM_11_1}/delex" \
+        "{\"ids\":[\"${DEL_ID}\"]}")
+    check_any "XDELEX (default keepref)" "$status" "$body" 200 501
+
+    # XDELEX with explicit DELREF mode against a re-added entry.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+        '{"fields":{"k2":"v2"}}')
+    SECOND_DEL_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    if [[ -n "$SECOND_DEL_ID" ]]; then
+        IFS='|' read -r status body < <(do_request POST \
+            "/api/v1/streams/${STREAM_11_1}/delex" \
+            "{\"ids\":[\"${SECOND_DEL_ID}\"],\"mode\":\"delref\"}")
+        check_any "XDELEX (DELREF mode)" "$status" "$body" 200 501
+    fi
+
+    # XDELEX rejects empty ids regardless of capability.
+    IFS='|' read -r status body < <(do_request POST \
+        "/api/v1/streams/${STREAM_11_1}/delex" '{"ids":[]}')
+    check_any "XDELEX rejects empty ids" "$status" "$body" 400 501
+else
+    SKIP=$((SKIP + 3))
+    echo "  SKIP  XDELEX flow (XADD seed failed)"
+fi
+
+# XADD with reference_policy on a trim sub-clause (Redis 8.2+).
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+    '{"fields":{"a":"b"},"maxlen":100,"approximate":true,"reference_policy":"keepref"}')
+check_any "XADD with reference_policy + maxlen" "$status" "$body" 200 501
+
+# XADD reference_policy without maxlen/minid is rejected at the service layer (400).
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+    '{"fields":{"a":"b"},"reference_policy":"delref"}')
+check_any "XADD rejects reference_policy without trim" "$status" "$body" 400 501
+
+# XADD IDMP with explicit id is rejected.
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+    '{"fields":{"a":"b"},"id":"99-0","idmp":{"mode":"auto","producer_id":"p1"}}')
+check_any "XADD rejects idmp + explicit id" "$status" "$body" 400 501
+
+# XADD IDMP manual mode (Redis 8.6+; gated). Then call again with the SAME
+# (producer_id, idempotent_id) and assert Redis returns the original entry ID
+# — that's the actual idempotency guarantee, not just route acceptance.
+IDMP_PRODUCER="p_${P}_manual"
+IDMP_IID="iid-1"
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+    "{\"fields\":{\"a\":\"b\"},\"idmp\":{\"mode\":\"manual\",\"producer_id\":\"${IDMP_PRODUCER}\",\"idempotent_id\":\"${IDMP_IID}\"}}")
+check_any "XADD IDMP manual (first call)" "$status" "$body" 200 501
+IDMP_FIRST_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+if [[ "$status" == "200" && -n "$IDMP_FIRST_ID" ]]; then
+    # Re-issue the exact same idempotent call — Redis must dedupe and return
+    # the *first* entry ID, not generate a new one.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+        "{\"fields\":{\"a\":\"different\"},\"idmp\":{\"mode\":\"manual\",\"producer_id\":\"${IDMP_PRODUCER}\",\"idempotent_id\":\"${IDMP_IID}\"}}")
+    check "XADD IDMP manual (duplicate returns 200)" "200" "$status" "$body"
+    IDMP_DUP_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    if [[ "$IDMP_DUP_ID" == "$IDMP_FIRST_ID" ]]; then
+        PASS=$((PASS + 1))
+        echo "  PASS  XADD IDMP manual is idempotent (id=$IDMP_DUP_ID matches first)"
+    else
+        FAIL=$((FAIL + 1))
+        ERRORS="$ERRORS\n  FAIL  XADD IDMP manual idempotency: first=$IDMP_FIRST_ID got=$IDMP_DUP_ID"
+        echo "  FAIL  XADD IDMP manual idempotency (first=$IDMP_FIRST_ID, dup=$IDMP_DUP_ID)"
+    fi
+else
+    SKIP=$((SKIP + 2))
+    echo "  SKIP  XADD IDMP manual duplicate (first call did not succeed)"
+fi
+
+# XADD IDMPAUTO mode (Redis 8.6+; gated). IDMPAUTO derives the iid from the
+# message body, so two calls with identical fields + producer_id must dedupe
+# to the same entry ID.
+IDMPAUTO_PRODUCER="p_${P}_auto"
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+    "{\"fields\":{\"a\":\"auto-payload\"},\"idmp\":{\"mode\":\"auto\",\"producer_id\":\"${IDMPAUTO_PRODUCER}\"}}")
+check_any "XADD IDMPAUTO (first call)" "$status" "$body" 200 501
+IDMPAUTO_FIRST_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+if [[ "$status" == "200" && -n "$IDMPAUTO_FIRST_ID" ]]; then
+    IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+        "{\"fields\":{\"a\":\"auto-payload\"},\"idmp\":{\"mode\":\"auto\",\"producer_id\":\"${IDMPAUTO_PRODUCER}\"}}")
+    check "XADD IDMPAUTO (duplicate returns 200)" "200" "$status" "$body"
+    IDMPAUTO_DUP_ID=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    if [[ "$IDMPAUTO_DUP_ID" == "$IDMPAUTO_FIRST_ID" ]]; then
+        PASS=$((PASS + 1))
+        echo "  PASS  XADD IDMPAUTO is idempotent (id=$IDMPAUTO_DUP_ID matches first)"
+    else
+        FAIL=$((FAIL + 1))
+        ERRORS="$ERRORS\n  FAIL  XADD IDMPAUTO idempotency: first=$IDMPAUTO_FIRST_ID got=$IDMPAUTO_DUP_ID"
+        echo "  FAIL  XADD IDMPAUTO idempotency (first=$IDMPAUTO_FIRST_ID, dup=$IDMPAUTO_DUP_ID)"
+    fi
+else
+    SKIP=$((SKIP + 2))
+    echo "  SKIP  XADD IDMPAUTO duplicate (first call did not succeed)"
+fi
+
+# Multi-field IDMPAUTO regression test — IDMPAUTO derives the iid from the
+# message body, so the wire-side field order must be deterministic across
+# retries even when JSON delivers fields in arbitrary order. With three
+# fields sent each time, a HashMap-iteration-order bug would surface as a
+# new entry id on the duplicate call.
+IDMPAUTO_MULTI_PRODUCER="p_${P}_auto_multi"
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+    "{\"fields\":{\"alpha\":\"1\",\"beta\":\"2\",\"gamma\":\"3\"},\"idmp\":{\"mode\":\"auto\",\"producer_id\":\"${IDMPAUTO_MULTI_PRODUCER}\"}}")
+check_any "XADD IDMPAUTO multi-field (first call)" "$status" "$body" 200 501
+IDMPAUTO_MULTI_FIRST=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+
+if [[ "$status" == "200" && -n "$IDMPAUTO_MULTI_FIRST" ]]; then
+    # JSON object key order in the duplicate call is intentionally different
+    # to verify the server-side normalization, not just the client.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/add" \
+        "{\"fields\":{\"gamma\":\"3\",\"alpha\":\"1\",\"beta\":\"2\"},\"idmp\":{\"mode\":\"auto\",\"producer_id\":\"${IDMPAUTO_MULTI_PRODUCER}\"}}")
+    check "XADD IDMPAUTO multi-field (duplicate returns 200)" "200" "$status" "$body"
+    IDMPAUTO_MULTI_DUP=$(echo "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    if [[ "$IDMPAUTO_MULTI_DUP" == "$IDMPAUTO_MULTI_FIRST" ]]; then
+        PASS=$((PASS + 1))
+        echo "  PASS  XADD IDMPAUTO multi-field is idempotent (id=$IDMPAUTO_MULTI_DUP matches first)"
+    else
+        FAIL=$((FAIL + 1))
+        ERRORS="$ERRORS\n  FAIL  XADD IDMPAUTO multi-field idempotency: first=$IDMPAUTO_MULTI_FIRST got=$IDMPAUTO_MULTI_DUP"
+        echo "  FAIL  XADD IDMPAUTO multi-field idempotency (first=$IDMPAUTO_MULTI_FIRST, dup=$IDMPAUTO_MULTI_DUP)"
+    fi
+else
+    SKIP=$((SKIP + 2))
+    echo "  SKIP  XADD IDMPAUTO multi-field duplicate (first call did not succeed)"
+fi
+
+# XTRIM with reference_policy + limit (Redis 8.2+; gated).
+IFS='|' read -r status body < <(do_request POST "/api/v1/streams/${STREAM_11_1}/trim" \
+    '{"strategy":"maxlen","count":10,"approximate":true,"limit":50,"reference_policy":"acked"}')
+check_any "XTRIM with reference_policy" "$status" "$body" 200 400 501
+
+# XCFGSET (Redis 8.6+; gated).
+IFS='|' read -r status body < <(do_request PATCH "/api/v1/streams/${STREAM_11_1}/config" \
+    '{"idmp_duration_seconds":120,"idmp_max_size":1000}')
+check_any "XCFGSET" "$status" "$body" 200 501
+
+# XCFGSET rejects empty body.
+IFS='|' read -r status body < <(do_request PATCH "/api/v1/streams/${STREAM_11_1}/config" \
+    '{}')
+check_any "XCFGSET rejects empty body" "$status" "$body" 400 501
+
+# XCFGSET rejects out-of-range duration.
+IFS='|' read -r status body < <(do_request PATCH "/api/v1/streams/${STREAM_11_1}/config" \
+    '{"idmp_duration_seconds":86401}')
+check_any "XCFGSET rejects duration > 86400" "$status" "$body" 400 501
+
+echo ""
+
+# ==========================================================================
 # Admin (new endpoints)
 # ==========================================================================
 echo "--- Admin (new endpoints) ---"

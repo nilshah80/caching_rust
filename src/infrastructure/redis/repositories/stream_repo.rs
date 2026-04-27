@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use crate::domain::entities::{
     AutoClaimResult, ClaimResult, ConsumerGroupInfo, ConsumerInfo, PendingEntry, PendingSummary,
-    StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddOptions,
-    XAutoClaimOptions, XClaimOptions, XGroupCreateOptions, XPendingOptions, XReadGroupOptions,
-    XReadOptions, XTrimStrategy,
+    StreamEntry, StreamInfo, StreamReadResult, XAckDelEntryResult, XAckDelMode, XAddIdmp,
+    XAddOptions, XAutoClaimOptions, XCfgSetOptions, XClaimOptions, XGroupCreateOptions,
+    XPendingOptions, XReadGroupOptions, XReadOptions, XTrimOptions, XTrimStrategy,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StreamRepository;
@@ -84,9 +84,37 @@ impl StreamRepository for RedisStreamRepository {
         let mut cmd = redis::cmd("XADD");
         cmd.arg(key);
 
+        // Wire form (Redis 8.6 docs):
+        //   XADD key [NOMKSTREAM] [KEEPREF | DELREF | ACKED]
+        //            [IDMPAUTO producer-id | IDMP producer-id idempotent-id]
+        //            [<MAXLEN | MINID> [= | ~] threshold [LIMIT count]]
+        //            <* | id> field value [field value ...]
+
         // NOMKSTREAM option
         if options.no_mkstream {
             cmd.arg("NOMKSTREAM");
+        }
+
+        // Reference policy (Redis 8.2+) — applies to the trim sub-clause if
+        // MAXLEN/MINID is supplied. Service-layer guards reject the option
+        // when no trim is set.
+        if let Some(policy) = options.reference_policy {
+            cmd.arg(policy.as_str());
+        }
+
+        // IDMP / IDMPAUTO (Redis 8.6+). Service-layer rejects pairing with an
+        // explicit `id` (Redis requires `*` for idempotent producers).
+        match &options.idmp {
+            Some(XAddIdmp::Manual {
+                producer_id,
+                idempotent_id,
+            }) => {
+                cmd.arg("IDMP").arg(producer_id).arg(idempotent_id);
+            }
+            Some(XAddIdmp::Auto { producer_id }) => {
+                cmd.arg("IDMPAUTO").arg(producer_id);
+            }
+            None => {}
         }
 
         // Trimming options
@@ -117,8 +145,14 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("*");
         }
 
-        // Fields
-        for (field, value) in fields {
+        // Fields — emit in lexicographic order by field name. `HashMap` does
+        // not guarantee iteration order, and Redis 8.6 IDMPAUTO derives the
+        // idempotent id from the message body, so two retries of "the same
+        // message" must serialize to the exact same byte sequence to dedupe.
+        // Sorting also makes XADD output deterministic for replay/debugging.
+        let mut sorted: Vec<(&String, &String)> = fields.iter().collect();
+        sorted.sort_by(|a, b| a.0.cmp(b.0));
+        for (field, value) in sorted {
             cmd.arg(field).arg(value);
         }
 
@@ -187,12 +221,15 @@ impl StreamRepository for RedisStreamRepository {
         Ok(result)
     }
 
-    async fn xtrim(&self, key: &str, strategy: XTrimStrategy) -> Result<i64, CacheError> {
+    async fn xtrim(&self, key: &str, options: XTrimOptions) -> Result<i64, CacheError> {
         let mut conn = self.pool.get().await?;
         let mut cmd = redis::cmd("XTRIM");
         cmd.arg(key);
 
-        match strategy {
+        // Wire form (Redis 8.2 docs):
+        //   XTRIM key <MAXLEN | MINID> [= | ~] threshold [LIMIT count]
+        //             [KEEPREF | DELREF | ACKED]
+        match options.strategy {
             XTrimStrategy::MaxLen { count, approximate } => {
                 cmd.arg("MAXLEN");
                 if approximate {
@@ -207,6 +244,13 @@ impl StreamRepository for RedisStreamRepository {
                 }
                 cmd.arg(&id);
             }
+        }
+
+        if let Some(limit) = options.limit {
+            cmd.arg("LIMIT").arg(limit);
+        }
+        if let Some(policy) = options.reference_policy {
+            cmd.arg(policy.as_str());
         }
 
         let result: i64 = cmd.query_async(&mut conn).await?;
@@ -539,6 +583,59 @@ impl StreamRepository for RedisStreamRepository {
             .zip(statuses)
             .map(|(id, status)| XAckDelEntryResult::new(id.clone(), status))
             .collect())
+    }
+
+    async fn xdelex(
+        &self,
+        key: &str,
+        mode: XAckDelMode,
+        ids: &[String],
+    ) -> Result<Vec<XAckDelEntryResult>, CacheError> {
+        if ids.is_empty() {
+            return Err(CacheError::InvalidInput(
+                "XDELEX requires at least one entry id".to_string(),
+            ));
+        }
+        let mut conn = self.pool.get().await?;
+        // Wire form: XDELEX key [KEEPREF | DELREF | ACKED] IDS numids id [id ...]
+        let mut cmd = redis::cmd("XDELEX");
+        cmd.arg(key).arg(mode.as_str()).arg("IDS").arg(ids.len());
+        for id in ids {
+            cmd.arg(id);
+        }
+        let statuses: Vec<i64> = cmd.query_async(&mut conn).await?;
+        if statuses.len() != ids.len() {
+            return Err(CacheError::Internal(format!(
+                "XDELEX returned {} statuses for {} ids — Redis reply shape mismatch",
+                statuses.len(),
+                ids.len()
+            )));
+        }
+        Ok(ids
+            .iter()
+            .zip(statuses)
+            .map(|(id, status)| XAckDelEntryResult::new(id.clone(), status))
+            .collect())
+    }
+
+    async fn xcfgset(&self, key: &str, options: XCfgSetOptions) -> Result<(), CacheError> {
+        if options.idmp_duration_seconds.is_none() && options.idmp_max_size.is_none() {
+            return Err(CacheError::InvalidInput(
+                "XCFGSET requires at least one of IDMP-DURATION or IDMP-MAXSIZE".to_string(),
+            ));
+        }
+        let mut conn = self.pool.get().await?;
+        // Wire form: XCFGSET key [IDMP-DURATION seconds] [IDMP-MAXSIZE n]
+        let mut cmd = redis::cmd("XCFGSET");
+        cmd.arg(key);
+        if let Some(d) = options.idmp_duration_seconds {
+            cmd.arg("IDMP-DURATION").arg(d);
+        }
+        if let Some(n) = options.idmp_max_size {
+            cmd.arg("IDMP-MAXSIZE").arg(n);
+        }
+        let _: () = cmd.query_async(&mut conn).await?;
+        Ok(())
     }
 
     // ========== Pending Entry Operations ==========

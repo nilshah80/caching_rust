@@ -916,6 +916,12 @@ impl InstrumentedPool {
                 && RedisCapabilities::version_gte(&redis_version, "8.2.0"),
             // XACKDEL — atomic ack+delete on streams, Redis 8.2+
             xackdel: RedisCapabilities::version_gte(&redis_version, "8.2.0"),
+            // XDELEX — reference-policy-aware delete, Redis 8.2+
+            xdelex: RedisCapabilities::version_gte(&redis_version, "8.2.0"),
+            // XADD/XTRIM `KEEPREF | DELREF | ACKED` flags, Redis 8.2+
+            stream_reference_policy: RedisCapabilities::version_gte(&redis_version, "8.2.0"),
+            // XADD `IDMP / IDMPAUTO` + XCFGSET, Redis 8.6+
+            stream_idmp: RedisCapabilities::version_gte(&redis_version, "8.6.0"),
             vectors: vectors_available,
             vector_range: vector_range_available,
             cluster: cluster_enabled,

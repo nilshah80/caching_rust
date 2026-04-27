@@ -218,12 +218,13 @@ use crate::api::http::schemas::streams::{
     ConsumerCreateRequest, ConsumerGroupCreateRequest, ConsumerGroupCreateResponse,
     ConsumerGroupSetIdRequest, ConsumerOperationResponse, PendingQuery, StreamAckDelEntrySchema,
     StreamAckDelRequest, StreamAckDelResponse, StreamAckRequest, StreamAckResponse,
-    StreamAddRequest, StreamAddResponse, StreamAutoClaimRequest, StreamClaimRequest,
+    StreamAddRequest, StreamAddResponse, StreamAutoClaimRequest, StreamCfgSetRequest,
+    StreamClaimRequest, StreamDeleteExEntrySchema, StreamDeleteExRequest, StreamDeleteExResponse,
     StreamDeleteRequest, StreamDeleteResponse, StreamEntriesResponse, StreamGroupSubscribeQuery,
     StreamIdPair, StreamInfoQuery, StreamLengthResponse, StreamRangeQuery,
     StreamReadBlockingRequest, StreamReadGroupBlockingRequest, StreamReadGroupRequest,
     StreamReadRequest, StreamSetIdRequest, StreamSubscribeQuery, StreamTrimRequest,
-    StreamTrimResponse, TrimStrategyParam, XAckDelModeSchema,
+    StreamTrimResponse, TrimStrategyParam, XAckDelModeSchema, XAddIdmpSchema,
 };
 use crate::api::http::schemas::strings::{
     AppendRequest, AppendResponse, DelExRequest, DelExResponse, DigestResponse, GetDelResponse,
@@ -529,6 +530,8 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::streams::xreadgroup_blocking,
         crate::api::http::routes::streams::xack,
         crate::api::http::routes::streams::xackdel,
+        crate::api::http::routes::streams::xdelex,
+        crate::api::http::routes::streams::xcfgset,
         crate::api::http::routes::streams::xpending_summary,
         crate::api::http::routes::streams::xpending,
         crate::api::http::routes::streams::xclaim,
@@ -1049,7 +1052,12 @@ use crate::shared::app_state::AppState;
             StreamAckDelRequest,
             StreamAckDelResponse,
             StreamAckDelEntrySchema,
+            StreamDeleteExRequest,
+            StreamDeleteExResponse,
+            StreamDeleteExEntrySchema,
+            StreamCfgSetRequest,
             XAckDelModeSchema,
+            XAddIdmpSchema,
             PendingQuery,
             StreamClaimRequest,
             StreamAutoClaimRequest,
@@ -1615,6 +1623,22 @@ pub fn filtered_openapi(
         spec.paths.paths.remove("/api/v1/vectors/{key}/range");
     }
 
+    // Stream 8.2/8.6 routes are gated by per-feature flags inside the streams
+    // route group. Their handlers already return 501 at runtime when the gate
+    // is off; strip them from the OpenAPI spec too so deployment-specific
+    // documentation stays honest.
+    if !capabilities.features.xdelex {
+        spec.paths.paths.remove("/api/v1/streams/{key}/delex");
+    }
+    if !capabilities.features.stream_idmp {
+        spec.paths.paths.remove("/api/v1/streams/{key}/config");
+    }
+    // Note: XADD reference_policy/idmp and XTRIM reference_policy are
+    // optional fields on existing routes, not separate paths, so the OpenAPI
+    // spec keeps the routes mounted; the schema documentation just describes
+    // fields that 501 at runtime when the capability is off. This matches
+    // what we do for other gradually-rolled-out option fields.
+
     if !remove_prefixes.is_empty() {
         // Filter paths
         spec.paths.paths.retain(|path, _| {
@@ -1734,8 +1758,56 @@ mod tests {
         caps.features.cluster = true;
         caps.features.vectors = true;
         caps.features.vector_range = true;
+        // Per-feature stream gates (Redis 8.2 / 8.6) — flip them on too,
+        // otherwise filtered_openapi strips /streams/{key}/delex and
+        // /streams/{key}/config.
+        caps.features.xdelex = true;
+        caps.features.stream_idmp = true;
         let full_spec = ApiDoc::openapi();
         let filtered = filtered_openapi(&caps);
         assert_eq!(full_spec.paths.paths.len(), filtered.paths.paths.len());
+    }
+
+    #[test]
+    fn test_filtered_openapi_strips_xdelex_when_capability_off() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.streams = true;
+        caps.features.xdelex = false;
+        caps.features.stream_idmp = true;
+        let filtered = filtered_openapi(&caps);
+        assert!(
+            !filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/streams/{key}/delex")
+        );
+        // The gated /config path is still present (stream_idmp on).
+        assert!(
+            filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/streams/{key}/config")
+        );
+    }
+
+    #[test]
+    fn test_filtered_openapi_strips_xcfgset_when_idmp_off() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.streams = true;
+        caps.features.xdelex = true;
+        caps.features.stream_idmp = false;
+        let filtered = filtered_openapi(&caps);
+        assert!(
+            !filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/streams/{key}/config")
+        );
+        assert!(
+            filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/streams/{key}/delex")
+        );
     }
 }
