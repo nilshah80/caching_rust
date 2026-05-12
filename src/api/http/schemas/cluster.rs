@@ -179,6 +179,21 @@ mod tests {
     }
 
     #[test]
+    fn test_slot_stats_query_rejects_partial_ranges() {
+        let q = SlotStatsQuery {
+            slot_start: Some(0),
+            ..Default::default()
+        };
+        assert!(matches!(q.into_filter(), Err(CacheError::InvalidInput(_))));
+
+        let q = SlotStatsQuery {
+            slot_end: Some(100),
+            ..Default::default()
+        };
+        assert!(matches!(q.into_filter(), Err(CacheError::InvalidInput(_))));
+    }
+
+    #[test]
     fn test_slot_stats_query_orderby_default_asc() {
         let q = SlotStatsQuery {
             order_by: Some("memory_bytes".into()),

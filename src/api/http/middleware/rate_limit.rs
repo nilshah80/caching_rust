@@ -118,6 +118,26 @@ mod tests {
         assert!(limiter.check_key(&ip2).is_ok());
     }
 
+    #[test]
+    fn test_extract_client_ip_uses_forwarded_for_only_when_trusted() {
+        let mut request = Request::get("/test")
+            .header("x-forwarded-for", "203.0.113.10, 10.0.0.1")
+            .body(Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 1], 12345))));
+
+        assert_eq!(
+            extract_client_ip(&request, true),
+            IpAddr::from([203, 0, 113, 10])
+        );
+        assert_eq!(
+            extract_client_ip(&request, false),
+            IpAddr::from([192, 0, 2, 1])
+        );
+    }
+
     fn test_state(limiter: SharedRateLimiter) -> RateLimitState {
         RateLimitState {
             limiter,

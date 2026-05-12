@@ -12,4 +12,5 @@ mod docker_helper;
 
 mod core_features;
 mod error_scenarios;
+mod phase11_features;
 mod phase5_features;

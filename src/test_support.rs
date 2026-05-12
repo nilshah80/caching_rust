@@ -74,6 +74,8 @@ use crate::domain::entities::{
     FlushOptions,
     FlushResult,
     GetExOptions,
+    HotkeysReport,
+    HotkeysStartOptions,
     IndexAlterResult,
     IndexCreateOptions,
     IndexCreateResult,
@@ -984,6 +986,32 @@ impl AdminRepository for MockAdminRepository {
 
     async fn memory_malloc_stats(&self) -> Result<String, CacheError> {
         Ok("mock allocator stats".to_string())
+    }
+
+    async fn hotkeys_start(&self, _options: HotkeysStartOptions) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn hotkeys_stop(&self) -> Result<(), CacheError> {
+        Ok(())
+    }
+
+    async fn hotkeys_get(&self) -> Result<HotkeysReport, CacheError> {
+        Ok(HotkeysReport {
+            data: serde_json::json!({
+                "tracking-active": 0,
+                "sample-ratio": 1,
+                "selected-slots": [[0, 16383]],
+                "collection-start-time-unix-ms": 1_700_000_000_000_i64,
+                "collection-duration-ms": 0,
+                "by-cpu-time-us": ["mock_key", 42],
+                "by-net-bytes": ["mock_key", 128]
+            }),
+        })
+    }
+
+    async fn hotkeys_reset(&self) -> Result<(), CacheError> {
+        Ok(())
     }
 }
 

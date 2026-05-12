@@ -320,6 +320,10 @@ mod tests {
             CacheError::TransactionFailed("x".into()).error_code(),
             "TRANSACTION_FAILED"
         );
+        assert_eq!(
+            CacheError::TransactionAborted.error_code(),
+            "TRANSACTION_ABORTED"
+        );
         assert_eq!(CacheError::Unauthorized.error_code(), "UNAUTHORIZED");
         assert_eq!(
             CacheError::Internal("x".into()).error_code(),

@@ -359,6 +359,16 @@ mod tests {
     }
 
     #[test]
+    fn test_ignore_schema_converts_to_domain_type() {
+        let ignore = TsIgnore::from(TsIgnoreSchema {
+            max_time_diff: 10,
+            max_val_diff: 0.5,
+        });
+        assert_eq!(ignore.max_time_diff, 10);
+        assert_eq!(ignore.max_val_diff, 0.5);
+    }
+
+    #[test]
     fn test_create_request_propagates_nested_ignore_validation() {
         // Nested validation must trigger when the parent is validated.
         let request = TimeSeriesCreateRequest {

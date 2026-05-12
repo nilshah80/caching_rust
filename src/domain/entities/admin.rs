@@ -294,6 +294,51 @@ pub struct KeyAndFlags {
     pub flags: Vec<String>,
 }
 
+// ============================================================================
+// HOTKEYS (Redis 8.6+)
+// ============================================================================
+
+/// Inclusive `[start, end]` slot range supplied via `HOTKEYS START SLOTS`.
+///
+/// Both endpoints are required and `start <= end`; the service layer rejects
+/// malformed ranges before reaching the Redis driver.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+pub struct HotkeysSlotRange {
+    pub start: u16,
+    pub end: u16,
+}
+
+/// Options forwarded to `HOTKEYS START`.
+///
+/// `METRICS` is mandatory and accepts at least one of `cpu` / `net`. The
+/// optional knobs map 1:1 to the Redis arguments (`COUNT k`, `DURATION s`,
+/// `SAMPLE ratio`, `SLOTS count slot ...`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct HotkeysStartOptions {
+    /// Track hot keys by CPU time percentage.
+    pub cpu: bool,
+    /// Track hot keys by network bytes percentage.
+    pub net: bool,
+    /// Top-K hot keys to retain per metric (`COUNT k`).
+    pub top_k: Option<u32>,
+    /// Auto-stop the tracker after this many seconds (`DURATION seconds`).
+    pub duration_seconds: Option<u64>,
+    /// Sample ratio in `[1, 100]` (`SAMPLE ratio`).
+    pub sample_ratio: Option<u32>,
+    /// Restrict tracking to these slot ranges (`SLOTS count slot ...`).
+    pub slots: Vec<HotkeysSlotRange>,
+}
+
+/// Free-form `HOTKEYS GET` reply.
+///
+/// Redis returns a map-like RESP array whose shape evolves between releases
+/// (e.g. `by-cpu-time-us` / `by-net-bytes` lists). We surface it as opaque
+/// JSON the way `LATENCY HISTOGRAM` does — see [`AdminRepository::latency_histogram`].
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HotkeysReport {
+    pub data: serde_json::Value,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

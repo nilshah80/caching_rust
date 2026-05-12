@@ -1244,6 +1244,22 @@ mod tests {
     }
 
     #[test]
+    fn test_hybrid_search_options_deserialize_default_limit() {
+        let options: HybridSearchOptions = serde_json::from_str(
+            r#"{
+                "query": "*",
+                "vsim_field": "embedding",
+                "vsim_input": {"type": "ELE", "element": "doc-1"}
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(options.limit, 10);
+        assert!(options.params.is_empty());
+        assert!(options.filters.is_empty());
+    }
+
+    #[test]
     fn test_distance_metric_display() {
         assert_eq!(DistanceMetric::L2.to_string(), "L2");
         assert_eq!(DistanceMetric::Ip.to_string(), "IP");

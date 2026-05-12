@@ -167,3 +167,52 @@ pub trait ClusterRepository: Send + Sync {
         filter: ClusterSlotStatsFilter,
     ) -> Result<Vec<SlotStats>, CacheError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slot_stats_metric_wire_tokens() {
+        assert_eq!(SlotStatsMetric::KeyCount.as_str(), "KEY-COUNT");
+        assert_eq!(SlotStatsMetric::CpuUsec.as_str(), "CPU-USEC");
+        assert_eq!(SlotStatsMetric::MemoryBytes.as_str(), "MEMORY-BYTES");
+        assert_eq!(SlotStatsMetric::NetworkBytesIn.as_str(), "NETWORK-BYTES-IN");
+        assert_eq!(
+            SlotStatsMetric::NetworkBytesOut.as_str(),
+            "NETWORK-BYTES-OUT"
+        );
+    }
+
+    #[test]
+    fn test_slot_stats_metric_parse_variants() {
+        assert_eq!(
+            SlotStatsMetric::parse("key_count"),
+            Some(SlotStatsMetric::KeyCount)
+        );
+        assert_eq!(
+            SlotStatsMetric::parse("cpu-usec"),
+            Some(SlotStatsMetric::CpuUsec)
+        );
+        assert_eq!(
+            SlotStatsMetric::parse("MEMORYBYTES"),
+            Some(SlotStatsMetric::MemoryBytes)
+        );
+        assert_eq!(
+            SlotStatsMetric::parse("network_bytes_in"),
+            Some(SlotStatsMetric::NetworkBytesIn)
+        );
+        assert_eq!(
+            SlotStatsMetric::parse("network-bytes-out"),
+            Some(SlotStatsMetric::NetworkBytesOut)
+        );
+        assert_eq!(SlotStatsMetric::parse("unknown"), None);
+    }
+
+    #[test]
+    fn test_slot_stats_order_wire_tokens() {
+        assert_eq!(SlotStatsOrder::default(), SlotStatsOrder::Asc);
+        assert_eq!(SlotStatsOrder::Asc.as_str(), "ASC");
+        assert_eq!(SlotStatsOrder::Desc.as_str(), "DESC");
+    }
+}

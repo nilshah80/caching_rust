@@ -346,13 +346,13 @@
 - [x] **11.1.5**: Add Redis 8.6 XADD IDMP options (`IDMPAUTO producer-id`, `IDMP producer-id idempotent-id`)
 - [x] **11.1.6**: Add capability gates, OpenAPI entries, unit tests, and E2E coverage for the stream 8.2/8.6 additions
 
-### 11.2 Hot Key Monitoring (Redis 8.6) 🟡 MEDIUM PRIORITY
+### 11.2 Hot Key Monitoring (Redis 8.6) 🟢 COMPLETED
 
-- [ ] **11.2.1**: Implement HOTKEYS START
-- [ ] **11.2.2**: Implement HOTKEYS STOP
-- [ ] **11.2.3**: Implement HOTKEYS GET
-- [ ] **11.2.4**: Implement HOTKEYS RESET
-- [ ] **11.2.5**: Add `hotkeys` capability detection (`version_gte("8.6.0")`), admin routes, OpenAPI, and E2E tests
+- [x] **11.2.1**: Implement HOTKEYS START
+- [x] **11.2.2**: Implement HOTKEYS STOP
+- [x] **11.2.3**: Implement HOTKEYS GET
+- [x] **11.2.4**: Implement HOTKEYS RESET
+- [x] **11.2.5**: Add `hotkeys` capability detection (`version_gte("8.6.0")`), admin routes, OpenAPI, and E2E tests
 
 ### 11.3 Durability and Key Restore Options 🟢 LOW PRIORITY
 
@@ -382,7 +382,7 @@
 | Task | Feature | Commands/options | Priority | Status |
 |------|---------|------------------|----------|--------|
 | 11.1 | Streams 8.2/8.6 | 2 commands + 3 option groups | 🟡 Medium | Completed |
-| 11.2 | HOTKEYS | 4 commands | 🟡 Medium | Planned |
+| 11.2 | HOTKEYS | 4 commands | 🟡 Medium | Completed |
 | 11.3 | Durability/key restore | 2 commands + RESTORE options | 🟢 Low | Planned |
 | 11.4 | Client admin cleanup | 3 commands | 🟢 Low | Planned |
 | 11.5 | SET predicate parity | 4 options | 🟢 Low | Planned |

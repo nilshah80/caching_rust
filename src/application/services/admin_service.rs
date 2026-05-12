@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, KeyAndFlags, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
+    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
+    ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -489,6 +490,72 @@ impl AdminService {
     pub async fn memory_malloc_stats(&self) -> Result<String, CacheError> {
         self.repository.memory_malloc_stats().await
     }
+
+    // ========================================================================
+    // Hot Key Monitoring (Redis 8.6+)
+    // ========================================================================
+
+    /// Start hot-key tracking. Requires at least one of CPU / NET metrics; the
+    /// optional knobs are validated to stay within Redis-accepted ranges so
+    /// invalid input is rejected before reaching the server.
+    pub async fn hotkeys_start(&self, options: HotkeysStartOptions) -> Result<(), CacheError> {
+        if !options.cpu && !options.net {
+            return Err(CacheError::InvalidInput(
+                "At least one of CPU or NET metrics must be enabled".to_string(),
+            ));
+        }
+        if let Some(k) = options.top_k
+            && k == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "top_k must be at least 1".to_string(),
+            ));
+        }
+        if let Some(d) = options.duration_seconds
+            && d == 0
+        {
+            return Err(CacheError::InvalidInput(
+                "duration_seconds must be at least 1".to_string(),
+            ));
+        }
+        if let Some(r) = options.sample_ratio
+            && !(1..=100).contains(&r)
+        {
+            return Err(CacheError::InvalidInput(
+                "sample_ratio must be between 1 and 100".to_string(),
+            ));
+        }
+        for range in &options.slots {
+            if range.start > range.end {
+                return Err(CacheError::InvalidInput(format!(
+                    "Slot range {}-{} is invalid (start must be ≤ end)",
+                    range.start, range.end
+                )));
+            }
+            if range.end > 16_383 {
+                return Err(CacheError::InvalidInput(format!(
+                    "Slot {} is out of range (max 16383)",
+                    range.end
+                )));
+            }
+        }
+        self.repository.hotkeys_start(options).await
+    }
+
+    /// Stop hot-key tracking (collected data is preserved).
+    pub async fn hotkeys_stop(&self) -> Result<(), CacheError> {
+        self.repository.hotkeys_stop().await
+    }
+
+    /// Fetch the latest tracking report.
+    pub async fn hotkeys_get(&self) -> Result<HotkeysReport, CacheError> {
+        self.repository.hotkeys_get().await
+    }
+
+    /// Release tracking resources.
+    pub async fn hotkeys_reset(&self) -> Result<(), CacheError> {
+        self.repository.hotkeys_reset().await
+    }
 }
 
 #[cfg(test)]
@@ -743,6 +810,21 @@ mod tests {
         async fn memory_malloc_stats(&self) -> Result<String, CacheError> {
             Ok(String::from("---OK---"))
         }
+
+        async fn hotkeys_start(&self, _options: HotkeysStartOptions) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn hotkeys_stop(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
+        async fn hotkeys_get(&self) -> Result<HotkeysReport, CacheError> {
+            Ok(HotkeysReport {
+                data: serde_json::json!({}),
+            })
+        }
+        async fn hotkeys_reset(&self) -> Result<(), CacheError> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -870,5 +952,119 @@ mod tests {
     fn test_admin_service_new() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let _service = AdminService::new(pool);
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_no_metrics() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+        let err = service
+            .hotkeys_start(HotkeysStartOptions::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_zero_top_k() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+        let err = service
+            .hotkeys_start(HotkeysStartOptions {
+                cpu: true,
+                top_k: Some(0),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_zero_duration() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+        let err = service
+            .hotkeys_start(HotkeysStartOptions {
+                cpu: true,
+                duration_seconds: Some(0),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_sample_ratio_out_of_range() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+        let err = service
+            .hotkeys_start(HotkeysStartOptions {
+                cpu: true,
+                sample_ratio: Some(150),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_out_of_range_slot() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+        let err = service
+            .hotkeys_start(HotkeysStartOptions {
+                cpu: true,
+                slots: vec![crate::domain::entities::HotkeysSlotRange {
+                    start: 16_000,
+                    end: 17_000,
+                }],
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_inverted_slot_range() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+        let err = service
+            .hotkeys_start(HotkeysStartOptions {
+                cpu: true,
+                slots: vec![crate::domain::entities::HotkeysSlotRange {
+                    start: 200,
+                    end: 100,
+                }],
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_lifecycle_passthrough() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+
+        service
+            .hotkeys_start(HotkeysStartOptions {
+                cpu: true,
+                net: true,
+                top_k: Some(5),
+                duration_seconds: Some(30),
+                sample_ratio: Some(10),
+                slots: vec![],
+            })
+            .await
+            .expect("start");
+        service.hotkeys_stop().await.expect("stop");
+        let report = service.hotkeys_get().await.expect("get");
+        assert!(report.data.is_object());
+        service.hotkeys_reset().await.expect("reset");
     }
 }

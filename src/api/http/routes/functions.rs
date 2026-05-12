@@ -593,6 +593,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_function_restore_append_and_flush_policies() {
+        for policy in [
+            FunctionRestorePolicySchema::Append,
+            FunctionRestorePolicySchema::Flush,
+        ] {
+            let (state, _) = test_state_with_function_repo();
+            let headers = admin_headers(&state.config.admin.api_key);
+            let response = function_restore(
+                headers,
+                State(state),
+                Json(FunctionRestoreRequest {
+                    data: BASE64.encode([1, 2, 3]),
+                    policy: Some(policy),
+                }),
+            )
+            .await
+            .expect("restore");
+            assert!(response.0.data.expect("data").success);
+        }
+    }
+
+    #[tokio::test]
     async fn test_function_restore_501_when_disabled() {
         let (mut state, _) = test_state_with_function_repo();
         let headers = admin_headers(&state.config.admin.api_key);

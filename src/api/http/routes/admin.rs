@@ -15,7 +15,8 @@ use utoipa::ToSchema;
 use crate::api::http::middleware::admin_auth::ADMIN_API_KEY_HEADER;
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo as DomainClientInfo, FlushResult,
-    LatencyEvent, MemoryStats, MemoryUsage, ServerInfo, ServerTime, SlowlogEntry,
+    HotkeysSlotRange, HotkeysStartOptions, LatencyEvent, MemoryStats, MemoryUsage, ServerInfo,
+    ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -540,6 +541,50 @@ pub struct MemoryMallocStatsResponse {
     pub stats: String,
 }
 
+/// Inclusive `[start, end]` slot range supplied to `HOTKEYS START`.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct HotkeysSlotRangeSchema {
+    /// Inclusive start slot (0..=16383).
+    pub start: u16,
+    /// Inclusive end slot (0..=16383, ≥ start).
+    pub end: u16,
+}
+
+/// Request body for `HOTKEYS START`.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct HotkeysStartRequest {
+    /// Track CPU-time-percentage hot keys (`HOTKEYS START METRICS … CPU`).
+    #[serde(default)]
+    pub cpu: bool,
+    /// Track network-bytes hot keys (`HOTKEYS START METRICS … NET`).
+    #[serde(default)]
+    pub net: bool,
+    /// Top-K hot keys per metric (`COUNT k`).
+    #[serde(default)]
+    pub top_k: Option<u32>,
+    /// Auto-stop after this many seconds (`DURATION seconds`).
+    #[serde(default)]
+    pub duration_seconds: Option<u64>,
+    /// Sample ratio in `[1, 100]` (`SAMPLE ratio`).
+    #[serde(default)]
+    pub sample_ratio: Option<u32>,
+    /// Restrict tracking to specific slot ranges (`SLOTS count slot ...`).
+    #[serde(default)]
+    pub slots: Vec<HotkeysSlotRangeSchema>,
+}
+
+/// Generic acknowledgement returned by `HOTKEYS START | STOP | RESET`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HotkeysAckResponse {
+    pub success: bool,
+}
+
+/// `HOTKEYS GET` response — opaque passthrough of the Redis reply.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HotkeysGetResponse {
+    pub data: serde_json::Value,
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -624,6 +669,11 @@ pub fn admin_routes() -> Router<AppState> {
             "/api/v1/admin/commands/getkeysandflags",
             post(command_getkeysandflags),
         )
+        // Hot key monitoring (Redis 8.6+, protected)
+        .route("/api/v1/admin/hotkeys/start", post(hotkeys_start))
+        .route("/api/v1/admin/hotkeys/stop", post(hotkeys_stop))
+        .route("/api/v1/admin/hotkeys", get(hotkeys_get))
+        .route("/api/v1/admin/hotkeys/reset", post(hotkeys_reset))
 }
 
 // ============================================================================
@@ -2213,6 +2263,143 @@ pub async fn command_getkeysandflags(
         .map_err(to_status_code)
 }
 
+// ============================================================================
+// Hot Key Monitoring (Redis 8.6+)
+// ============================================================================
+
+/// Reject requests when the running server does not advertise HOTKEYS support.
+fn ensure_hotkeys_available(state: &AppState) -> Result<(), StatusCode> {
+    if state.capabilities.features.hotkeys {
+        Ok(())
+    } else {
+        Err(StatusCode::NOT_IMPLEMENTED)
+    }
+}
+
+/// POST /api/v1/admin/hotkeys/start
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/hotkeys/start",
+    request_body = HotkeysStartRequest,
+    responses(
+        (status = 200, description = "Tracking started", body = HotkeysAckResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "HOTKEYS requires Redis 8.6+")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn hotkeys_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<HotkeysStartRequest>,
+) -> Result<ApiResponse<HotkeysAckResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    ensure_hotkeys_available(&state)?;
+
+    let options = HotkeysStartOptions {
+        cpu: request.cpu,
+        net: request.net,
+        top_k: request.top_k,
+        duration_seconds: request.duration_seconds,
+        sample_ratio: request.sample_ratio,
+        slots: request
+            .slots
+            .into_iter()
+            .map(|r| HotkeysSlotRange {
+                start: r.start,
+                end: r.end,
+            })
+            .collect(),
+    };
+
+    state
+        .admin_service
+        .hotkeys_start(options)
+        .await
+        .map(|_| ApiResponse::success(HotkeysAckResponse { success: true }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/hotkeys/stop
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/hotkeys/stop",
+    responses(
+        (status = 200, description = "Tracking stopped", body = HotkeysAckResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "HOTKEYS requires Redis 8.6+")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn hotkeys_stop(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<HotkeysAckResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    ensure_hotkeys_available(&state)?;
+    state
+        .admin_service
+        .hotkeys_stop()
+        .await
+        .map(|_| ApiResponse::success(HotkeysAckResponse { success: true }))
+        .map_err(to_status_code)
+}
+
+/// GET /api/v1/admin/hotkeys
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/hotkeys",
+    responses(
+        (status = 200, description = "Tracking report", body = HotkeysGetResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "HOTKEYS requires Redis 8.6+")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn hotkeys_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<HotkeysGetResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    ensure_hotkeys_available(&state)?;
+    state
+        .admin_service
+        .hotkeys_get()
+        .await
+        .map(|report| ApiResponse::success(HotkeysGetResponse { data: report.data }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/hotkeys/reset
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/hotkeys/reset",
+    responses(
+        (status = 200, description = "Tracking resources released", body = HotkeysAckResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "HOTKEYS requires Redis 8.6+")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn hotkeys_reset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<HotkeysAckResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    ensure_hotkeys_available(&state)?;
+    state
+        .admin_service
+        .hotkeys_reset()
+        .await
+        .map(|_| ApiResponse::success(HotkeysAckResponse { success: true }))
+        .map_err(to_status_code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2277,6 +2464,32 @@ mod tests {
         let _ = get_server_time(state.clone(), auth.clone()).await.unwrap();
         let _ = get_db_size(state.clone(), auth.clone()).await.unwrap();
         let _ = get_lastsave(state.clone(), auth.clone()).await.unwrap();
+        let _ = debug_object(
+            state.clone(),
+            auth.clone(),
+            Json(DebugObjectRequest {
+                key: "k".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        let shutdown_request: ShutdownRequest = serde_json::from_str(r#"{"force":true}"#).unwrap();
+        assert!(shutdown_request.now);
+        let shutdown_response = shutdown(state.clone(), auth.clone(), Json(shutdown_request))
+            .await
+            .unwrap();
+        assert!(shutdown_response.data.expect("data").success);
+        let result = shutdown(
+            state.clone(),
+            auth.clone(),
+            Json(ShutdownRequest {
+                force: false,
+                save: false,
+                now: true,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
 
         let _ = get_memory_stats(state.clone(), auth.clone()).await.unwrap();
         let _ = get_memory_usage(
@@ -2396,6 +2609,7 @@ mod tests {
         .unwrap();
         let _ = client_getname(state.clone(), auth.clone()).await.unwrap();
         let _ = client_id(state.clone(), auth.clone()).await.unwrap();
+        let _ = client_info(state.clone(), auth.clone()).await.unwrap();
 
         let _ = slowlog_get(
             state.clone(),
@@ -2418,6 +2632,15 @@ mod tests {
         .await
         .unwrap();
         let _ = latency_doctor(state.clone(), auth.clone()).await.unwrap();
+        let _ = latency_graph(
+            state.clone(),
+            auth.clone(),
+            Json(LatencyHistoryRequest {
+                event: "command".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
         let _ = latency_reset(
             state.clone(),
             auth.clone(),
@@ -2457,6 +2680,27 @@ mod tests {
         )
         .await
         .unwrap();
+        let _ = acl_setuser(
+            state.clone(),
+            auth.clone(),
+            Json(AclSetUserRequest {
+                username: "coverage-user".to_string(),
+                rules: vec!["on".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let _ = acl_deluser(
+            state.clone(),
+            auth.clone(),
+            Json(AclDelUserRequest {
+                usernames: vec!["coverage-user".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+        let _ = acl_load(state.clone(), auth.clone()).await.unwrap();
+        let _ = acl_save(state.clone(), auth.clone()).await.unwrap();
         let result = acl_dryrun(
             state,
             auth,
@@ -2691,5 +2935,191 @@ mod tests {
         )
         .await;
         assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    fn enable_hotkeys(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.hotkeys = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_requires_metric() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = hotkeys_start(State(state), auth, Json(HotkeysStartRequest::default())).await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_invalid_sample_ratio() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = hotkeys_start(
+            State(state),
+            auth,
+            Json(HotkeysStartRequest {
+                cpu: true,
+                sample_ratio: Some(0),
+                ..Default::default()
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_rejects_inverted_slot_range() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = hotkeys_start(
+            State(state),
+            auth,
+            Json(HotkeysStartRequest {
+                cpu: true,
+                slots: vec![HotkeysSlotRangeSchema {
+                    start: 100,
+                    end: 50,
+                }],
+                ..Default::default()
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_accepts_cpu_metric() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = hotkeys_start(
+            State(state),
+            auth,
+            Json(HotkeysStartRequest {
+                cpu: true,
+                net: true,
+                top_k: Some(10),
+                duration_seconds: Some(60),
+                sample_ratio: Some(50),
+                slots: vec![HotkeysSlotRangeSchema {
+                    start: 0,
+                    end: 8_191,
+                }],
+            }),
+        )
+        .await
+        .expect("response");
+        assert!(response.data.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_returns_501_when_capability_off() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = hotkeys_start(
+            State(state),
+            auth,
+            Json(HotkeysStartRequest {
+                cpu: true,
+                ..Default::default()
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_start_requires_auth() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let result = hotkeys_start(
+            State(state),
+            HeaderMap::new(),
+            Json(HotkeysStartRequest {
+                cpu: true,
+                ..Default::default()
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_stop_succeeds() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = hotkeys_stop(State(state), auth).await.expect("response");
+        assert!(response.data.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_stop_returns_501_when_capability_off() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = hotkeys_stop(State(state), auth).await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_stop_requires_auth() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let result = hotkeys_stop(State(state), HeaderMap::new()).await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_get_returns_passthrough() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = hotkeys_get(State(state), auth).await.expect("response");
+        assert!(response.data.unwrap().data.is_object());
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_get_returns_501_when_capability_off() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = hotkeys_get(State(state), auth).await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_get_requires_auth() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let result = hotkeys_get(State(state), HeaderMap::new()).await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_reset_returns_501_when_capability_off() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = hotkeys_reset(State(state), auth).await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_reset_succeeds() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = hotkeys_reset(State(state), auth).await.expect("response");
+        assert!(response.data.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn test_hotkeys_reset_requires_auth() {
+        let (mut state, _, _, _) = test_state();
+        enable_hotkeys(&mut state);
+        let result = hotkeys_reset(State(state), HeaderMap::new()).await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
     }
 }

@@ -240,3 +240,114 @@ pub struct VectorSetAttrRequest {
 pub struct VectorSetAttrResponse {
     pub success: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::entities::{VectorInfo, VectorItem, VectorRangeResult};
+    use std::collections::HashMap;
+    use validator::Validate;
+
+    #[test]
+    fn test_vector_add_request_validates_non_empty_vectors() {
+        let request = VectorAddRequest {
+            items: HashMap::from([("item-1".to_string(), vec![1.0, 2.0])]),
+        };
+        assert!(request.validate().is_ok());
+
+        let request = VectorAddRequest {
+            items: HashMap::from([("item-1".to_string(), Vec::new())]),
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_vector_rand_member_rejects_zero_count() {
+        assert!(VectorRandMemberRequest { count: 1 }.validate().is_ok());
+        assert!(VectorRandMemberRequest { count: -1 }.validate().is_ok());
+        assert!(VectorRandMemberRequest { count: 0 }.validate().is_err());
+    }
+
+    #[test]
+    fn test_vector_range_count_validation() {
+        assert!(
+            VectorRangeRequest {
+                start: "-".to_string(),
+                end: "+".to_string(),
+                count: None,
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            VectorRangeRequest {
+                start: "-".to_string(),
+                end: "+".to_string(),
+                count: Some(-1),
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            VectorRangeRequest {
+                start: "-".to_string(),
+                end: "+".to_string(),
+                count: Some(3),
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            VectorRangeRequest {
+                start: "-".to_string(),
+                end: "+".to_string(),
+                count: Some(0),
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_vector_response_conversions() {
+        let add_response = VectorAddResponse::from(VectorAddResult {
+            key: "vectors".to_string(),
+            added_count: 2,
+        });
+        assert_eq!(add_response.key, "vectors");
+        assert_eq!(add_response.added_count, 2);
+
+        let sim_response = VectorSimResponse::from(VectorSimResult {
+            items: vec![VectorItem {
+                id: "item-1".to_string(),
+                score: Some(0.75),
+                vector: Some(vec![1.0, 2.0]),
+                attributes: Some("{}".to_string()),
+            }],
+        });
+        assert_eq!(sim_response.items[0].id, "item-1");
+        assert_eq!(sim_response.items[0].score, Some(0.75));
+
+        let range_response = VectorRangeResponse::from(VectorRangeResult {
+            items: vec![VectorItem {
+                id: "item-2".to_string(),
+                score: None,
+                vector: None,
+                attributes: None,
+            }],
+        });
+        assert_eq!(range_response.items[0].id, "item-2");
+        assert_eq!(range_response.items[0].score, None);
+
+        let info_response = VectorInfoResponse::from(VectorInfo {
+            dimension: 128,
+            distance_metric: "L2".to_string(),
+            data_type: "FLOAT32".to_string(),
+            count: 10,
+        });
+        assert_eq!(info_response.dimension, 128);
+        assert_eq!(info_response.distance_metric, "L2");
+        assert_eq!(info_response.data_type, "FLOAT32");
+        assert_eq!(info_response.count, 10);
+    }
+}

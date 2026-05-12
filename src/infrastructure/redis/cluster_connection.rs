@@ -112,4 +112,16 @@ mod tests {
         let result = ClusterPool::new(&config);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_cluster_pool_with_replica_read_routing() {
+        let config = RedisConfig {
+            cluster_enabled: true,
+            cluster_nodes: "redis://127.0.0.1:7001".to_string(),
+            cluster_read_from_replicas: true,
+            ..RedisConfig::default()
+        };
+        let result = ClusterPool::new(&config);
+        assert!(result.is_ok());
+    }
 }

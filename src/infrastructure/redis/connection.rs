@@ -922,6 +922,8 @@ impl InstrumentedPool {
             stream_reference_policy: RedisCapabilities::version_gte(&redis_version, "8.2.0"),
             // XADD `IDMP / IDMPAUTO` + XCFGSET, Redis 8.6+
             stream_idmp: RedisCapabilities::version_gte(&redis_version, "8.6.0"),
+            // HOTKEYS START/STOP/GET/RESET hot-key sampling, Redis 8.6+
+            hotkeys: RedisCapabilities::version_gte(&redis_version, "8.6.0"),
             vectors: vectors_available,
             vector_range: vector_range_available,
             cluster: cluster_enabled,

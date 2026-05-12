@@ -86,6 +86,9 @@ pub struct FeatureCapabilities {
     /// XADD idempotent options + XCFGSET (Redis 8.6+).
     pub stream_idmp: bool,
 
+    /// HOTKEYS START/STOP/GET/RESET hot-key sampling (Redis 8.6+).
+    pub hotkeys: bool,
+
     /// Redis 8.0 vector sets commands (VADD, VSIM, etc.)
     pub vectors: bool,
 
@@ -123,6 +126,7 @@ impl RedisCapabilities {
                 xdelex: false,              // Only enabled when Redis ≥ 8.2
                 stream_reference_policy: false, // Only enabled when Redis ≥ 8.2
                 stream_idmp: false,         // Only enabled when Redis ≥ 8.6
+                hotkeys: false,             // Only enabled when Redis ≥ 8.6
                 vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
                 vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
                 cluster: false,
@@ -186,6 +190,7 @@ impl Default for FeatureCapabilities {
             xdelex: false,              // Only enabled when Redis ≥ 8.2
             stream_reference_policy: false, // Only enabled when Redis ≥ 8.2
             stream_idmp: false,         // Only enabled when Redis ≥ 8.6
+            hotkeys: false,             // Only enabled when Redis ≥ 8.6
             vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
             vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
             cluster: false,

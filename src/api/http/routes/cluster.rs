@@ -329,15 +329,48 @@ mod tests {
         );
     }
 
+    fn admin_headers(api_key: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ADMIN_API_KEY_HEADER,
+            axum::http::HeaderValue::from_str(api_key).expect("header"),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn test_cluster_handlers_map_noncluster_mock_to_500() {
+        let (state, _, _, _) = crate::test_support::test_state();
+        let headers = admin_headers(&state.config.admin.api_key);
+        let state = State(state);
+
+        assert!(matches!(
+            cluster_info(headers.clone(), state.clone()).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_nodes(headers.clone(), state.clone()).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_slots(headers.clone(), state.clone()).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_shards(headers.clone(), state.clone()).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_keyslot(headers, state, Path("key".to_string())).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+    }
+
     #[tokio::test]
     async fn test_slot_stats_returns_501_when_capability_off() {
         // The default test_state has cluster_slot_stats disabled.
         let (state, _, _, _) = crate::test_support::test_state();
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            ADMIN_API_KEY_HEADER,
-            axum::http::HeaderValue::from_str(&state.config.admin.api_key).expect("header"),
-        );
+        let headers = admin_headers(&state.config.admin.api_key);
         let result = cluster_slot_stats(
             headers,
             State(state),
@@ -375,11 +408,7 @@ mod tests {
         let mut caps = (*state.capabilities).clone();
         caps.features.cluster_slot_stats = true;
         state.capabilities = std::sync::Arc::new(caps);
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            ADMIN_API_KEY_HEADER,
-            axum::http::HeaderValue::from_str(&state.config.admin.api_key).expect("header"),
-        );
+        let headers = admin_headers(&state.config.admin.api_key);
         let result =
             cluster_slot_stats(headers, State(state), Query(SlotStatsQuery::default())).await;
         assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));

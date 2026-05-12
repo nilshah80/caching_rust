@@ -434,4 +434,72 @@ cluster_my_epoch:1\r
             crate::domain::errors::CacheError::Internal(_)
         ));
     }
+
+    #[test]
+    fn test_parse_cluster_slots_with_master_and_replica() {
+        let reply = redis::Value::Array(vec![redis::Value::Array(vec![
+            redis::Value::Int(0),
+            redis::Value::Int(5460),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"127.0.0.1".to_vec()),
+                redis::Value::Int(7000),
+                redis::Value::BulkString(b"master-id".to_vec()),
+            ]),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"127.0.0.2".to_vec()),
+                redis::Value::Int(7001),
+                redis::Value::BulkString(b"replica-id".to_vec()),
+            ]),
+        ])]);
+
+        let ranges = parse_cluster_slots(&reply);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start, 0);
+        assert_eq!(ranges[0].end, 5460);
+        assert_eq!(ranges[0].master.host, "127.0.0.1");
+        assert_eq!(ranges[0].master.port, 7000);
+        assert_eq!(ranges[0].master.node_id.as_deref(), Some("master-id"));
+        assert_eq!(ranges[0].replicas.len(), 1);
+        assert_eq!(ranges[0].replicas[0].node_id.as_deref(), Some("replica-id"));
+    }
+
+    #[test]
+    fn test_parse_cluster_slots_skips_malformed_entries() {
+        let reply = redis::Value::Array(vec![
+            redis::Value::Int(99),
+            redis::Value::Array(vec![redis::Value::Int(0), redis::Value::Int(1)]),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"not-a-number".to_vec()),
+                redis::Value::Int(1),
+                redis::Value::Int(123),
+            ]),
+        ]);
+
+        let ranges = parse_cluster_slots(&reply);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start, 0);
+        assert_eq!(ranges[0].end, 1);
+        assert!(ranges[0].master.host.is_empty());
+        assert_eq!(ranges[0].master.port, 0);
+        assert!(ranges[0].master.node_id.is_none());
+        assert!(parse_cluster_slots(&redis::Value::Nil).is_empty());
+    }
+
+    #[test]
+    fn test_extract_endpoint_handles_missing_and_empty_node_id() {
+        let endpoint = extract_endpoint(&redis::Value::Array(vec![
+            redis::Value::BulkString(b"10.0.0.1".to_vec()),
+            redis::Value::Int(6379),
+            redis::Value::BulkString(Vec::new()),
+        ]));
+
+        assert_eq!(endpoint.host, "10.0.0.1");
+        assert_eq!(endpoint.port, 6379);
+        assert!(endpoint.node_id.is_none());
+
+        let endpoint = extract_endpoint(&redis::Value::SimpleString("bad".to_string()));
+        assert!(endpoint.host.is_empty());
+        assert_eq!(endpoint.port, 0);
+        assert!(endpoint.node_id.is_none());
+    }
 }

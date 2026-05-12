@@ -1230,6 +1230,10 @@ mod tests {
             service.tdigest_byrank("td:a", vec![]).await,
             Err(CacheError::InvalidInput(_))
         ));
+        assert!(matches!(
+            service.tdigest_byrevrank("td:a", vec![]).await,
+            Err(CacheError::InvalidInput(_))
+        ));
     }
 
     #[tokio::test]

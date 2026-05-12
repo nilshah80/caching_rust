@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, KeyAndFlags, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
+    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
+    ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -802,6 +803,99 @@ impl AdminRepository for RedisAdminRepository {
             .await?;
         Ok(stats)
     }
+
+    async fn hotkeys_start(&self, options: HotkeysStartOptions) -> Result<(), CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let mut cmd = redis::cmd("HOTKEYS");
+        cmd.arg("START");
+
+        // METRICS <count> [CPU] [NET] — count is the number of metric flags.
+        let metric_count: u32 = u32::from(options.cpu) + u32::from(options.net);
+        cmd.arg("METRICS").arg(metric_count);
+        if options.cpu {
+            cmd.arg("CPU");
+        }
+        if options.net {
+            cmd.arg("NET");
+        }
+
+        if let Some(k) = options.top_k {
+            cmd.arg("COUNT").arg(k);
+        }
+        if let Some(d) = options.duration_seconds {
+            cmd.arg("DURATION").arg(d);
+        }
+        if let Some(r) = options.sample_ratio {
+            cmd.arg("SAMPLE").arg(r);
+        }
+        let expanded = expand_hotkeys_slot_ranges(&options.slots);
+        if !expanded.is_empty() {
+            // Redis 8.6 wire format: `SLOTS <count> <slot> [<slot> ...]` — each
+            // entry is an individual slot number, not a range pair. The repo
+            // therefore expands the `[start,end]` ranges supplied at the API
+            // boundary before forwarding them to Redis.
+            cmd.arg("SLOTS").arg(expanded.len());
+            for slot in &expanded {
+                cmd.arg(*slot);
+            }
+        }
+
+        cmd.query_async::<()>(&mut conn).await?;
+        Ok(())
+    }
+
+    async fn hotkeys_stop(&self) -> Result<(), CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        redis::cmd("HOTKEYS")
+            .arg("STOP")
+            .query_async::<()>(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn hotkeys_get(&self) -> Result<HotkeysReport, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let result: redis::Value = redis::cmd("HOTKEYS")
+            .arg("GET")
+            .query_async(&mut conn)
+            .await?;
+        Ok(HotkeysReport {
+            data: redis_value_to_json(result),
+        })
+    }
+
+    async fn hotkeys_reset(&self) -> Result<(), CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        redis::cmd("HOTKEYS")
+            .arg("RESET")
+            .query_async::<()>(&mut conn)
+            .await?;
+        Ok(())
+    }
+}
+
+/// Flatten `HOTKEYS START` slot ranges into the individual slot list Redis
+/// expects on the wire (`SLOTS count slot [slot ...]`).
+///
+/// Each `[start, end]` range is expanded to every slot it covers. Ordering and
+/// duplicates from the caller are preserved — Redis tolerates either.
+/// Service-layer validation (see [`crate::application::services::AdminService::hotkeys_start`])
+/// guarantees `start ≤ end ≤ 16_383` so the inclusive range iteration cannot
+/// overflow or run unbounded.
+pub(crate) fn expand_hotkeys_slot_ranges(
+    ranges: &[crate::domain::entities::HotkeysSlotRange],
+) -> Vec<u16> {
+    let mut out = Vec::new();
+    for range in ranges {
+        if range.start > range.end {
+            // Defensive: validation should have rejected this already.
+            continue;
+        }
+        for slot in range.start..=range.end {
+            out.push(slot);
+        }
+    }
+    out
 }
 
 /// Parse the array reply from `COMMAND GETKEYSANDFLAGS` into typed entries.
@@ -1392,5 +1486,108 @@ db0:keys=5,expires=0,avg_ttl=0\n";
             redis::Value::Array(vec![redis::Value::Int(1), redis::Value::Int(2)]),
         )])]));
         assert_eq!(result, serde_json::json!([{"key": [1, 2]}]));
+    }
+
+    #[test]
+    fn test_expand_hotkeys_slot_ranges_empty() {
+        assert!(expand_hotkeys_slot_ranges(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_expand_hotkeys_slot_ranges_single_slot() {
+        let ranges = vec![crate::domain::entities::HotkeysSlotRange { start: 42, end: 42 }];
+        assert_eq!(expand_hotkeys_slot_ranges(&ranges), vec![42]);
+    }
+
+    #[test]
+    fn test_expand_hotkeys_slot_ranges_inclusive_range() {
+        let ranges = vec![crate::domain::entities::HotkeysSlotRange { start: 10, end: 14 }];
+        assert_eq!(
+            expand_hotkeys_slot_ranges(&ranges),
+            vec![10, 11, 12, 13, 14]
+        );
+    }
+
+    #[test]
+    fn test_expand_hotkeys_slot_ranges_multiple_ranges_preserve_order() {
+        let ranges = vec![
+            crate::domain::entities::HotkeysSlotRange { start: 0, end: 2 },
+            crate::domain::entities::HotkeysSlotRange {
+                start: 100,
+                end: 101,
+            },
+        ];
+        assert_eq!(expand_hotkeys_slot_ranges(&ranges), vec![0, 1, 2, 100, 101]);
+    }
+
+    #[test]
+    fn test_expand_hotkeys_slot_ranges_skips_inverted_range() {
+        // Defensive: service-layer validation rejects inverted ranges, but the
+        // helper must never panic if one slips through.
+        let ranges = vec![
+            crate::domain::entities::HotkeysSlotRange { start: 5, end: 3 },
+            crate::domain::entities::HotkeysSlotRange { start: 7, end: 7 },
+        ];
+        assert_eq!(expand_hotkeys_slot_ranges(&ranges), vec![7]);
+    }
+
+    #[test]
+    fn test_expand_hotkeys_slot_ranges_max_slot() {
+        let ranges = vec![crate::domain::entities::HotkeysSlotRange {
+            start: 16_380,
+            end: 16_383,
+        }];
+        assert_eq!(
+            expand_hotkeys_slot_ranges(&ranges),
+            vec![16_380, 16_381, 16_382, 16_383]
+        );
+    }
+
+    #[test]
+    fn test_parse_keys_and_flags_accepts_bulk_and_simple_strings() {
+        let parsed = parse_keys_and_flags(redis::Value::Array(vec![
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"key:1".to_vec()),
+                redis::Value::Array(vec![
+                    redis::Value::BulkString(b"RW".to_vec()),
+                    redis::Value::SimpleString("access".to_string()),
+                    redis::Value::Int(99),
+                ]),
+            ]),
+            redis::Value::Array(vec![
+                redis::Value::SimpleString("key:2".to_string()),
+                redis::Value::SimpleString("not-an-array".to_string()),
+            ]),
+        ]))
+        .expect("parse");
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].key, "key:1");
+        assert_eq!(parsed[0].flags, vec!["RW", "access"]);
+        assert_eq!(parsed[1].key, "key:2");
+        assert!(parsed[1].flags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_keys_and_flags_rejects_malformed_replies() {
+        assert!(matches!(
+            parse_keys_and_flags(redis::Value::Int(1)),
+            Err(CacheError::Internal(_))
+        ));
+
+        assert!(matches!(
+            parse_keys_and_flags(redis::Value::Array(vec![redis::Value::Array(vec![
+                redis::Value::BulkString(b"only-key".to_vec())
+            ])])),
+            Err(CacheError::Internal(_))
+        ));
+
+        assert!(matches!(
+            parse_keys_and_flags(redis::Value::Array(vec![redis::Value::Array(vec![
+                redis::Value::Int(1),
+                redis::Value::Array(vec![])
+            ])])),
+            Err(CacheError::Internal(_))
+        ));
     }
 }

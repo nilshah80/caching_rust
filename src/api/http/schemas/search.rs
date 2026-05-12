@@ -1188,6 +1188,23 @@ mod tests {
     }
 
     #[test]
+    fn test_index_create_options_defaults_unknown_on_to_hash() {
+        let options: IndexCreateOptions = IndexCreateOptionsDto {
+            on: Some("hash".to_string()),
+            ..Default::default()
+        }
+        .into();
+        assert!(matches!(options.on, IndexDataType::Hash));
+
+        let options: IndexCreateOptions = IndexCreateOptionsDto {
+            on: Some("unknown".to_string()),
+            ..Default::default()
+        }
+        .into();
+        assert!(matches!(options.on, IndexDataType::Hash));
+    }
+
+    #[test]
     fn test_field_schema_conversion() {
         let dto = SearchFieldSchemaDto {
             name: "title".to_string(),

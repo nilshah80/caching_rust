@@ -63,6 +63,11 @@ use crate::api::http::routes::admin::{
     DebugObjectRequest,
     DebugObjectResponse,
     FlushDbRequest,
+    // Hot key monitoring (Redis 8.6+)
+    HotkeysAckResponse,
+    HotkeysGetResponse,
+    HotkeysSlotRangeSchema,
+    HotkeysStartRequest,
     // Server info
     LastSaveResponse,
     LatencyDoctorResponse,
@@ -764,6 +769,11 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::command_info,
         crate::api::http::routes::admin::command_getkeys,
         crate::api::http::routes::admin::command_getkeysandflags,
+        // Admin - Hot Key Monitoring (Redis 8.6+)
+        crate::api::http::routes::admin::hotkeys_start,
+        crate::api::http::routes::admin::hotkeys_stop,
+        crate::api::http::routes::admin::hotkeys_get,
+        crate::api::http::routes::admin::hotkeys_reset,
         // RedisTimeSeries endpoints
         crate::api::http::routes::timeseries::ts_create,
         crate::api::http::routes::timeseries::ts_alter,
@@ -1084,6 +1094,11 @@ use crate::shared::app_state::AppState;
             MemoryDoctorResponse,
             MemoryPurgeResponse,
             MemoryMallocStatsResponse,
+            // Admin - Hot key monitoring (Redis 8.6+)
+            HotkeysStartRequest,
+            HotkeysSlotRangeSchema,
+            HotkeysAckResponse,
+            HotkeysGetResponse,
             // Admin - Database operations (domain entity + request/response schemas)
             FlushDbRequest,
             FlushResult,
@@ -1639,6 +1654,15 @@ pub fn filtered_openapi(
     // fields that 501 at runtime when the capability is off. This matches
     // what we do for other gradually-rolled-out option fields.
 
+    // HOTKEYS (Redis 8.6+) — strip the entire admin sub-tree when the
+    // capability gate is off; handlers also return 501 at runtime.
+    if !capabilities.features.hotkeys {
+        spec.paths.paths.remove("/api/v1/admin/hotkeys/start");
+        spec.paths.paths.remove("/api/v1/admin/hotkeys/stop");
+        spec.paths.paths.remove("/api/v1/admin/hotkeys");
+        spec.paths.paths.remove("/api/v1/admin/hotkeys/reset");
+    }
+
     if !remove_prefixes.is_empty() {
         // Filter paths
         spec.paths.paths.retain(|path, _| {
@@ -1747,6 +1771,24 @@ mod tests {
     }
 
     #[test]
+    fn test_filtered_openapi_removes_stream_paths_and_tags_when_disabled() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.streams = false;
+        let spec = filtered_openapi(&caps);
+
+        assert!(
+            !spec
+                .paths
+                .paths
+                .keys()
+                .any(|p| p.starts_with("/api/v1/streams"))
+        );
+        if let Some(tags) = spec.tags {
+            assert!(!tags.iter().any(|tag| tag.name == "Streams"));
+        }
+    }
+
+    #[test]
     fn test_filtered_openapi_all_enabled_retains_all_paths() {
         let mut caps = RedisCapabilities::default_capabilities();
         caps.modules.json = true;
@@ -1763,6 +1805,7 @@ mod tests {
         // /streams/{key}/config.
         caps.features.xdelex = true;
         caps.features.stream_idmp = true;
+        caps.features.hotkeys = true;
         let full_spec = ApiDoc::openapi();
         let filtered = filtered_openapi(&caps);
         assert_eq!(full_spec.paths.paths.len(), filtered.paths.paths.len());
@@ -1809,5 +1852,41 @@ mod tests {
                 .paths
                 .contains_key("/api/v1/streams/{key}/delex")
         );
+    }
+
+    #[test]
+    fn test_filtered_openapi_strips_hotkeys_when_capability_off() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.hotkeys = false;
+        let filtered = filtered_openapi(&caps);
+        for path in [
+            "/api/v1/admin/hotkeys/start",
+            "/api/v1/admin/hotkeys/stop",
+            "/api/v1/admin/hotkeys",
+            "/api/v1/admin/hotkeys/reset",
+        ] {
+            assert!(
+                !filtered.paths.paths.contains_key(path),
+                "{path} should be absent when hotkeys is off"
+            );
+        }
+    }
+
+    #[test]
+    fn test_filtered_openapi_keeps_hotkeys_when_capability_on() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.hotkeys = true;
+        let filtered = filtered_openapi(&caps);
+        for path in [
+            "/api/v1/admin/hotkeys/start",
+            "/api/v1/admin/hotkeys/stop",
+            "/api/v1/admin/hotkeys",
+            "/api/v1/admin/hotkeys/reset",
+        ] {
+            assert!(
+                filtered.paths.paths.contains_key(path),
+                "{path} should be present when hotkeys is on"
+            );
+        }
     }
 }

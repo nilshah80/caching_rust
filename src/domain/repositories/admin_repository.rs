@@ -7,8 +7,9 @@ use std::collections::HashMap;
 
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
-    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, KeyAndFlags, LatencyEvent,
-    MemoryStats, MemoryUsage, MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry,
+    ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
+    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
+    ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 
@@ -248,4 +249,20 @@ pub trait AdminRepository: Send + Sync {
     /// Returns a long bulk string when running under jemalloc, an empty/benign
     /// payload otherwise. Mirrors `memory_doctor`.
     async fn memory_malloc_stats(&self) -> Result<String, CacheError>;
+
+    // ========================================================================
+    // Hot Key Monitoring (Redis 8.6+)
+    // ========================================================================
+
+    /// Start hot-key tracking (HOTKEYS START).
+    async fn hotkeys_start(&self, options: HotkeysStartOptions) -> Result<(), CacheError>;
+
+    /// Stop hot-key tracking but keep the collected data (HOTKEYS STOP).
+    async fn hotkeys_stop(&self) -> Result<(), CacheError>;
+
+    /// Fetch the current or most recent tracking report (HOTKEYS GET).
+    async fn hotkeys_get(&self) -> Result<HotkeysReport, CacheError>;
+
+    /// Release tracking resources; can only run when tracking is stopped (HOTKEYS RESET).
+    async fn hotkeys_reset(&self) -> Result<(), CacheError>;
 }

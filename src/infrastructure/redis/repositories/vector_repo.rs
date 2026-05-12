@@ -532,3 +532,104 @@ impl VectorRepository for RedisVectorRepository {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_u64_value_accepts_numeric_wire_forms() {
+        assert_eq!(
+            RedisVectorRepository::extract_u64_value(&redis::Value::Int(42)),
+            Some(42)
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_u64_value(&redis::Value::BulkString(b"43".to_vec())),
+            Some(43)
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_u64_value(&redis::Value::SimpleString(
+                " 44 ".to_string()
+            )),
+            Some(44)
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_u64_value(&redis::Value::Double(45.9)),
+            Some(45)
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_u64_value(&redis::Value::BulkString(
+                b"not-a-number".to_vec()
+            )),
+            None
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_u64_value(&redis::Value::Nil),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_string_value_accepts_string_like_wire_forms() {
+        assert_eq!(
+            RedisVectorRepository::extract_string_value(&redis::Value::BulkString(
+                b"FLOAT32".to_vec()
+            )),
+            Some("FLOAT32".to_string())
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_string_value(&redis::Value::SimpleString(
+                "COSINE".to_string()
+            )),
+            Some("COSINE".to_string())
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_string_value(&redis::Value::Int(12)),
+            Some("12".to_string())
+        );
+        assert_eq!(
+            RedisVectorRepository::extract_string_value(&redis::Value::Nil),
+            None
+        );
+    }
+
+    #[test]
+    fn test_classify_redis_error_maps_known_client_errors() {
+        let cases = [
+            "ERR key does not exist",
+            "ERR no such key",
+            "ERR dimension mismatch",
+            "ERR Dimension mismatch",
+            "ERR DIMENSION_MISMATCH",
+            "ERR invalid vector",
+            "ERR invalid JSON",
+            "ERR not a valid JSON object",
+            "ERR wrong number of arguments",
+            "ERR element not found in the vector set",
+            "ERR invalid specification",
+        ];
+
+        for msg in cases {
+            let err = redis::RedisError::from((
+                redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
+                "ERR",
+                msg.to_string(),
+            ));
+            let classified = RedisVectorRepository::classify_redis_error(err);
+            if msg.contains("does not exist") || msg.contains("no such key") {
+                assert!(matches!(classified, CacheError::KeyNotFound(_)));
+            } else {
+                assert!(matches!(classified, CacheError::InvalidInput(_)));
+            }
+        }
+    }
+
+    #[test]
+    fn test_classify_redis_error_preserves_unknown_errors() {
+        let err = redis::RedisError::from((redis::ErrorKind::Io, "connection dropped"));
+        assert!(matches!(
+            RedisVectorRepository::classify_redis_error(err),
+            CacheError::RedisError(_)
+        ));
+    }
+}

@@ -1147,6 +1147,67 @@ fi
 echo ""
 
 # ==========================================================================
+# Admin (HOTKEYS, Redis 8.6+)
+# ==========================================================================
+echo "--- Admin (Hot Keys, Redis 8.6+) ---"
+
+# Auth is required even when the capability is off; this never goes through
+# to Redis, so check for an exact 401 instead of allowing 501.
+IFS='|' read -r status body < <(do_request POST "/api/v1/admin/hotkeys/start" \
+    '{"cpu":true}')
+check "HOTKEYS START rejects missing auth" "401" "$status" "$body"
+
+# Schema validation runs after auth + capability — both 400 and 501 are valid
+# depending on whether the server is on Redis 8.6+.
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/hotkeys/start" '{}')
+check_any "HOTKEYS START rejects empty metrics" "$status" "$body" 400 501
+
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/hotkeys/start" \
+    '{"cpu":true,"sample_ratio":0}')
+check_any "HOTKEYS START rejects sample_ratio=0" "$status" "$body" 400 501
+
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/hotkeys/start" \
+    '{"cpu":true,"slots":[{"start":100,"end":50}]}')
+check_any "HOTKEYS START rejects inverted slot range" "$status" "$body" 400 501
+
+# Happy-path start with both metrics. On a real Redis 8.6+ server this returns
+# 200; on older builds the route returns 501 from the capability gate.
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/hotkeys/start" \
+    '{"cpu":true,"net":true,"top_k":5,"duration_seconds":2,"sample_ratio":50}')
+check_any "HOTKEYS START (cpu+net)" "$status" "$body" 200 501
+HOTKEYS_ACTIVE="$status"
+
+if [[ "$HOTKEYS_ACTIVE" == "200" ]]; then
+    # Trigger a little workload so the tracker actually accumulates samples
+    # before STOP/GET.
+    for _ in 1 2 3 4 5; do
+        do_request GET "/api/v1/strings/${P}_hot_key" >/dev/null
+    done
+
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/hotkeys/stop")
+    check "HOTKEYS STOP" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/hotkeys")
+    check "HOTKEYS GET" "200" "$status" "$body"
+    if [[ "$body" != *'"data"'* ]]; then
+        FAIL=$((FAIL + 1))
+        ERRORS="$ERRORS\n  FAIL  HOTKEYS GET body missing 'data' field"
+        echo "  FAIL  HOTKEYS GET body missing 'data' field"
+    else
+        PASS=$((PASS + 1))
+        echo "  PASS  HOTKEYS GET body contains 'data' field"
+    fi
+
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/hotkeys/reset")
+    check "HOTKEYS RESET" "200" "$status" "$body"
+else
+    SKIP=$((SKIP + 4))
+    echo "  SKIP  HOTKEYS lifecycle (capability not advertised by this Redis)"
+fi
+
+echo ""
+
+# ==========================================================================
 # Cleanup
 # ==========================================================================
 echo "--- Cleanup ---"
