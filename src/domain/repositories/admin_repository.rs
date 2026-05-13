@@ -9,7 +9,7 @@ use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
     HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
-    ServerInfo, ServerTime, SlowlogEntry,
+    ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
 };
 use crate::domain::errors::CacheError;
 
@@ -96,8 +96,11 @@ pub trait AdminRepository: Send + Sync {
     /// Synchronous save to disk (SAVE command)
     async fn save(&self) -> Result<(), CacheError>;
 
-    /// Asynchronous background save (BGSAVE command)
-    async fn bgsave(&self) -> Result<BgSaveResult, CacheError>;
+    /// Asynchronous background save (BGSAVE command).
+    ///
+    /// When `schedule` is true, Redis enqueues the save instead of refusing
+    /// it if another `BGSAVE`/`BGREWRITEAOF` is already running (Redis 3.2+).
+    async fn bgsave(&self, schedule: bool) -> Result<BgSaveResult, CacheError>;
 
     /// Background AOF rewrite (BGREWRITEAOF command)
     async fn bgrewriteaof(&self) -> Result<BgRewriteAofResult, CacheError>;
@@ -265,4 +268,33 @@ pub trait AdminRepository: Send + Sync {
 
     /// Release tracking resources; can only run when tracking is stopped (HOTKEYS RESET).
     async fn hotkeys_reset(&self) -> Result<(), CacheError>;
+
+    // ========================================================================
+    // Durability (Redis 7.2+)
+    // ========================================================================
+
+    /// Block until `numlocal` fsync acks and `numreplicas` replica fsync acks
+    /// are observed, with a millisecond `timeout` (`WAITAOF numlocal numreplicas timeout`).
+    ///
+    /// **Connection-scoped:** Redis evaluates this command against the writes
+    /// issued on the *current connection*. Implementations that run on top of
+    /// a shared connection pool therefore observe the ack state of whichever
+    /// pooled connection is borrowed — not writes a caller made through an
+    /// earlier HTTP request. Callers requiring a per-request durability
+    /// guarantee must pin the connection at write time.
+    async fn wait_aof(
+        &self,
+        numlocal: u64,
+        numreplicas: u64,
+        timeout_ms: u64,
+    ) -> Result<WaitAofResult, CacheError>;
+
+    /// Unblock a client that is blocked on a blocking command, by ID
+    /// (`CLIENT UNBLOCK client-id [TIMEOUT | ERROR]`, Redis 5.0+).
+    ///
+    /// Returns `1` if the client was unblocked, `0` if no such client was
+    /// found or the client wasn't blocked. `error` controls whether the
+    /// blocked command returns a normal timeout (`TIMEOUT`, default) or an
+    /// `UNBLOCKED` error (`ERROR`).
+    async fn client_unblock(&self, client_id: i64, error: bool) -> Result<i64, CacheError>;
 }

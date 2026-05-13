@@ -523,7 +523,8 @@ pub async fn dump_key(
     ),
     request_body = RestoreRequest,
     responses(
-        (status = 200, description = "Value restored", body = RestoreResponse)
+        (status = 200, description = "Value restored", body = RestoreResponse),
+        (status = 400, description = "Invalid input, invalid base64, negative TTL, or mutually exclusive IDLETIME/FREQ")
     ),
     tag = "Keys"
 )]
@@ -535,10 +536,14 @@ pub async fn restore_key(
     let data = BASE64
         .decode(&request.data)
         .map_err(|e| CacheError::InvalidInput(format!("Invalid base64 data: {}", e)))?;
-    let success = state
-        .key_service
-        .restore(&key, request.ttl, &data, request.replace)
-        .await?;
+    let options = crate::domain::entities::RestoreOptions {
+        ttl: request.ttl,
+        replace: request.replace,
+        absttl: request.absttl,
+        idletime: request.idletime,
+        freq: request.freq,
+    };
+    let success = state.key_service.restore(&key, &data, options).await?;
 
     Ok(Json(ApiResponse::new(RestoreResponse { key, success })))
 }
@@ -926,6 +931,9 @@ mod tests {
                 ttl: 0,
                 data: BASE64.encode("restored"),
                 replace: false,
+                absttl: false,
+                idletime: None,
+                freq: None,
             }),
         )
         .await
@@ -939,6 +947,9 @@ mod tests {
                 ttl: 0,
                 data: "not_base64".to_string(),
                 replace: false,
+                absttl: false,
+                idletime: None,
+                freq: None,
             }),
         )
         .await

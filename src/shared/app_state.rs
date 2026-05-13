@@ -129,7 +129,9 @@ impl AppState {
         );
         let bitmap_service = Arc::new(BitMapService::new(pool.clone()));
         let key_service = Arc::new(KeyService::new(pool.clone()));
-        let admin_service = Arc::new(AdminService::new(pool.clone()));
+        let admin_service = Arc::new(
+            AdminService::new(pool.clone()).with_max_blocking_timeout(max_blocking_timeout),
+        );
         let stream_service = Arc::new(
             StreamService::new(pool.clone()).with_max_blocking_timeout(max_blocking_timeout),
         );

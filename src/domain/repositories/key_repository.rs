@@ -119,13 +119,16 @@ pub trait KeyRepository: Send + Sync {
     /// DUMP - Serialize a key's value
     async fn dump(&self, key: &str) -> Result<DumpResult, CacheError>;
 
-    /// RESTORE - Deserialize a value into a key
+    /// RESTORE - Deserialize a value into a key.
+    ///
+    /// `options` carries `ttl` (ms, or absolute Unix-ms when `absttl=true`),
+    /// `replace`, plus the Redis 5.0+ knobs `ABSTTL`, `IDLETIME seconds`, and
+    /// `FREQ frequency`.
     async fn restore(
         &self,
         key: &str,
-        ttl: i64,
         data: &[u8],
-        replace: bool,
+        options: crate::domain::entities::RestoreOptions,
     ) -> Result<bool, CacheError>;
 
     /// OBJECT ENCODING - Get the encoding of a key

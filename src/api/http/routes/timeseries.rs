@@ -701,6 +701,198 @@ mod tests {
         let _ = timeseries_routes();
     }
 
+    #[test]
+    fn test_timeseries_option_conversions_cover_all_variants() {
+        assert!(matches!(
+            to_duplicate_policy(DuplicatePolicy::Block),
+            TsDuplicatePolicy::Block
+        ));
+        assert!(matches!(
+            to_duplicate_policy(DuplicatePolicy::First),
+            TsDuplicatePolicy::First
+        ));
+        assert!(matches!(
+            to_duplicate_policy(DuplicatePolicy::Last),
+            TsDuplicatePolicy::Last
+        ));
+        assert!(matches!(
+            to_duplicate_policy(DuplicatePolicy::Min),
+            TsDuplicatePolicy::Min
+        ));
+        assert!(matches!(
+            to_duplicate_policy(DuplicatePolicy::Max),
+            TsDuplicatePolicy::Max
+        ));
+        assert!(matches!(
+            to_duplicate_policy(DuplicatePolicy::Sum),
+            TsDuplicatePolicy::Sum
+        ));
+
+        let cases = [
+            (Aggregation::Avg, TsAggregation::Avg),
+            (Aggregation::Sum, TsAggregation::Sum),
+            (Aggregation::Min, TsAggregation::Min),
+            (Aggregation::Max, TsAggregation::Max),
+            (Aggregation::Range, TsAggregation::Range),
+            (Aggregation::Count, TsAggregation::Count),
+            (Aggregation::First, TsAggregation::First),
+            (Aggregation::Last, TsAggregation::Last),
+            (Aggregation::StdP, TsAggregation::StdP),
+            (Aggregation::StdS, TsAggregation::StdS),
+            (Aggregation::VarP, TsAggregation::VarP),
+            (Aggregation::VarS, TsAggregation::VarS),
+            (Aggregation::Twa, TsAggregation::Twa),
+        ];
+
+        for (schema, domain) in cases {
+            assert_eq!(
+                std::mem::discriminant(&to_aggregation(schema)),
+                std::mem::discriminant(&domain)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_timeseries_handlers_reject_invalid_requests() {
+        let (state, _) = test_state_with_timeseries_repo();
+        let state = State(state);
+
+        let result = ts_create(
+            state.clone(),
+            Json(TimeSeriesCreateRequest {
+                key: String::new(),
+                retention_ms: None,
+                chunk_size: None,
+                duplicate_policy: None,
+                ignore: None,
+                labels: std::collections::HashMap::new(),
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_add(
+            state.clone(),
+            Path("metrics".to_string()),
+            Json(TimeSeriesAddRequest {
+                timestamp: -1,
+                value: 1.0,
+                on_duplicate: None,
+                ignore: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_range(
+            state.clone(),
+            Path("metrics".to_string()),
+            Query(TimeSeriesRangeQuery {
+                from: -1,
+                to: 500,
+                count: None,
+                aggregation: None,
+                bucket_duration_ms: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_mget(
+            state.clone(),
+            Json(TimeSeriesMGetRequest { filters: vec![] }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_mrange(
+            state.clone(),
+            Json(TimeSeriesMRangeRequest {
+                from: 0,
+                to: 500,
+                filters: vec![],
+                count: None,
+                aggregation: None,
+                bucket_duration_ms: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_alter(
+            state.clone(),
+            Path("metrics".to_string()),
+            Json(TsAlterRequest {
+                retention_ms: None,
+                chunk_size: None,
+                duplicate_policy: None,
+                ignore: Some(crate::api::http::schemas::timeseries::TsIgnoreSchema {
+                    max_time_diff: -1,
+                    max_val_diff: 0.0,
+                }),
+                labels: std::collections::HashMap::new(),
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_madd(state.clone(), Json(TsMaddRequest { items: vec![] })).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_del(
+            state.clone(),
+            Path("metrics".to_string()),
+            Query(TsDelQuery { from: -1, to: 100 }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_rev_range(
+            state.clone(),
+            Path("metrics".to_string()),
+            Query(TimeSeriesRangeQuery {
+                from: 0,
+                to: -1,
+                count: None,
+                aggregation: None,
+                bucket_duration_ms: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_mrev_range(
+            state.clone(),
+            Json(TsMrevRangeRequest {
+                from: 0,
+                to: 500,
+                filters: vec![],
+                count: None,
+                aggregation: None,
+                bucket_duration_ms: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result =
+            ts_query_index(state.clone(), Json(TsQueryIndexRequest { filters: vec![] })).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = ts_create_rule(
+            state,
+            Path("source".to_string()),
+            Json(TsCreateRuleRequest {
+                dest_key: String::new(),
+                aggregation: Aggregation::Avg,
+                bucket_duration_ms: 0,
+                align_timestamp_ms: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
     #[tokio::test]
     async fn test_ts_create_handler() {
         let (state, _) = test_state_with_timeseries_repo();

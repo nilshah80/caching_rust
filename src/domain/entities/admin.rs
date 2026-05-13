@@ -130,6 +130,15 @@ pub struct BgRewriteAofResult {
     pub message: String,
 }
 
+/// Reply payload from `WAITAOF numlocal numreplicas timeout` (Redis 7.2+).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+pub struct WaitAofResult {
+    /// Number of local fsync acknowledgements completed.
+    pub local: i64,
+    /// Number of replica fsync acknowledgements completed.
+    pub replicas: i64,
+}
+
 // ============================================================================
 // Client Information
 // ============================================================================
@@ -152,6 +161,12 @@ pub struct ClientInfo {
     pub oll: i64,
     pub omem: i64,
     pub cmd: String,
+    /// `LIB-NAME` advertised by the client (Redis 7.2+, empty otherwise).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub lib_name: String,
+    /// `LIB-VER` advertised by the client (Redis 7.2+, empty otherwise).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub lib_ver: String,
 }
 
 impl Default for ClientInfo {
@@ -172,6 +187,8 @@ impl Default for ClientInfo {
             oll: 0,
             omem: 0,
             cmd: String::new(),
+            lib_name: String::new(),
+            lib_ver: String::new(),
         }
     }
 }

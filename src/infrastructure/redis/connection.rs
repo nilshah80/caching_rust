@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use std::time::Instant;
 
-#[cfg(not(test))]
 use deadpool_redis::Hook;
 use deadpool_redis::{Config, Connection, Pool, Runtime};
 use serde::Serialize;
@@ -101,6 +100,61 @@ impl Default for CircuitBreaker {
             opened_at: AtomicU64::new(0),
         }
     }
+}
+
+/// `LIB-NAME` reported via `CLIENT SETINFO` so this service is recognisable
+/// in `CLIENT LIST` (Redis 7.2+). Exposed at module scope so the integration
+/// test (compiled with `cfg(test)` against an external Redis) can verify the
+/// tag without duplicating the literal.
+pub const CLIENT_LIB_NAME: &str = "redis-caching-service";
+
+/// Tag a newly created Redis connection with this service's `LIB-NAME` and
+/// `LIB-VER` so it shows up identifiable in `CLIENT LIST` (Redis 7.2+).
+///
+/// CLIENT SETINFO is best-effort on older Redis or restricted ACL users, so we
+/// swallow only command-level unsupported and permission failures. Transport,
+/// protocol, and transient server-state failures still bubble up so the pool
+/// does not admit an unhealthy connection.
+/// This is the only place CLIENT SETINFO should ever fire: it's connection-scoped
+/// and intended to be set once per Redis connection, not per HTTP request.
+#[allow(dead_code)] // only invoked from the cfg(not(test)) pool builder
+pub(crate) async fn advertise_client_info(
+    conn: &mut redis::aio::MultiplexedConnection,
+) -> Result<(), redis::RedisError> {
+    let lib_ver: &str = env!("CARGO_PKG_VERSION");
+
+    set_client_info(conn, "LIB-NAME", CLIENT_LIB_NAME).await?;
+    set_client_info(conn, "LIB-VER", lib_ver).await
+}
+
+async fn set_client_info(
+    conn: &mut redis::aio::MultiplexedConnection,
+    field: &str,
+    value: &str,
+) -> Result<(), redis::RedisError> {
+    match redis::cmd("CLIENT")
+        .arg("SETINFO")
+        .arg(field)
+        .arg(value)
+        .query_async::<()>(conn)
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(err) if is_client_setinfo_ignorable(&err) => {
+            debug!(%field, error = %err, "Redis ignored CLIENT SETINFO metadata");
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn is_client_setinfo_ignorable(err: &redis::RedisError) -> bool {
+    matches!(
+        err.kind(),
+        redis::ErrorKind::Server(
+            redis::ServerErrorKind::ResponseError | redis::ServerErrorKind::NoPerm
+        )
+    )
 }
 
 /// Number of consecutive failures before the circuit opens
@@ -217,12 +271,18 @@ impl InstrumentedPool {
         cfg.builder()
             .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?
             .runtime(Runtime::Tokio1)
-            .post_create(Hook::sync_fn(move |conn, _metrics| {
-                metrics
-                    .total_connections_created
-                    .fetch_add(1, Ordering::Relaxed);
-                conn.set_response_timeout(command_timeout);
-                Ok(())
+            .post_create(Hook::async_fn(move |conn, _metrics| {
+                let metrics = metrics.clone();
+                Box::pin(async move {
+                    metrics
+                        .total_connections_created
+                        .fetch_add(1, Ordering::Relaxed);
+                    conn.set_response_timeout(command_timeout);
+                    advertise_client_info(conn)
+                        .await
+                        .map_err(deadpool_redis::HookError::Backend)?;
+                    Ok(())
+                })
             }))
             .build()
             .map_err(|e| CacheError::ConnectionFailed(e.to_string()))
@@ -403,6 +463,16 @@ impl InstrumentedPool {
             .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?
             .max_size(4)
             .runtime(Runtime::Tokio1)
+            // Mirror the production `build_pool` hook so integration tests
+            // exercise the same `CLIENT SETINFO` advertisement.
+            .post_create(Hook::async_fn(|conn, _metrics| {
+                Box::pin(async move {
+                    advertise_client_info(conn)
+                        .await
+                        .map_err(deadpool_redis::HookError::Backend)?;
+                    Ok(())
+                })
+            }))
             .build()
             .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?;
 
@@ -924,6 +994,13 @@ impl InstrumentedPool {
             stream_idmp: RedisCapabilities::version_gte(&redis_version, "8.6.0"),
             // HOTKEYS START/STOP/GET/RESET hot-key sampling, Redis 8.6+
             hotkeys: RedisCapabilities::version_gte(&redis_version, "8.6.0"),
+            // WAITAOF — Redis 7.2+; note this is a connection-scoped diagnostic
+            // when used over a pooled REST API (see admin route docstring).
+            waitaof: RedisCapabilities::version_gte(&redis_version, "7.2.0"),
+            // CLIENT SETINFO LIB-NAME / LIB-VER — Redis 7.2+, used at pool init.
+            client_setinfo: RedisCapabilities::version_gte(&redis_version, "7.2.0"),
+            // CLIENT UNBLOCK — Redis 5.0+.
+            client_unblock: RedisCapabilities::version_gte(&redis_version, "5.0.0"),
             vectors: vectors_available,
             vector_range: vector_range_available,
             cluster: cluster_enabled,
@@ -1189,6 +1266,42 @@ mod tests {
             InstrumentedPool::mask_password("redis://localhost:6379"),
             "redis://localhost:6379"
         );
+    }
+
+    #[test]
+    fn test_client_setinfo_ignores_server_command_errors() {
+        let unknown_command = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::ResponseError),
+            "ERR",
+            "unknown command 'CLIENT|SETINFO'".to_string(),
+        ));
+        assert!(is_client_setinfo_ignorable(&unknown_command));
+
+        let no_permission = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::NoPerm),
+            "NOPERM",
+            "this user has no permissions to run CLIENT SETINFO".to_string(),
+        ));
+        assert!(is_client_setinfo_ignorable(&no_permission));
+
+        let busy_loading = redis::RedisError::from((
+            redis::ErrorKind::Server(redis::ServerErrorKind::BusyLoading),
+            "LOADING",
+            "Redis is loading the dataset".to_string(),
+        ));
+        assert!(!is_client_setinfo_ignorable(&busy_loading));
+    }
+
+    #[test]
+    fn test_client_setinfo_propagates_connection_errors() {
+        let io_error = redis::RedisError::from(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "connection closed",
+        ));
+        assert!(!is_client_setinfo_ignorable(&io_error));
+
+        let parse_error = redis::RedisError::from((redis::ErrorKind::Parse, "bad response"));
+        assert!(!is_client_setinfo_ignorable(&parse_error));
     }
 
     #[test]

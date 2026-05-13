@@ -988,12 +988,33 @@ check "CLIENT INFO" "200" "$status" "$body"
 
 IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/client/id")
 check "CLIENT ID" "200" "$status" "$body"
+CURRENT_CLIENT_ID=$(echo "$body" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
 
 IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/client/getname")
 check "CLIENT GETNAME" "200" "$status" "$body"
 
 IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/server/time")
 check "SERVER TIME" "200" "$status" "$body"
+
+# CLIENT UNBLOCK (Redis 5.0+, capability-gated). The current client is not
+# blocked, so a successful response should return `unblocked=false`; older
+# Redis or service-side rejection (non-positive id) surface as 501 / 400.
+if [[ -n "$CURRENT_CLIENT_ID" ]]; then
+    IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/client/unblock" \
+        "{\"client_id\":${CURRENT_CLIENT_ID}}")
+    check_any "CLIENT UNBLOCK" "$status" "$body" 200 501
+else
+    SKIP=$((SKIP + 1))
+    echo "  SKIP  CLIENT UNBLOCK (could not parse CLIENT ID)"
+fi
+
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/client/unblock" \
+    '{"client_id":0}')
+check_any "CLIENT UNBLOCK rejects client_id=0" "$status" "$body" 400 501
+
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/client/unblock" \
+    '{"client_id":-1}')
+check_any "CLIENT UNBLOCK rejects negative id" "$status" "$body" 400 501
 
 IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/server/lastsave")
 check "LASTSAVE" "200" "$status" "$body"
@@ -1118,6 +1139,73 @@ echo "--- Admin (Persistence) ---"
 
 IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/persistence/bgsave" '{}')
 check_any "BGSAVE" "$status" "$body" 200 500
+
+# BGSAVE with SCHEDULE flag (Redis 3.2+). Should at least pass the route
+# layer; Redis may return a non-error message when nothing else is running.
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/persistence/bgsave" \
+    '{"schedule":true}')
+check_any "BGSAVE SCHEDULE" "$status" "$body" 200 500
+
+# WAITAOF (Redis 7.2+). Use zero requested acknowledgements so the call returns
+# immediately; the service clamps the timeout to its blocking-operation bounds.
+# Older Redis is gated out at the capability layer with HTTP 501; standalone
+# instances with `appendonly no` may surface a 5xx.
+IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/persistence/waitaof" \
+    '{"numlocal":0,"numreplicas":0,"timeout_ms":1000}')
+check_any "WAITAOF" "$status" "$body" 200 500 501
+
+echo ""
+
+# ==========================================================================
+# Keys (RESTORE option parity, Redis 5.0+)
+# ==========================================================================
+echo "--- Keys (RESTORE options) ---"
+
+RESTORE_SRC="${P}_restore_src"
+RESTORE_DST="${P}_restore_dst"
+
+IFS='|' read -r status body < <(do_request POST "/api/v1/strings/${RESTORE_SRC}" \
+    '{"value":"hello"}')
+check_any "SET (seed for RESTORE)" "$status" "$body" 200 400
+
+IFS='|' read -r status body < <(do_request GET "/api/v1/keys/${RESTORE_SRC}/dump")
+check_any "DUMP (seed for RESTORE)" "$status" "$body" 200 404
+DUMP_PAYLOAD=$(echo "$body" | sed -n 's/.*"data":"\([^"]*\)".*/\1/p')
+
+if [[ -n "$DUMP_PAYLOAD" ]]; then
+    # Plain restore so the rest of the assertions have a target.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/keys/${RESTORE_DST}/restore" \
+        "{\"ttl\":0,\"data\":\"${DUMP_PAYLOAD}\"}")
+    check_any "RESTORE (plain)" "$status" "$body" 200
+
+    # RESTORE with IDLETIME initializer.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/keys/${RESTORE_DST}/restore" \
+        "{\"ttl\":0,\"data\":\"${DUMP_PAYLOAD}\",\"replace\":true,\"idletime\":30}")
+    check_any "RESTORE (IDLETIME)" "$status" "$body" 200
+
+    # RESTORE with FREQ initializer (requires LFU policy; tolerate 5xx).
+    IFS='|' read -r status body < <(do_request POST "/api/v1/keys/${RESTORE_DST}/restore" \
+        "{\"ttl\":0,\"data\":\"${DUMP_PAYLOAD}\",\"replace\":true,\"freq\":5}")
+    check_any "RESTORE (FREQ)" "$status" "$body" 200 500
+
+    # RESTORE with ABSTTL using an absolute future timestamp (year 2100).
+    IFS='|' read -r status body < <(do_request POST "/api/v1/keys/${RESTORE_DST}/restore" \
+        "{\"ttl\":4102444800000,\"data\":\"${DUMP_PAYLOAD}\",\"replace\":true,\"absttl\":true}")
+    check_any "RESTORE (ABSTTL)" "$status" "$body" 200
+
+    # IDLETIME + FREQ together is rejected at the service layer.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/keys/${RESTORE_DST}/restore" \
+        "{\"ttl\":0,\"data\":\"${DUMP_PAYLOAD}\",\"replace\":true,\"idletime\":1,\"freq\":1}")
+    check "RESTORE rejects IDLETIME + FREQ" "400" "$status" "$body"
+
+    # Negative TTL is rejected at the service layer.
+    IFS='|' read -r status body < <(do_request POST "/api/v1/keys/${RESTORE_DST}/restore" \
+        "{\"ttl\":-1,\"data\":\"${DUMP_PAYLOAD}\"}")
+    check "RESTORE rejects negative TTL" "400" "$status" "$body"
+else
+    SKIP=$((SKIP + 6))
+    echo "  SKIP  RESTORE option matrix (DUMP failed to produce payload)"
+fi
 
 echo ""
 

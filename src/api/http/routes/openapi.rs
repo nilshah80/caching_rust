@@ -26,6 +26,8 @@ use crate::api::http::routes::admin::{
     AclSetUserResponse,
     AclUsersResponse,
     AclWhoamiResponse,
+    // Database operations
+    BgSaveRequest,
     ClientGetNameResponse,
     ClientIdResponse,
     ClientInfoResponse,
@@ -37,6 +39,8 @@ use crate::api::http::routes::admin::{
     ClientPauseResponse,
     ClientSetNameRequest,
     ClientSetNameResponse,
+    ClientUnblockRequest,
+    ClientUnblockResponse,
     ClientUnpauseResponse,
     // Command introspection
     CommandCountResponse,
@@ -56,7 +60,6 @@ use crate::api::http::routes::admin::{
     ConfigRewriteResponse,
     ConfigSetRequest,
     ConfigSetResponse,
-    // Database operations
     CopyKeyRequest,
     CopyKeyResponse,
     DbSizeResponse,
@@ -97,6 +100,9 @@ use crate::api::http::routes::admin::{
     SlowlogResetResponse,
     SwapDbRequest,
     SwapDbResponse,
+    // Durability (Redis 7.2+)
+    WaitAofRequest,
+    WaitAofResponse,
 };
 // Domain entities used directly in API responses
 use crate::api::http::schemas::bitmaps::{
@@ -730,9 +736,11 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::save,
         crate::api::http::routes::admin::bgsave,
         crate::api::http::routes::admin::bgrewriteaof,
+        crate::api::http::routes::admin::waitaof,
         // Admin - Client operations
         crate::api::http::routes::admin::client_list,
         crate::api::http::routes::admin::client_kill,
+        crate::api::http::routes::admin::client_unblock,
         crate::api::http::routes::admin::client_pause,
         crate::api::http::routes::admin::client_unpause,
         crate::api::http::routes::admin::client_setname,
@@ -1117,13 +1125,18 @@ use crate::shared::app_state::AppState;
             ConfigResetStatResponse,
             // Admin - Persistence (domain entities + response schema)
             SaveResponse,
+            BgSaveRequest,
             BgSaveResult,
             BgRewriteAofResult,
+            WaitAofRequest,
+            WaitAofResponse,
             // Admin - Client (domain entity for ClientInfo)
             ClientInfo,
             ClientListResponse,
             ClientKillRequest,
             ClientKillResponse,
+            ClientUnblockRequest,
+            ClientUnblockResponse,
             ClientPauseRequest,
             ClientPauseResponse,
             ClientUnpauseResponse,
@@ -1663,6 +1676,20 @@ pub fn filtered_openapi(
         spec.paths.paths.remove("/api/v1/admin/hotkeys/reset");
     }
 
+    // WAITAOF (Redis 7.2+) — strip the admin path when unsupported; the
+    // handler also returns 501 at runtime. Documented as diagnostic-only
+    // because the underlying Redis semantics are connection-scoped.
+    if !capabilities.features.waitaof {
+        spec.paths.paths.remove("/api/v1/admin/persistence/waitaof");
+    }
+
+    // CLIENT UNBLOCK (Redis 5.0+) — strip when unsupported; runtime returns
+    // 501. Unlike most CLIENT * commands this targets another client by ID
+    // and is therefore safe to expose as a REST endpoint.
+    if !capabilities.features.client_unblock {
+        spec.paths.paths.remove("/api/v1/admin/client/unblock");
+    }
+
     if !remove_prefixes.is_empty() {
         // Filter paths
         spec.paths.paths.retain(|path, _| {
@@ -1806,6 +1833,8 @@ mod tests {
         caps.features.xdelex = true;
         caps.features.stream_idmp = true;
         caps.features.hotkeys = true;
+        caps.features.waitaof = true;
+        caps.features.client_unblock = true;
         let full_spec = ApiDoc::openapi();
         let filtered = filtered_openapi(&caps);
         assert_eq!(full_spec.paths.paths.len(), filtered.paths.paths.len());
@@ -1888,5 +1917,61 @@ mod tests {
                 "{path} should be present when hotkeys is on"
             );
         }
+    }
+
+    #[test]
+    fn test_filtered_openapi_strips_waitaof_when_capability_off() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.waitaof = false;
+        let filtered = filtered_openapi(&caps);
+        assert!(
+            !filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/admin/persistence/waitaof"),
+            "/api/v1/admin/persistence/waitaof should be absent when waitaof is off"
+        );
+    }
+
+    #[test]
+    fn test_filtered_openapi_keeps_waitaof_when_capability_on() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.waitaof = true;
+        let filtered = filtered_openapi(&caps);
+        assert!(
+            filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/admin/persistence/waitaof"),
+            "/api/v1/admin/persistence/waitaof should be present when waitaof is on"
+        );
+    }
+
+    #[test]
+    fn test_filtered_openapi_strips_client_unblock_when_capability_off() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.client_unblock = false;
+        let filtered = filtered_openapi(&caps);
+        assert!(
+            !filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/admin/client/unblock"),
+            "/api/v1/admin/client/unblock should be absent when client_unblock is off"
+        );
+    }
+
+    #[test]
+    fn test_filtered_openapi_keeps_client_unblock_when_capability_on() {
+        let mut caps = RedisCapabilities::default_capabilities();
+        caps.features.client_unblock = true;
+        let filtered = filtered_openapi(&caps);
+        assert!(
+            filtered
+                .paths
+                .paths
+                .contains_key("/api/v1/admin/client/unblock"),
+            "/api/v1/admin/client/unblock should be present when client_unblock is on"
+        );
     }
 }

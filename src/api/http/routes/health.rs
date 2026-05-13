@@ -212,6 +212,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_readiness_reports_configured_mode() {
+        let (mut state, _, _, _) = test_state();
+        let mut config = (*state.config).clone();
+        config.redis.cluster_enabled = true;
+        state.config = std::sync::Arc::new(config);
+        let (_, response) = readiness(State(state)).await;
+        assert_eq!(response.0.mode, "cluster");
+
+        let (mut state, _, _, _) = test_state();
+        let mut config = (*state.config).clone();
+        config.redis.sentinel_enabled = true;
+        state.config = std::sync::Arc::new(config);
+        let (_, response) = readiness(State(state)).await;
+        assert_eq!(response.0.mode, "sentinel");
+    }
+
+    #[tokio::test]
     async fn test_prometheus_metrics_no_handle() {
         let (mut state, _, _, _) = test_state();
         state.metrics_handle = None;

@@ -585,6 +585,69 @@ pub struct HotkeysGetResponse {
     pub data: serde_json::Value,
 }
 
+/// Request body for `POST /api/v1/admin/persistence/bgsave`.
+///
+/// The body is optional — omitting it issues a plain `BGSAVE` for backwards
+/// compatibility; setting `schedule=true` appends Redis's `SCHEDULE` flag.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct BgSaveRequest {
+    /// Use the `SCHEDULE` option (Redis 3.2+) so the save is enqueued when
+    /// another background persistence task is already running.
+    #[serde(default)]
+    pub schedule: bool,
+}
+
+/// Request body for `POST /api/v1/admin/persistence/waitaof`.
+///
+/// Note: the resulting `WAITAOF` runs on a pooled Redis connection, so the
+/// acknowledgement counts in the response describe the fsync state of that
+/// connection's writes — not writes the caller made through earlier HTTP
+/// requests. See the handler docstring for the full caveat.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct WaitAofRequest {
+    /// Required number of local AOF fsync acknowledgements.
+    pub numlocal: u64,
+    /// Required number of replica AOF fsync acknowledgements.
+    pub numreplicas: u64,
+    /// Maximum time to block in milliseconds. The service clamps this to the
+    /// configured blocking timeout bounds to avoid unbounded pool occupancy:
+    /// values below 1000 are raised to 1000, and 0 is not treated as Redis's
+    /// "wait forever" sentinel.
+    pub timeout_ms: u64,
+}
+
+/// Response body for `POST /api/v1/admin/persistence/waitaof`.
+///
+/// Diagnostic counts only — see [`WaitAofRequest`] for the connection-scope
+/// caveat.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct WaitAofResponse {
+    /// Number of local fsync acknowledgements observed before the timeout.
+    pub local: i64,
+    /// Number of replica fsync acknowledgements observed before the timeout.
+    pub replicas: i64,
+}
+
+/// Request body for `POST /api/v1/admin/client/unblock`.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ClientUnblockRequest {
+    /// Target client connection ID (from `CLIENT LIST` / `CLIENT ID`).
+    pub client_id: i64,
+    /// When true, the blocked caller receives an `UNBLOCKED` error instead of
+    /// the default `TIMEOUT` reply. Defaults to false.
+    #[serde(default)]
+    pub error: bool,
+}
+
+/// Response body for `POST /api/v1/admin/client/unblock`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ClientUnblockResponse {
+    /// `true` if the client was unblocked, `false` if no such client was
+    /// found or it wasn't blocked. Mirrors the underlying Redis return value
+    /// (`1`/`0`).
+    pub unblocked: bool,
+}
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -627,9 +690,11 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/persistence/save", post(save))
         .route("/api/v1/admin/persistence/bgsave", post(bgsave))
         .route("/api/v1/admin/persistence/bgrewriteaof", post(bgrewriteaof))
+        .route("/api/v1/admin/persistence/waitaof", post(waitaof))
         // Client operations (protected)
         .route("/api/v1/admin/client/list", get(client_list))
         .route("/api/v1/admin/client/kill", post(client_kill))
+        .route("/api/v1/admin/client/unblock", post(client_unblock))
         .route("/api/v1/admin/client/pause", post(client_pause))
         .route("/api/v1/admin/client/unpause", post(client_unpause))
         .route("/api/v1/admin/client/setname", post(client_setname))
@@ -1301,6 +1366,11 @@ pub async fn save(
 #[utoipa::path(
     post,
     path = "/api/v1/admin/persistence/bgsave",
+    request_body(
+        content = Option<BgSaveRequest>,
+        description = "Optional `SCHEDULE` flag (Redis 3.2+) to enqueue the save \
+            instead of failing when another background persistence task is running."
+    ),
     responses(
         (status = 200, description = "Background save started", body = BgSaveResult),
         (status = 401, description = "Unauthorized")
@@ -1311,13 +1381,63 @@ pub async fn save(
 pub async fn bgsave(
     State(state): State<AppState>,
     headers: HeaderMap,
+    body: Option<Json<BgSaveRequest>>,
 ) -> Result<ApiResponse<BgSaveResult>, StatusCode> {
     verify_admin_key(&headers, &state)?;
+    let schedule = body.map(|Json(b)| b.schedule).unwrap_or(false);
     state
         .admin_service
-        .bgsave()
+        .bgsave(schedule)
         .await
         .map(ApiResponse::success)
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/persistence/waitaof
+///
+/// **Diagnostic only — not a per-request durability guarantee.**
+///
+/// Redis defines `WAITAOF` against the writes issued on the *current*
+/// connection (see <https://redis.io/docs/latest/commands/waitaof/>). This
+/// service runs the command on whichever connection the deadpool happens to
+/// hand us, so the ack counts reflect the global fsync state seen by that
+/// connection rather than writes the caller made through previous HTTP
+/// requests. Use it to observe server-side AOF/replica progress, or in tooling
+/// that hits a dedicated Redis instance — do not treat the response as proof
+/// that any specific REST-side write has been fsynced. Gated by `features.waitaof`
+/// (Redis 7.2+).
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/persistence/waitaof",
+    request_body = WaitAofRequest,
+    responses(
+        (status = 200, description = "AOF fsync acknowledgements observed (diagnostic only — connection-scoped, not per-request)", body = WaitAofResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "WAITAOF requires Redis 7.2+"),
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn waitaof(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<WaitAofRequest>,
+) -> Result<ApiResponse<WaitAofResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    if !state.capabilities.features.waitaof {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    state
+        .admin_service
+        .wait_aof(request.numlocal, request.numreplicas, request.timeout_ms)
+        .await
+        .map(|result| {
+            ApiResponse::success(WaitAofResponse {
+                local: result.local,
+                replicas: result.replicas,
+            })
+        })
         .map_err(to_status_code)
 }
 
@@ -1396,6 +1516,46 @@ pub async fn client_kill(
         .client_kill(request.id, request.addr, request.client_type)
         .await
         .map(|killed| ApiResponse::success(ClientKillResponse { killed }))
+        .map_err(to_status_code)
+}
+
+/// POST /api/v1/admin/client/unblock
+///
+/// Unblock a client that is blocked on a blocking command (`CLIENT UNBLOCK`,
+/// Redis 5.0+). Unlike most "client" commands, this is **not**
+/// connection-scoped — the operation targets a specific client by ID and is
+/// safe to expose as a REST endpoint. Gated by `features.client_unblock`.
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/client/unblock",
+    request_body = ClientUnblockRequest,
+    responses(
+        (status = 200, description = "Client unblock result", body = ClientUnblockResponse),
+        (status = 400, description = "Invalid client_id"),
+        (status = 401, description = "Unauthorized"),
+        (status = 501, description = "CLIENT UNBLOCK requires Redis 5.0+"),
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn client_unblock(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ClientUnblockRequest>,
+) -> Result<ApiResponse<ClientUnblockResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    if !state.capabilities.features.client_unblock {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    state
+        .admin_service
+        .client_unblock(request.client_id, request.error)
+        .await
+        .map(|reply| {
+            ApiResponse::success(ClientUnblockResponse {
+                unblocked: reply == 1,
+            })
+        })
         .map_err(to_status_code)
 }
 
@@ -2572,7 +2732,28 @@ mod tests {
         let _ = config_resetstat(state.clone(), auth.clone()).await.unwrap();
 
         let _ = save(state.clone(), auth.clone()).await.unwrap();
-        let _ = bgsave(state.clone(), auth.clone()).await.unwrap();
+        let _ = bgsave(state.clone(), auth.clone(), None).await.unwrap();
+        let _ = bgsave(
+            state.clone(),
+            auth.clone(),
+            Some(Json(BgSaveRequest { schedule: true })),
+        )
+        .await
+        .unwrap();
+        // waitaof has its own happy-path test (enables the capability first);
+        // here we just assert the route returns 501 under the default
+        // test_state, which keeps the capability off.
+        let waitaof_result = waitaof(
+            state.clone(),
+            auth.clone(),
+            Json(WaitAofRequest {
+                numlocal: 1,
+                numreplicas: 0,
+                timeout_ms: 100,
+            }),
+        )
+        .await;
+        assert!(matches!(waitaof_result, Err(StatusCode::NOT_IMPLEMENTED)));
         let _ = bgrewriteaof(state.clone(), auth.clone()).await.unwrap();
 
         let _ = client_list(state.clone(), auth.clone()).await.unwrap();
@@ -3120,6 +3301,211 @@ mod tests {
         let (mut state, _, _, _) = test_state();
         enable_hotkeys(&mut state);
         let result = hotkeys_reset(State(state), HeaderMap::new()).await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
+    }
+
+    #[tokio::test]
+    async fn test_bgsave_without_body_runs_plain_command() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = bgsave(State(state), auth, None).await.expect("response");
+        let body = response.data.expect("body");
+        assert!(body.started);
+        assert!(!body.message.to_lowercase().contains("schedul"));
+    }
+
+    #[tokio::test]
+    async fn test_bgsave_with_schedule_flag() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = bgsave(
+            State(state),
+            auth,
+            Some(Json(BgSaveRequest { schedule: true })),
+        )
+        .await
+        .expect("response");
+        let body = response.data.expect("body");
+        assert!(body.started);
+        assert!(body.message.to_lowercase().contains("schedul"));
+    }
+
+    #[tokio::test]
+    async fn test_bgsave_requires_auth() {
+        let (state, _, _, _) = test_state();
+        let result = bgsave(State(state), HeaderMap::new(), None).await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
+    }
+
+    fn enable_waitaof(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.waitaof = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    #[tokio::test]
+    async fn test_waitaof_returns_counts() {
+        let (mut state, _, _, _) = test_state();
+        enable_waitaof(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = waitaof(
+            State(state),
+            auth,
+            Json(WaitAofRequest {
+                numlocal: 1,
+                numreplicas: 0,
+                timeout_ms: 500,
+            }),
+        )
+        .await
+        .expect("response");
+        let body = response.data.expect("body");
+        assert_eq!(body.local, 1);
+        assert_eq!(body.replicas, 0);
+    }
+
+    #[tokio::test]
+    async fn test_waitaof_returns_501_when_capability_off() {
+        let (state, _, _, _) = test_state();
+        // Default test_state() has waitaof disabled (Redis < 7.2).
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = waitaof(
+            State(state),
+            auth,
+            Json(WaitAofRequest {
+                numlocal: 1,
+                numreplicas: 0,
+                timeout_ms: 100,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    #[tokio::test]
+    async fn test_waitaof_requires_auth() {
+        let (mut state, _, _, _) = test_state();
+        // Auth check happens before the capability check — enable the capability
+        // so the only reason a request can fail is the missing API key.
+        enable_waitaof(&mut state);
+        let result = waitaof(
+            State(state),
+            HeaderMap::new(),
+            Json(WaitAofRequest {
+                numlocal: 1,
+                numreplicas: 0,
+                timeout_ms: 100,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
+    }
+
+    fn enable_client_unblock(state: &mut crate::shared::app_state::AppState) {
+        let mut caps = (*state.capabilities).clone();
+        caps.features.client_unblock = true;
+        state.capabilities = std::sync::Arc::new(caps);
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_returns_unblocked() {
+        let (mut state, _, _, _) = test_state();
+        enable_client_unblock(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = client_unblock(
+            State(state),
+            auth,
+            Json(ClientUnblockRequest {
+                client_id: 42,
+                error: false,
+            }),
+        )
+        .await
+        .expect("response");
+        assert!(response.data.expect("body").unblocked);
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_returns_unblocked_with_error_mode() {
+        let (mut state, _, _, _) = test_state();
+        enable_client_unblock(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let response = client_unblock(
+            State(state),
+            auth,
+            Json(ClientUnblockRequest {
+                client_id: 42,
+                error: true,
+            }),
+        )
+        .await
+        .expect("response");
+        assert!(response.data.expect("body").unblocked);
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_rejects_zero_id() {
+        let (mut state, _, _, _) = test_state();
+        enable_client_unblock(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = client_unblock(
+            State(state),
+            auth,
+            Json(ClientUnblockRequest {
+                client_id: 0,
+                error: false,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_rejects_negative_id() {
+        let (mut state, _, _, _) = test_state();
+        enable_client_unblock(&mut state);
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = client_unblock(
+            State(state),
+            auth,
+            Json(ClientUnblockRequest {
+                client_id: -1,
+                error: false,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_returns_501_when_capability_off() {
+        let (state, _, _, _) = test_state();
+        let auth = auth_headers(&state.config.admin.api_key);
+        let result = client_unblock(
+            State(state),
+            auth,
+            Json(ClientUnblockRequest {
+                client_id: 1,
+                error: false,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::NOT_IMPLEMENTED)));
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_requires_auth() {
+        let (mut state, _, _, _) = test_state();
+        enable_client_unblock(&mut state);
+        let result = client_unblock(
+            State(state),
+            HeaderMap::new(),
+            Json(ClientUnblockRequest {
+                client_id: 1,
+                error: false,
+            }),
+        )
+        .await;
         assert!(matches!(result, Err(StatusCode::UNAUTHORIZED)));
     }
 }

@@ -244,6 +244,20 @@ pub struct DumpResult {
     pub data: Option<String>,
 }
 
+/// Options forwarded to `RESTORE key ttl value [REPLACE] [ABSTTL] [IDLETIME s] [FREQ f]`.
+///
+/// `ttl` is in milliseconds and is interpreted as an absolute Unix-ms timestamp
+/// when [`Self::absttl`] is true (Redis 5.0+). `idletime` (seconds) and `freq`
+/// initialize the restored key's OBJECT metadata (Redis 5.0+).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RestoreOptions {
+    pub ttl: i64,
+    pub replace: bool,
+    pub absttl: bool,
+    pub idletime: Option<u64>,
+    pub freq: Option<u8>,
+}
+
 /// Result of OBJECT operations
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ObjectInfoResult {

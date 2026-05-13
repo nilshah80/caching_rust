@@ -270,7 +270,7 @@ pub struct DumpResponse {
 /// Request to restore a key
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct RestoreRequest {
-    /// TTL in milliseconds (0 = no expiry)
+    /// TTL in milliseconds (0 = no expiry, treated as absolute Unix-ms timestamp when `absttl=true`)
     #[serde(default)]
     pub ttl: i64,
 
@@ -278,9 +278,23 @@ pub struct RestoreRequest {
     #[validate(length(min = 1, message = "Data is required"))]
     pub data: String,
 
-    /// Replace existing key
+    /// Replace existing key (`REPLACE`)
     #[serde(default)]
     pub replace: bool,
+
+    /// Interpret `ttl` as an absolute Unix-ms timestamp (`ABSTTL`, Redis 5.0+)
+    #[serde(default)]
+    pub absttl: bool,
+
+    /// Initialize the restored key's idle time in seconds (`IDLETIME`, Redis 5.0+).
+    /// Mutually exclusive with `freq`.
+    #[serde(default)]
+    pub idletime: Option<u64>,
+
+    /// Initialize the restored key's LFU frequency (`FREQ`, Redis 5.0+).
+    /// Mutually exclusive with `idletime`.
+    #[serde(default)]
+    pub freq: Option<u8>,
 }
 
 /// Response for restore operation

@@ -89,6 +89,15 @@ pub struct FeatureCapabilities {
     /// HOTKEYS START/STOP/GET/RESET hot-key sampling (Redis 8.6+).
     pub hotkeys: bool,
 
+    /// WAITAOF AOF fsync acknowledgement (Redis 7.2+).
+    pub waitaof: bool,
+
+    /// CLIENT SETINFO `LIB-NAME` / `LIB-VER` (Redis 7.2+).
+    pub client_setinfo: bool,
+
+    /// CLIENT UNBLOCK by client id (Redis 5.0+).
+    pub client_unblock: bool,
+
     /// Redis 8.0 vector sets commands (VADD, VSIM, etc.)
     pub vectors: bool,
 
@@ -127,6 +136,9 @@ impl RedisCapabilities {
                 stream_reference_policy: false, // Only enabled when Redis ≥ 8.2
                 stream_idmp: false,         // Only enabled when Redis ≥ 8.6
                 hotkeys: false,             // Only enabled when Redis ≥ 8.6
+                waitaof: false,             // Only enabled when Redis ≥ 7.2
+                client_setinfo: false,      // Only enabled when Redis ≥ 7.2
+                client_unblock: false,      // Only enabled when Redis ≥ 5.0
                 vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
                 vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
                 cluster: false,
@@ -191,6 +203,9 @@ impl Default for FeatureCapabilities {
             stream_reference_policy: false, // Only enabled when Redis ≥ 8.2
             stream_idmp: false,         // Only enabled when Redis ≥ 8.6
             hotkeys: false,             // Only enabled when Redis ≥ 8.6
+            waitaof: false,             // Only enabled when Redis ≥ 7.2
+            client_setinfo: false,      // Only enabled when Redis ≥ 7.2
+            client_unblock: false,      // Only enabled when Redis ≥ 5.0
             vectors: false,             // Only enabled after positive COMMAND INFO VADD probe
             vector_range: false,        // Only enabled after positive COMMAND INFO VRANGE probe
             cluster: false,

@@ -791,10 +791,14 @@ impl AdminRepository for MockAdminRepository {
         Ok(())
     }
 
-    async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
+    async fn bgsave(&self, schedule: bool) -> Result<BgSaveResult, CacheError> {
         Ok(BgSaveResult {
             started: true,
-            message: "OK".to_string(),
+            message: if schedule {
+                "Background saving scheduled".to_string()
+            } else {
+                "Background saving started".to_string()
+            },
         })
     }
 
@@ -1012,6 +1016,24 @@ impl AdminRepository for MockAdminRepository {
 
     async fn hotkeys_reset(&self) -> Result<(), CacheError> {
         Ok(())
+    }
+
+    async fn wait_aof(
+        &self,
+        _numlocal: u64,
+        _numreplicas: u64,
+        _timeout_ms: u64,
+    ) -> Result<crate::domain::entities::WaitAofResult, CacheError> {
+        Ok(crate::domain::entities::WaitAofResult {
+            local: 1,
+            replicas: 0,
+        })
+    }
+
+    async fn client_unblock(&self, _client_id: i64, _error: bool) -> Result<i64, CacheError> {
+        // Mock semantics: pretend exactly one client was unblocked. Service-
+        // level validation (id > 0) is exercised separately.
+        Ok(1)
     }
 }
 
@@ -1583,12 +1605,11 @@ impl KeyRepository for MockKeyRepository {
     async fn restore(
         &self,
         key: &str,
-        _ttl: i64,
         data: &[u8],
-        replace: bool,
+        options: crate::domain::entities::RestoreOptions,
     ) -> Result<bool, CacheError> {
         let mut store = self.store.lock().expect("store lock");
-        if !replace && store.contains_key(key) {
+        if !options.replace && store.contains_key(key) {
             return Ok(false);
         }
         let value = String::from_utf8_lossy(data).to_string();

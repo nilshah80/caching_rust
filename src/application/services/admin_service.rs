@@ -9,16 +9,19 @@ use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
     HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
-    ServerInfo, ServerTime, SlowlogEntry,
+    ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::infrastructure::redis::repositories::RedisAdminRepository;
+use crate::shared::blocking::BlockingTimeoutEnforcer;
+use std::time::Duration;
 
 /// Service for admin operations
 pub struct AdminService {
     repository: Arc<dyn AdminRepository>,
+    timeout_enforcer: BlockingTimeoutEnforcer,
 }
 
 impl AdminService {
@@ -29,7 +32,23 @@ impl AdminService {
 
     /// Create an AdminService with a custom repository (useful for testing)
     pub fn new_with_repository(repository: Arc<dyn AdminRepository>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            timeout_enforcer: BlockingTimeoutEnforcer::new(),
+        }
+    }
+
+    /// Set custom max blocking timeout (for testing or configuration).
+    pub fn with_max_blocking_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout_enforcer = BlockingTimeoutEnforcer::with_max(timeout.as_secs());
+        self
+    }
+
+    fn enforce_wait_aof_timeout_ms(&self, timeout_ms: u64) -> u64 {
+        let enforced = self
+            .timeout_enforcer
+            .enforce(Duration::from_millis(timeout_ms));
+        enforced.as_millis() as u64
     }
 
     // ========================================================================
@@ -200,9 +219,34 @@ impl AdminService {
         self.repository.save().await
     }
 
-    /// Asynchronous background save
-    pub async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
-        self.repository.bgsave().await
+    /// Asynchronous background save.
+    ///
+    /// Pass `schedule=true` to use the `SCHEDULE` option (Redis 3.2+), which
+    /// enqueues the save when another background persistence task is already
+    /// running instead of returning an error.
+    pub async fn bgsave(&self, schedule: bool) -> Result<BgSaveResult, CacheError> {
+        self.repository.bgsave(schedule).await
+    }
+
+    /// Block until `numlocal` fsync acks and `numreplicas` replica fsync acks
+    /// are observed, with a millisecond timeout (`WAITAOF`, Redis 7.2+).
+    ///
+    /// **Connection-scoped, diagnostic semantics.** Redis defines `WAITAOF`
+    /// against the writes issued on the *current* connection. Because the
+    /// REST service borrows pooled connections, the ack counts reflect
+    /// fsync progress on whatever writes that pooled connection happened to
+    /// carry — not the caller's prior HTTP requests. See the handler
+    /// docstring in `routes/admin.rs::waitaof` for the full caveat.
+    pub async fn wait_aof(
+        &self,
+        numlocal: u64,
+        numreplicas: u64,
+        timeout_ms: u64,
+    ) -> Result<WaitAofResult, CacheError> {
+        let timeout_ms = self.enforce_wait_aof_timeout_ms(timeout_ms);
+        self.repository
+            .wait_aof(numlocal, numreplicas, timeout_ms)
+            .await
     }
 
     /// Background AOF rewrite
@@ -270,6 +314,20 @@ impl AdminService {
     /// Get information about the current client
     pub async fn client_info(&self) -> Result<ClientInfo, CacheError> {
         self.repository.client_info().await
+    }
+
+    /// Unblock a client blocked on a blocking command (`CLIENT UNBLOCK`,
+    /// Redis 5.0+). `client_id` is the target connection's ID (as reported by
+    /// CLIENT LIST / CLIENT ID); `error=true` returns `UNBLOCKED` to the
+    /// blocked caller instead of the default `TIMEOUT`. Returns 1 if the
+    /// client was unblocked, 0 if no such client was found / it wasn't blocked.
+    pub async fn client_unblock(&self, client_id: i64, error: bool) -> Result<i64, CacheError> {
+        if client_id <= 0 {
+            return Err(CacheError::InvalidInput(
+                "client_id must be a positive Redis client ID".to_string(),
+            ));
+        }
+        self.repository.client_unblock(client_id, error).await
     }
 
     // ========================================================================
@@ -571,6 +629,9 @@ mod tests {
         pause: Mutex<Option<ClientPauseOptions>>,
         slowlog_count: Mutex<Option<i64>>,
         genpass_bits: Mutex<Option<u32>>,
+        bgsave_schedule: Mutex<Option<bool>>,
+        wait_aof_args: Mutex<Option<(u64, u64, u64)>>,
+        client_unblock_args: Mutex<Option<(i64, bool)>>,
     }
 
     #[async_trait]
@@ -652,10 +713,11 @@ mod tests {
         async fn save(&self) -> Result<(), CacheError> {
             Ok(())
         }
-        async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
+        async fn bgsave(&self, schedule: bool) -> Result<BgSaveResult, CacheError> {
+            *self.bgsave_schedule.lock().expect("lock") = Some(schedule);
             Ok(BgSaveResult {
                 started: true,
-                message: "OK".to_string(),
+                message: if schedule { "SCHEDULED" } else { "OK" }.to_string(),
             })
         }
         async fn bgrewriteaof(&self) -> Result<BgRewriteAofResult, CacheError> {
@@ -825,6 +887,22 @@ mod tests {
         async fn hotkeys_reset(&self) -> Result<(), CacheError> {
             Ok(())
         }
+        async fn wait_aof(
+            &self,
+            numlocal: u64,
+            numreplicas: u64,
+            timeout_ms: u64,
+        ) -> Result<WaitAofResult, CacheError> {
+            *self.wait_aof_args.lock().expect("lock") = Some((numlocal, numreplicas, timeout_ms));
+            Ok(WaitAofResult {
+                local: numlocal as i64,
+                replicas: numreplicas as i64,
+            })
+        }
+        async fn client_unblock(&self, client_id: i64, error: bool) -> Result<i64, CacheError> {
+            *self.client_unblock_args.lock().expect("lock") = Some((client_id, error));
+            Ok(1)
+        }
     }
 
     #[tokio::test]
@@ -847,6 +925,9 @@ mod tests {
         let err = service.move_key("".to_string(), 1).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
+        let err = service.debug_object("").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
         let err = service.config_get("").await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
@@ -856,6 +937,9 @@ mod tests {
         let err = service.latency_history("").await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
+        let err = service.latency_graph("").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
         let err = service
             .acl_dryrun("", &["GET".to_string()])
             .await
@@ -863,6 +947,16 @@ mod tests {
         assert!(matches!(err, CacheError::InvalidInput(_)));
 
         let err = service.acl_dryrun("default", &[]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let rules = vec!["on".to_string()];
+        let err = service.acl_setuser("", &rules).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.acl_setuser("default", &[]).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.acl_deluser(&[]).await.unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 
@@ -1044,6 +1138,76 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_bgsave_forwards_schedule_flag() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo.clone());
+
+        let plain = service.bgsave(false).await.expect("bgsave");
+        assert!(plain.started);
+        assert_eq!(plain.message, "OK");
+        assert_eq!(*repo.bgsave_schedule.lock().expect("lock"), Some(false));
+
+        let scheduled = service.bgsave(true).await.expect("bgsave schedule");
+        assert!(scheduled.started);
+        assert_eq!(scheduled.message, "SCHEDULED");
+        assert_eq!(*repo.bgsave_schedule.lock().expect("lock"), Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_wait_aof_forwards_arguments() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo.clone());
+
+        let result = service.wait_aof(2, 3, 1_500).await.expect("wait_aof");
+        assert_eq!(result.local, 2);
+        assert_eq!(result.replicas, 3);
+        assert_eq!(
+            *repo.wait_aof_args.lock().expect("lock"),
+            Some((2, 3, 1_500))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wait_aof_clamps_timeout_to_blocking_bounds() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo.clone())
+            .with_max_blocking_timeout(Duration::from_secs(2));
+
+        service.wait_aof(1, 0, 0).await.expect("wait_aof min");
+        assert_eq!(
+            *repo.wait_aof_args.lock().expect("lock"),
+            Some((1, 0, 1_000))
+        );
+
+        service.wait_aof(1, 0, 60_000).await.expect("wait_aof max");
+        assert_eq!(
+            *repo.wait_aof_args.lock().expect("lock"),
+            Some((1, 0, 2_000))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_rejects_non_positive_id() {
+        let service = AdminService::new_with_repository(Arc::new(CaptureAdminRepo::default()));
+        let err = service.client_unblock(0, false).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+        let err = service.client_unblock(-5, true).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_client_unblock_forwards_arguments() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo.clone());
+        let reply = service.client_unblock(101, true).await.expect("unblock");
+        assert_eq!(reply, 1);
+        assert_eq!(
+            *repo.client_unblock_args.lock().expect("lock"),
+            Some((101, true))
+        );
     }
 
     #[tokio::test]

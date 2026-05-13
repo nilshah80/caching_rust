@@ -10,7 +10,7 @@ use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
     HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
-    ServerInfo, ServerTime, SlowlogEntry,
+    ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -304,10 +304,14 @@ impl AdminRepository for RedisAdminRepository {
         Ok(())
     }
 
-    async fn bgsave(&self) -> Result<BgSaveResult, CacheError> {
+    async fn bgsave(&self, schedule: bool) -> Result<BgSaveResult, CacheError> {
         let mut conn = self.pool.get_standalone().await?;
 
-        let result: String = redis::cmd("BGSAVE").query_async(&mut conn).await?;
+        let mut cmd = redis::cmd("BGSAVE");
+        if schedule {
+            cmd.arg("SCHEDULE");
+        }
+        let result: String = cmd.query_async(&mut conn).await?;
 
         Ok(BgSaveResult {
             started: true,
@@ -872,6 +876,38 @@ impl AdminRepository for RedisAdminRepository {
             .await?;
         Ok(())
     }
+
+    async fn wait_aof(
+        &self,
+        numlocal: u64,
+        numreplicas: u64,
+        timeout_ms: u64,
+    ) -> Result<WaitAofResult, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let reply: (i64, i64) = redis::cmd("WAITAOF")
+            .arg(numlocal)
+            .arg(numreplicas)
+            .arg(timeout_ms)
+            .query_async(&mut conn)
+            .await?;
+        Ok(WaitAofResult {
+            local: reply.0,
+            replicas: reply.1,
+        })
+    }
+
+    async fn client_unblock(&self, client_id: i64, error: bool) -> Result<i64, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let mut cmd = redis::cmd("CLIENT");
+        cmd.arg("UNBLOCK").arg(client_id);
+        if error {
+            cmd.arg("ERROR");
+        } else {
+            cmd.arg("TIMEOUT");
+        }
+        let reply: i64 = cmd.query_async(&mut conn).await?;
+        Ok(reply)
+    }
 }
 
 /// Flatten `HOTKEYS START` slot ranges into the individual slot list Redis
@@ -1139,6 +1175,8 @@ fn parse_client_list(output: &str) -> Vec<ClientInfo> {
                         "oll" => info.oll = value.parse().unwrap_or(0),
                         "omem" => info.omem = value.parse().unwrap_or(0),
                         "cmd" => info.cmd = value.to_string(),
+                        "lib-name" => info.lib_name = value.to_string(),
+                        "lib-ver" => info.lib_ver = value.to_string(),
                         _ => {}
                     }
                 }
@@ -1352,6 +1390,23 @@ db0:keys=5,expires=0,avg_ttl=0\n";
         assert_eq!(clients[0].id, 1);
         assert_eq!(clients[0].name, "test");
         assert_eq!(clients[0].cmd, "get");
+        // Older Redis CLIENT LIST output omits lib-name / lib-ver; the parser
+        // must leave them as empty strings rather than failing.
+        assert!(clients[0].lib_name.is_empty());
+        assert!(clients[0].lib_ver.is_empty());
+    }
+
+    #[test]
+    fn test_parse_client_list_with_lib_metadata() {
+        // Redis 7.2+ CLIENT LIST output includes `lib-name=` / `lib-ver=`
+        // fields when the connection issued `CLIENT SETINFO`.
+        let output = "id=42 name= addr=127.0.0.1:6379 fd=7 age=1 idle=0 flags=N \
+                      db=0 multi=-1 qbuf=0 qbuf-free=0 obl=0 oll=0 omem=0 cmd=ping \
+                      lib-name=redis-caching-service lib-ver=0.1.0\n";
+        let clients = parse_client_list(output);
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].lib_name, "redis-caching-service");
+        assert_eq!(clients[0].lib_ver, "0.1.0");
     }
 
     #[test]

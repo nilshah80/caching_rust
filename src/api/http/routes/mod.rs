@@ -246,8 +246,8 @@ mod tests {
     use super::*;
     use crate::infrastructure::redis::capabilities::RedisCapabilities;
     use crate::test_support::{
-        test_state_with_bloom_repo, test_state_with_function_repo, test_state_with_json_repo,
-        test_state_with_search_repo, test_state_with_timeseries_repo,
+        test_state, test_state_with_bloom_repo, test_state_with_function_repo,
+        test_state_with_json_repo, test_state_with_search_repo, test_state_with_timeseries_repo,
     };
     use axum::http::Request;
     use std::sync::Arc;
@@ -446,5 +446,111 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_unavailable_feature_fallbacks() {
+        let (mut state, _, _, _) = test_state();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.features.streams = false;
+        state.capabilities = Arc::new(capabilities);
+        let app = build_router(state);
+
+        for path in [
+            "/api/v1/streams",
+            "/api/v1/streams/example",
+            "/api/v1/search",
+            "/api/v1/search/indexes",
+            "/api/v1/bloom",
+            "/api/v1/cms/key",
+            "/api/v1/topk/key",
+            "/api/v1/tdigest/key/min",
+            "/api/v1/functions",
+            "/api/v1/functions/lib",
+            "/api/v1/timeseries",
+            "/api/v1/timeseries/key",
+            "/api/v1/cluster",
+            "/api/v1/cluster/nodes",
+            "/api/v1/vectors",
+            "/api/v1/vectors/key/card",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .expect("response");
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::NOT_IMPLEMENTED,
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_build_router_vectors_without_range_returns_501() {
+        let (mut state, _, _, _) = test_state();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.features.vectors = true;
+        capabilities.features.vector_range = false;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/vectors/key/range")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn test_build_router_with_cluster_and_vector_range_routes() {
+        let (mut state, _, _, _) = test_state();
+        let mut capabilities = RedisCapabilities::default_capabilities();
+        capabilities.features.cluster = true;
+        capabilities.features.vectors = true;
+        capabilities.features.vector_range = true;
+        state.capabilities = Arc::new(capabilities);
+
+        let app = build_router(state);
+
+        let cluster_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/cluster/nodes")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("cluster response");
+        assert_eq!(
+            cluster_response.status(),
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+
+        let vector_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/vectors/key/range")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(r#"{"start":"-","end":"+"}"#))
+                    .unwrap(),
+            )
+            .await
+            .expect("vector response");
+        assert_eq!(vector_response.status(), axum::http::StatusCode::OK);
     }
 }

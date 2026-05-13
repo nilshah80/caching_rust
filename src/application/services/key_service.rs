@@ -220,15 +220,27 @@ impl KeyService {
         self.repository.dump(key).await
     }
 
-    /// Restore a serialized value to a key
+    /// Restore a serialized value to a key.
+    ///
+    /// Validates that `idletime` and `freq` are not both set (Redis rejects
+    /// the combination) and that `ttl` is non-negative.
     pub async fn restore(
         &self,
         key: &str,
-        ttl: i64,
         data: &[u8],
-        replace: bool,
+        options: crate::domain::entities::RestoreOptions,
     ) -> Result<bool, CacheError> {
-        self.repository.restore(key, ttl, data, replace).await
+        if options.ttl < 0 {
+            return Err(CacheError::InvalidInput(
+                "TTL must be non-negative".to_string(),
+            ));
+        }
+        if options.idletime.is_some() && options.freq.is_some() {
+            return Err(CacheError::InvalidInput(
+                "IDLETIME and FREQ are mutually exclusive".to_string(),
+            ));
+        }
+        self.repository.restore(key, data, options).await
     }
 
     /// Get comprehensive information about a key
@@ -575,12 +587,11 @@ mod tests {
         async fn restore(
             &self,
             key: &str,
-            _ttl: i64,
             _data: &[u8],
-            replace: bool,
+            options: crate::domain::entities::RestoreOptions,
         ) -> Result<bool, CacheError> {
             let mut store = self.keys.lock().unwrap();
-            if store.contains_key(key) && !replace {
+            if store.contains_key(key) && !options.replace {
                 return Ok(false);
             }
             store.insert(key.to_string(), "restored".to_string());
@@ -833,9 +844,23 @@ mod tests {
         let dump = service.dump("beta").await.unwrap();
         assert!(dump.data.is_some());
 
-        let restored = service.restore("beta", 0, b"value", false).await.unwrap();
+        use crate::domain::entities::RestoreOptions;
+        let restored = service
+            .restore("beta", b"value", RestoreOptions::default())
+            .await
+            .unwrap();
         assert!(!restored);
-        let restored = service.restore("beta", 0, b"value", true).await.unwrap();
+        let restored = service
+            .restore(
+                "beta",
+                b"value",
+                RestoreOptions {
+                    replace: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert!(restored);
 
         let info = service.key_info("missing").await.unwrap();
@@ -864,5 +889,88 @@ mod tests {
     fn test_key_service_new() {
         let pool = Arc::new(InstrumentedPool::new_for_tests());
         let _service = KeyService::new(pool);
+    }
+
+    #[tokio::test]
+    async fn test_restore_rejects_negative_ttl() {
+        use crate::domain::entities::RestoreOptions;
+        let service = KeyService::new_with_repository(Arc::new(MockKeyRepository::default()));
+        let err = service
+            .restore(
+                "k",
+                b"data",
+                RestoreOptions {
+                    ttl: -1,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_restore_rejects_idletime_and_freq_together() {
+        use crate::domain::entities::RestoreOptions;
+        let service = KeyService::new_with_repository(Arc::new(MockKeyRepository::default()));
+        let err = service
+            .restore(
+                "k",
+                b"data",
+                RestoreOptions {
+                    idletime: Some(5),
+                    freq: Some(3),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_restore_accepts_absttl_idletime_freq() {
+        use crate::domain::entities::RestoreOptions;
+        let service = KeyService::new_with_repository(Arc::new(MockKeyRepository::default()));
+
+        let with_absttl = service
+            .restore(
+                "k1",
+                b"data",
+                RestoreOptions {
+                    ttl: 1_700_000_000_000,
+                    absttl: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("restore absttl");
+        assert!(with_absttl);
+
+        let with_idle = service
+            .restore(
+                "k2",
+                b"data",
+                RestoreOptions {
+                    idletime: Some(60),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("restore idletime");
+        assert!(with_idle);
+
+        let with_freq = service
+            .restore(
+                "k3",
+                b"data",
+                RestoreOptions {
+                    freq: Some(7),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("restore freq");
+        assert!(with_freq);
     }
 }

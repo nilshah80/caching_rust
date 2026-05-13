@@ -461,17 +461,25 @@ impl KeyRepository for RedisKeyRepository {
     async fn restore(
         &self,
         key: &str,
-        ttl: i64,
         data: &[u8],
-        replace: bool,
+        options: crate::domain::entities::RestoreOptions,
     ) -> Result<bool, CacheError> {
         let mut conn = self.pool.get().await?;
 
         let mut cmd = redis::cmd("RESTORE");
-        cmd.arg(key).arg(ttl).arg(data);
+        cmd.arg(key).arg(options.ttl).arg(data);
 
-        if replace {
+        if options.replace {
             cmd.arg("REPLACE");
+        }
+        if options.absttl {
+            cmd.arg("ABSTTL");
+        }
+        if let Some(seconds) = options.idletime {
+            cmd.arg("IDLETIME").arg(seconds);
+        }
+        if let Some(freq) = options.freq {
+            cmd.arg("FREQ").arg(freq);
         }
 
         let result: Result<(), redis::RedisError> = cmd.query_async(&mut conn).await;
