@@ -15,8 +15,8 @@ use utoipa::ToSchema;
 use crate::api::http::middleware::admin_auth::ADMIN_API_KEY_HEADER;
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo as DomainClientInfo, FlushResult,
-    HotkeysSlotRange, HotkeysStartOptions, LatencyEvent, MemoryStats, MemoryUsage, ServerInfo,
-    ServerTime, SlowlogEntry,
+    HotkeysSlotRange, HotkeysStartOptions, LatencyEvent, MemoryStats, MemoryUsage, ModuleInfo,
+    ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::errors::CacheError;
 use crate::infrastructure::redis::capabilities::RedisCapabilities;
@@ -188,6 +188,12 @@ fn default_shutdown_now() -> bool {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ShutdownResponse {
     pub success: bool,
+}
+
+/// Loaded Redis modules response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ModuleListResponse {
+    pub modules: Vec<ModuleInfo>,
 }
 
 /// Client list response (uses domain entity)
@@ -666,6 +672,8 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/v1/admin/server/lastsave", get(get_lastsave))
         .route("/api/v1/admin/server/debug/object", post(debug_object))
         .route("/api/v1/admin/server/shutdown", post(shutdown))
+        // Module operations (protected, read-only)
+        .route("/api/v1/admin/modules/list", get(module_list))
         // Memory operations (protected)
         .route("/api/v1/admin/server/memory/stats", get(get_memory_stats))
         .route("/api/v1/admin/server/memory/usage", post(get_memory_usage))
@@ -954,6 +962,33 @@ pub async fn shutdown(
         .shutdown(request.save, request.now)
         .await
         .map(|_| ApiResponse::success(ShutdownResponse { success: true }))
+        .map_err(to_status_code)
+}
+
+/// GET /api/v1/admin/modules/list
+///
+/// Read-only wrapper for `MODULE LIST`. Module load/unload operations remain
+/// intentionally out of scope for this REST API.
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/modules/list",
+    responses(
+        (status = 200, description = "Loaded Redis modules", body = ModuleListResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = [])),
+    tag = "Admin"
+)]
+pub async fn module_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<ApiResponse<ModuleListResponse>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    state
+        .admin_service
+        .module_list()
+        .await
+        .map(|modules| ApiResponse::success(ModuleListResponse { modules }))
         .map_err(to_status_code)
 }
 
@@ -2650,6 +2685,9 @@ mod tests {
         )
         .await;
         assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+
+        let modules = module_list(state.clone(), auth.clone()).await.unwrap();
+        assert_eq!(modules.data.unwrap().modules[0].name, "mock-module");
 
         let _ = get_memory_stats(state.clone(), auth.clone()).await.unwrap();
         let _ = get_memory_usage(

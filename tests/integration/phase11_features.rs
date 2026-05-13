@@ -146,6 +146,20 @@ async fn test_bgsave_schedule_against_real_redis() {
 }
 
 #[tokio::test]
+async fn test_module_list_against_real_redis() {
+    let Some((_container, pool)) = create_pool().await else {
+        return;
+    };
+    let service = AdminService::new(pool);
+
+    let modules = service.module_list().await.expect("MODULE LIST");
+    assert!(
+        modules.iter().all(|module| !module.name.is_empty()),
+        "loaded modules should include non-empty names: {modules:?}"
+    );
+}
+
+#[tokio::test]
 async fn test_wait_aof_against_real_redis() {
     let Some((_container, pool)) = create_pool().await else {
         return;

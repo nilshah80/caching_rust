@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
-    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
-    ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
+    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, ModuleInfo,
+    MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
 };
 use crate::domain::errors::CacheError;
 
@@ -37,6 +37,9 @@ pub trait AdminRepository: Send + Sync {
 
     /// Shutdown the Redis server (SHUTDOWN command)
     async fn shutdown(&self, save: bool, now: bool) -> Result<(), CacheError>;
+
+    /// List loaded Redis modules (MODULE LIST command)
+    async fn module_list(&self) -> Result<Vec<ModuleInfo>, CacheError>;
 
     // ========================================================================
     // Memory Operations

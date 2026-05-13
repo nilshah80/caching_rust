@@ -599,6 +599,7 @@ Admin endpoints require the `X-Admin-Api-Key` header.
 | GET | `/api/v1/admin/server/time` | Server time |
 | GET | `/api/v1/admin/server/dbsize` | Database size |
 | GET | `/api/v1/admin/server/lastsave` | Last save timestamp |
+| GET | `/api/v1/admin/modules/list` | Loaded Redis modules |
 
 **Memory:**
 

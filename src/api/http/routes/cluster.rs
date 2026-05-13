@@ -10,6 +10,8 @@ use axum::{Json, Router};
 
 use crate::api::http::middleware::admin_auth::{ADMIN_API_KEY_HEADER, validate_admin_key};
 use crate::api::http::schemas::cluster::{
+    ClusterCountKeysInSlotResponse, ClusterGetKeysInSlotQuery, ClusterGetKeysInSlotResponse,
+    ClusterIdResponse, ClusterLinksResponse, ClusterReplicasResponse, ClusterShardIdResponse,
     KeySlotResponse, SlotStatsQuery, SlotStatsResponse, SlotStatsSchema,
 };
 use crate::domain::errors::CacheError;
@@ -24,7 +26,19 @@ pub fn cluster_routes() -> Router<AppState> {
         .route("/api/v1/cluster/nodes", get(cluster_nodes))
         .route("/api/v1/cluster/slots", get(cluster_slots))
         .route("/api/v1/cluster/shards", get(cluster_shards))
+        .route("/api/v1/cluster/myid", get(cluster_myid))
+        .route("/api/v1/cluster/myshardid", get(cluster_myshardid))
+        .route("/api/v1/cluster/links", get(cluster_links))
+        .route("/api/v1/cluster/replicas/{node_id}", get(cluster_replicas))
         .route("/api/v1/cluster/keyslot/{key}", get(cluster_keyslot))
+        .route(
+            "/api/v1/cluster/countkeysinslot/{slot}",
+            get(cluster_countkeysinslot),
+        )
+        .route(
+            "/api/v1/cluster/getkeysinslot/{slot}",
+            get(cluster_getkeysinslot),
+        )
         .route("/api/v1/cluster/slot-stats", get(cluster_slot_stats))
 }
 
@@ -130,6 +144,106 @@ async fn cluster_shards(
     Ok(Json(ApiResponse::success(json_value)))
 }
 
+/// Get this node's cluster ID (CLUSTER MYID)
+#[utoipa::path(
+    get,
+    path = "/api/v1/cluster/myid",
+    responses(
+        (status = 200, description = "Current cluster node ID", body = ClusterIdResponse),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "Cluster"
+)]
+pub async fn cluster_myid(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<ClusterIdResponse>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    let id = state
+        .cluster_service
+        .cluster_myid()
+        .await
+        .map_err(|err| cache_error_to_status(&err))?;
+    Ok(Json(ApiResponse::success(ClusterIdResponse { id })))
+}
+
+/// Get this node's shard ID (CLUSTER MYSHARDID)
+#[utoipa::path(
+    get,
+    path = "/api/v1/cluster/myshardid",
+    responses(
+        (status = 200, description = "Current cluster shard ID", body = ClusterShardIdResponse),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "Cluster"
+)]
+pub async fn cluster_myshardid(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<ClusterShardIdResponse>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    let shard_id = state
+        .cluster_service
+        .cluster_myshardid()
+        .await
+        .map_err(|err| cache_error_to_status(&err))?;
+    Ok(Json(ApiResponse::success(ClusterShardIdResponse {
+        shard_id,
+    })))
+}
+
+/// Get cluster bus links (CLUSTER LINKS)
+#[utoipa::path(
+    get,
+    path = "/api/v1/cluster/links",
+    responses(
+        (status = 200, description = "Cluster bus links", body = ClusterLinksResponse),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "Cluster"
+)]
+pub async fn cluster_links(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<ClusterLinksResponse>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    let links = state
+        .cluster_service
+        .cluster_links()
+        .await
+        .map_err(|err| cache_error_to_status(&err))?;
+    Ok(Json(ApiResponse::success(ClusterLinksResponse {
+        links: redis_value_to_json(&links),
+    })))
+}
+
+/// Get replicas for a master node (CLUSTER REPLICAS)
+#[utoipa::path(
+    get,
+    path = "/api/v1/cluster/replicas/{node_id}",
+    responses(
+        (status = 200, description = "Replica nodes for a master node", body = ClusterReplicasResponse),
+        (status = 400, description = "Invalid node id"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "Cluster"
+)]
+pub async fn cluster_replicas(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<ApiResponse<ClusterReplicasResponse>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    let replicas = state
+        .cluster_service
+        .cluster_replicas(&node_id)
+        .await
+        .map_err(|err| cache_error_to_status(&err))?;
+    Ok(Json(ApiResponse::success(ClusterReplicasResponse {
+        replicas,
+    })))
+}
+
 /// Get hash slot for a key (CLUSTER KEYSLOT)
 #[utoipa::path(
     get,
@@ -152,6 +266,67 @@ async fn cluster_keyslot(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(ApiResponse::success(KeySlotResponse { key, slot })))
+}
+
+/// Count keys in a hash slot (CLUSTER COUNTKEYSINSLOT)
+#[utoipa::path(
+    get,
+    path = "/api/v1/cluster/countkeysinslot/{slot}",
+    responses(
+        (status = 200, description = "Number of keys in the hash slot", body = ClusterCountKeysInSlotResponse),
+        (status = 400, description = "Invalid slot"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "Cluster"
+)]
+pub async fn cluster_countkeysinslot(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(slot): Path<u16>,
+) -> Result<Json<ApiResponse<ClusterCountKeysInSlotResponse>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    let count = state
+        .cluster_service
+        .cluster_countkeysinslot(slot)
+        .await
+        .map_err(|err| cache_error_to_status(&err))?;
+    Ok(Json(ApiResponse::success(ClusterCountKeysInSlotResponse {
+        slot,
+        count,
+    })))
+}
+
+/// Get key names from a hash slot (CLUSTER GETKEYSINSLOT)
+#[utoipa::path(
+    get,
+    path = "/api/v1/cluster/getkeysinslot/{slot}",
+    params(
+        ("count" = u64, Query, description = "Maximum number of key names to return")
+    ),
+    responses(
+        (status = 200, description = "Key names in the hash slot", body = ClusterGetKeysInSlotResponse),
+        (status = 400, description = "Invalid slot or count"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "Cluster"
+)]
+pub async fn cluster_getkeysinslot(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(slot): Path<u16>,
+    Query(query): Query<ClusterGetKeysInSlotQuery>,
+) -> Result<Json<ApiResponse<ClusterGetKeysInSlotResponse>>, StatusCode> {
+    verify_admin_key(&headers, &state)?;
+    let keys = state
+        .cluster_service
+        .cluster_getkeysinslot(slot, query.count)
+        .await
+        .map_err(|err| cache_error_to_status(&err))?;
+    Ok(Json(ApiResponse::success(ClusterGetKeysInSlotResponse {
+        slot,
+        count: query.count,
+        keys,
+    })))
 }
 
 /// GET /api/v1/cluster/slot-stats
@@ -245,6 +420,10 @@ fn redis_value_to_json(value: &redis::Value) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::services::ClusterService;
+    use crate::domain::repositories::{ClusterEndpoint, ClusterSlotStatsFilter, SlotStats};
+    use async_trait::async_trait;
+    use std::sync::Arc;
 
     #[test]
     fn test_redis_value_to_json_nil() {
@@ -329,6 +508,89 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_cluster_introspection_handlers_happy_path() {
+        let state = test_state_with_happy_cluster();
+        let headers = admin_headers(&state.config.admin.api_key);
+        let state = State(state);
+
+        let myid = cluster_myid(headers.clone(), state.clone())
+            .await
+            .expect("myid")
+            .0
+            .data
+            .expect("body");
+        assert_eq!(myid.id, "node-1");
+
+        let shard = cluster_myshardid(headers.clone(), state.clone())
+            .await
+            .expect("myshardid")
+            .0
+            .data
+            .expect("body");
+        assert_eq!(shard.shard_id, "shard-1");
+
+        let links = cluster_links(headers.clone(), state.clone())
+            .await
+            .expect("links")
+            .0
+            .data
+            .expect("body");
+        assert!(links.links.is_array());
+
+        let replicas = cluster_replicas(headers.clone(), state.clone(), Path("node-1".to_string()))
+            .await
+            .expect("replicas")
+            .0
+            .data
+            .expect("body");
+        assert_eq!(replicas.replicas.len(), 1);
+        assert_eq!(replicas.replicas[0].master_id.as_deref(), Some("node-1"));
+
+        let count = cluster_countkeysinslot(headers.clone(), state.clone(), Path(42))
+            .await
+            .expect("countkeysinslot")
+            .0
+            .data
+            .expect("body");
+        assert_eq!(count.count, 2);
+
+        let keys = cluster_getkeysinslot(
+            headers,
+            state,
+            Path(42),
+            Query(ClusterGetKeysInSlotQuery { count: 2 }),
+        )
+        .await
+        .expect("getkeysinslot")
+        .0
+        .data
+        .expect("body");
+        assert_eq!(keys.keys, vec!["key:0".to_string(), "key:1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_cluster_introspection_handlers_validate_inputs() {
+        let state = test_state_with_happy_cluster();
+        let headers = admin_headers(&state.config.admin.api_key);
+        let state = State(state);
+
+        let result = cluster_replicas(headers.clone(), state.clone(), Path(" ".to_string())).await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+
+        let result = cluster_countkeysinslot(headers.clone(), state.clone(), Path(16_384)).await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+
+        let result = cluster_getkeysinslot(
+            headers,
+            state,
+            Path(42),
+            Query(ClusterGetKeysInSlotQuery { count: 0 }),
+        )
+        .await;
+        assert!(matches!(result, Err(StatusCode::BAD_REQUEST)));
+    }
+
     fn admin_headers(api_key: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -336,6 +598,128 @@ mod tests {
             axum::http::HeaderValue::from_str(api_key).expect("header"),
         );
         headers
+    }
+
+    struct HappyClusterRepo;
+
+    #[async_trait]
+    impl crate::domain::repositories::ClusterRepository for HappyClusterRepo {
+        async fn cluster_info(&self) -> Result<ClusterInfo, CacheError> {
+            Ok(ClusterInfo {
+                cluster_state: "ok".to_string(),
+                cluster_slots_assigned: 16_384,
+                cluster_slots_ok: 16_384,
+                cluster_slots_pfail: 0,
+                cluster_slots_fail: 0,
+                cluster_known_nodes: 3,
+                cluster_size: 1,
+                cluster_current_epoch: 1,
+                cluster_my_epoch: 1,
+            })
+        }
+
+        async fn cluster_nodes(&self) -> Result<Vec<ClusterNode>, CacheError> {
+            Ok(vec![cluster_node("node-1", "master", None)])
+        }
+
+        async fn cluster_slots(&self) -> Result<Vec<ClusterSlotRange>, CacheError> {
+            Ok(vec![ClusterSlotRange {
+                start: 0,
+                end: 16_383,
+                master: ClusterEndpoint {
+                    host: "127.0.0.1".to_string(),
+                    port: 7000,
+                    node_id: Some("node-1".to_string()),
+                },
+                replicas: vec![],
+            }])
+        }
+
+        async fn cluster_shards(&self) -> Result<redis::Value, CacheError> {
+            Ok(redis::Value::Array(vec![]))
+        }
+
+        async fn cluster_myid(&self) -> Result<String, CacheError> {
+            Ok("node-1".to_string())
+        }
+
+        async fn cluster_myshardid(&self) -> Result<String, CacheError> {
+            Ok("shard-1".to_string())
+        }
+
+        async fn cluster_links(&self) -> Result<redis::Value, CacheError> {
+            Ok(redis::Value::Array(vec![redis::Value::Map(vec![
+                (
+                    redis::Value::BulkString(b"node".to_vec()),
+                    redis::Value::BulkString(b"node-2".to_vec()),
+                ),
+                (
+                    redis::Value::BulkString(b"direction".to_vec()),
+                    redis::Value::BulkString(b"to".to_vec()),
+                ),
+            ])]))
+        }
+
+        async fn cluster_replicas(&self, _node_id: &str) -> Result<Vec<ClusterNode>, CacheError> {
+            Ok(vec![cluster_node(
+                "replica-1",
+                "slave",
+                Some("node-1".to_string()),
+            )])
+        }
+
+        async fn cluster_keyslot(&self, _key: &str) -> Result<u16, CacheError> {
+            Ok(42)
+        }
+
+        async fn cluster_countkeysinslot(&self, _slot: u16) -> Result<u64, CacheError> {
+            Ok(2)
+        }
+
+        async fn cluster_getkeysinslot(
+            &self,
+            _slot: u16,
+            count: u64,
+        ) -> Result<Vec<String>, CacheError> {
+            Ok((0..count).map(|i| format!("key:{i}")).collect())
+        }
+
+        async fn cluster_slot_stats(
+            &self,
+            _filter: ClusterSlotStatsFilter,
+        ) -> Result<Vec<SlotStats>, CacheError> {
+            Ok(vec![SlotStats {
+                slot: 0,
+                key_count: 1,
+                cpu_usec: 2,
+                memory_bytes: 3,
+                network_bytes_in: 4,
+                network_bytes_out: 5,
+            }])
+        }
+    }
+
+    fn cluster_node(id: &str, flags: &str, master_id: Option<String>) -> ClusterNode {
+        ClusterNode {
+            id: id.to_string(),
+            address: "127.0.0.1:7000@17000".to_string(),
+            flags: flags.to_string(),
+            master_id,
+            ping_sent: 0,
+            pong_recv: 1000,
+            config_epoch: 1,
+            link_state: "connected".to_string(),
+            slots: vec![],
+        }
+    }
+
+    fn test_state_with_happy_cluster() -> AppState {
+        let (mut state, _, _, _) = crate::test_support::test_state();
+        state.cluster_service = Arc::new(ClusterService::new(Arc::new(HappyClusterRepo)));
+        let mut caps = (*state.capabilities).clone();
+        caps.features.cluster_slot_stats = true;
+        state.capabilities = Arc::new(caps);
+        state
     }
 
     #[tokio::test]
@@ -361,7 +745,37 @@ mod tests {
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         ));
         assert!(matches!(
-            cluster_keyslot(headers, state, Path("key".to_string())).await,
+            cluster_myid(headers.clone(), state.clone()).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_myshardid(headers.clone(), state.clone()).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_links(headers.clone(), state.clone()).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_replicas(headers.clone(), state.clone(), Path("node-1".to_string())).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_keyslot(headers.clone(), state.clone(), Path("key".to_string())).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_countkeysinslot(headers.clone(), state.clone(), Path(42)).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        ));
+        assert!(matches!(
+            cluster_getkeysinslot(
+                headers,
+                state,
+                Path(42),
+                Query(ClusterGetKeysInSlotQuery { count: 1 })
+            )
+            .await,
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         ));
     }

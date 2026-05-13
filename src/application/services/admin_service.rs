@@ -8,8 +8,8 @@ use std::sync::Arc;
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
-    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
-    ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
+    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, ModuleInfo,
+    MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -86,6 +86,11 @@ impl AdminService {
     /// Shutdown the Redis server
     pub async fn shutdown(&self, save: bool, now: bool) -> Result<(), CacheError> {
         self.repository.shutdown(save, now).await
+    }
+
+    /// List loaded Redis modules.
+    pub async fn module_list(&self) -> Result<Vec<ModuleInfo>, CacheError> {
+        self.repository.module_list().await
     }
 
     // ========================================================================
@@ -657,6 +662,14 @@ mod tests {
         async fn shutdown(&self, _save: bool, _now: bool) -> Result<(), CacheError> {
             Ok(())
         }
+        async fn module_list(&self) -> Result<Vec<ModuleInfo>, CacheError> {
+            Ok(vec![ModuleInfo {
+                name: "mock-module".to_string(),
+                version: 1,
+                path: String::new(),
+                args: vec![],
+            }])
+        }
         async fn get_memory_stats(&self) -> Result<MemoryStats, CacheError> {
             Ok(MemoryStats::default())
         }
@@ -982,6 +995,16 @@ mod tests {
 
         service.acl_genpass(None).await.expect("genpass");
         assert_eq!(*repo.genpass_bits.lock().expect("lock"), Some(256));
+    }
+
+    #[tokio::test]
+    async fn test_module_list_passthrough() {
+        let repo = Arc::new(CaptureAdminRepo::default());
+        let service = AdminService::new_with_repository(repo);
+
+        let modules = service.module_list().await.expect("module list");
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].name, "mock-module");
     }
 
     #[tokio::test]

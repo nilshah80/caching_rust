@@ -87,6 +87,7 @@ use crate::api::http::routes::admin::{
     MemoryPurgeResponse,
     // Memory operations
     MemoryUsageRequest,
+    ModuleListResponse,
     MoveKeyRequest,
     MoveKeyResponse,
     // Persistence operations
@@ -120,7 +121,11 @@ use crate::api::http::schemas::bloom::{
     CuckooLoadChunkRequest, CuckooLoadChunkResponse, CuckooReserveRequest, CuckooReserveResponse,
     CuckooScanDumpParams, CuckooScanDumpResponse,
 };
-use crate::api::http::schemas::cluster::{SlotStatsQuery, SlotStatsResponse, SlotStatsSchema};
+use crate::api::http::schemas::cluster::{
+    ClusterCountKeysInSlotResponse, ClusterGetKeysInSlotQuery, ClusterGetKeysInSlotResponse,
+    ClusterIdResponse, ClusterLinksResponse, ClusterReplicasResponse, ClusterShardIdResponse,
+    SlotStatsQuery, SlotStatsResponse, SlotStatsSchema,
+};
 use crate::api::http::schemas::common::{KeyInfo, PaginationParams, TtlInfo};
 use crate::api::http::schemas::functions::{
     FunctionCallRequest, FunctionCallResponse, FunctionDumpResponse, FunctionFlushModeSchema,
@@ -267,7 +272,7 @@ use crate::api::http::schemas::vectors::{
 };
 use crate::domain::entities::{
     AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, FlushResult, LatencyEvent,
-    MemoryStats, MemoryUsage, ServerInfo, ServerTime, SlowlogEntry,
+    MemoryStats, MemoryUsage, ModuleInfo, ServerInfo, ServerTime, SlowlogEntry,
 };
 use crate::domain::entities::{
     // Search entities
@@ -318,6 +323,7 @@ use crate::domain::entities::{
     VectorFieldOptions,
 };
 use crate::domain::errors::{ErrorDetail, ErrorResponse};
+use crate::domain::repositories::{ClusterEndpoint, ClusterNode, ClusterSlotRange};
 use crate::infrastructure::redis::capabilities::{
     FeatureCapabilities, ModuleCapabilities, RedisCapabilities,
 };
@@ -715,6 +721,7 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::admin::get_lastsave,
         crate::api::http::routes::admin::debug_object,
         crate::api::http::routes::admin::shutdown,
+        crate::api::http::routes::admin::module_list,
         // Admin - Memory
         crate::api::http::routes::admin::get_memory_stats,
         crate::api::http::routes::admin::get_memory_usage,
@@ -814,7 +821,13 @@ use crate::shared::app_state::AppState;
         crate::api::http::routes::vectors::vinfo,
         crate::api::http::routes::vectors::vgetattr,
         crate::api::http::routes::vectors::vsetattr,
-        // Cluster endpoints (10.7 — only this one is documented for now)
+        // Cluster endpoints
+        crate::api::http::routes::cluster::cluster_myid,
+        crate::api::http::routes::cluster::cluster_myshardid,
+        crate::api::http::routes::cluster::cluster_links,
+        crate::api::http::routes::cluster::cluster_replicas,
+        crate::api::http::routes::cluster::cluster_countkeysinslot,
+        crate::api::http::routes::cluster::cluster_getkeysinslot,
         crate::api::http::routes::cluster::cluster_slot_stats,
     ),
     components(
@@ -1095,6 +1108,8 @@ use crate::shared::app_state::AppState;
             ServerTime,
             DbSizeResponse,
             LastSaveResponse,
+            ModuleInfo,
+            ModuleListResponse,
             // Admin - Memory (domain entities + request schemas)
             MemoryStats,
             MemoryUsageRequest,
@@ -1198,7 +1213,17 @@ use crate::shared::app_state::AppState;
             CommandGetKeysAndFlagsRequest,
             CommandGetKeysAndFlagsResponse,
             CommandKeyAndFlagsSchema,
-            // Cluster — Slot stats (10.7)
+            // Cluster
+            ClusterEndpoint,
+            ClusterNode,
+            ClusterSlotRange,
+            ClusterIdResponse,
+            ClusterShardIdResponse,
+            ClusterLinksResponse,
+            ClusterReplicasResponse,
+            ClusterCountKeysInSlotResponse,
+            ClusterGetKeysInSlotQuery,
+            ClusterGetKeysInSlotResponse,
             SlotStatsQuery,
             SlotStatsResponse,
             SlotStatsSchema,

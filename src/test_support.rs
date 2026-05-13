@@ -111,6 +111,7 @@ use crate::domain::entities::{
     MGetResult,
     MemoryStats,
     MemoryUsage,
+    ModuleInfo,
     MoveKeyOptions,
     PendingEntry,
     PendingSummary,
@@ -749,6 +750,15 @@ impl AdminRepository for MockAdminRepository {
 
     async fn shutdown(&self, _save: bool, _now: bool) -> Result<(), CacheError> {
         Ok(())
+    }
+
+    async fn module_list(&self) -> Result<Vec<ModuleInfo>, CacheError> {
+        Ok(vec![ModuleInfo {
+            name: "mock-module".to_string(),
+            version: 1,
+            path: "/mock/module.so".to_string(),
+            args: vec!["arg".to_string()],
+        }])
     }
 
     async fn get_memory_stats(&self) -> Result<MemoryStats, CacheError> {
@@ -5920,7 +5930,35 @@ impl ClusterRepository for MockClusterRepository {
         Err(CacheError::Internal("not in cluster mode".to_string()))
     }
 
+    async fn cluster_myid(&self) -> Result<String, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_myshardid(&self) -> Result<String, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_links(&self) -> Result<redis::Value, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_replicas(&self, _node_id: &str) -> Result<Vec<ClusterNode>, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
     async fn cluster_keyslot(&self, _key: &str) -> Result<u16, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_countkeysinslot(&self, _slot: u16) -> Result<u64, CacheError> {
+        Err(CacheError::Internal("not in cluster mode".to_string()))
+    }
+
+    async fn cluster_getkeysinslot(
+        &self,
+        _slot: u16,
+        _count: u64,
+    ) -> Result<Vec<String>, CacheError> {
         Err(CacheError::Internal("not in cluster mode".to_string()))
     }
 

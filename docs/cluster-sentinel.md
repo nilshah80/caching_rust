@@ -89,7 +89,13 @@ REDIS__SENTINEL_PASSWORD=sentinel-secret
 | GET | `/api/v1/cluster/nodes` | Full node list with roles, slots, flags |
 | GET | `/api/v1/cluster/slots` | Slot-to-node mapping |
 | GET | `/api/v1/cluster/shards` | Redis 7.0+ shard topology (replaces SLOTS) |
+| GET | `/api/v1/cluster/myid` | Current node ID |
+| GET | `/api/v1/cluster/myshardid` | Current shard ID (Redis 7.2+) |
+| GET | `/api/v1/cluster/links` | Cluster bus links (Redis 7.0+) |
+| GET | `/api/v1/cluster/replicas/{node_id}` | Replica nodes for a master node |
 | GET | `/api/v1/cluster/keyslot/{key}` | Hash slot for a given key (0-16383) |
+| GET | `/api/v1/cluster/countkeysinslot/{slot}` | Number of keys in a hash slot |
+| GET | `/api/v1/cluster/getkeysinslot/{slot}?count=10` | Key names in a hash slot |
 
 All cluster endpoints require the `X-Admin-Api-Key` header.
 

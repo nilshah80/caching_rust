@@ -157,8 +157,27 @@ pub trait ClusterRepository: Send + Sync {
     /// Get cluster shards (CLUSTER SHARDS, Redis 7.0+)
     async fn cluster_shards(&self) -> Result<redis::Value, CacheError>;
 
+    /// Get this node's cluster ID (CLUSTER MYID)
+    async fn cluster_myid(&self) -> Result<String, CacheError>;
+
+    /// Get this node's shard ID (CLUSTER MYSHARDID, Redis 7.2+)
+    async fn cluster_myshardid(&self) -> Result<String, CacheError>;
+
+    /// Get cluster bus links (CLUSTER LINKS, Redis 7.0+)
+    async fn cluster_links(&self) -> Result<redis::Value, CacheError>;
+
+    /// List replicas for a master node (CLUSTER REPLICAS)
+    async fn cluster_replicas(&self, node_id: &str) -> Result<Vec<ClusterNode>, CacheError>;
+
     /// Get the hash slot for a key (CLUSTER KEYSLOT)
     async fn cluster_keyslot(&self, key: &str) -> Result<u16, CacheError>;
+
+    /// Count keys in a hash slot (CLUSTER COUNTKEYSINSLOT)
+    async fn cluster_countkeysinslot(&self, slot: u16) -> Result<u64, CacheError>;
+
+    /// Get key names from a hash slot (CLUSTER GETKEYSINSLOT)
+    async fn cluster_getkeysinslot(&self, slot: u16, count: u64)
+    -> Result<Vec<String>, CacheError>;
 
     /// Get per-slot usage statistics for slots assigned to the connected node
     /// (CLUSTER SLOT-STATS, Redis 8.2+).

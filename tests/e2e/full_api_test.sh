@@ -1235,6 +1235,9 @@ check "COMMAND COUNT" "200" "$status" "$body"
 IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/commands")
 check "COMMAND LIST" "200" "$status" "$body"
 
+IFS='|' read -r status body < <(admin_request GET "/api/v1/admin/modules/list")
+check "MODULE LIST" "200" "$status" "$body"
+
 # COMMAND GETKEYSANDFLAGS — Redis 7.0+, gated by command_docs.
 IFS='|' read -r status body < <(admin_request POST "/api/v1/admin/commands/getkeysandflags" \
     '{"command":["SET","foo","bar"]}')

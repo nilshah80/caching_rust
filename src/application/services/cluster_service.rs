@@ -9,6 +9,8 @@ use crate::domain::repositories::{
 };
 use std::sync::Arc;
 
+const MAX_CLUSTER_SLOT: u16 = 16_383;
+
 pub struct ClusterService {
     repository: Arc<dyn ClusterRepository>,
 }
@@ -38,9 +40,55 @@ impl ClusterService {
         self.repository.cluster_shards().await
     }
 
+    /// Get this node's cluster ID
+    pub async fn cluster_myid(&self) -> Result<String, CacheError> {
+        self.repository.cluster_myid().await
+    }
+
+    /// Get this node's shard ID
+    pub async fn cluster_myshardid(&self) -> Result<String, CacheError> {
+        self.repository.cluster_myshardid().await
+    }
+
+    /// Get cluster bus links
+    pub async fn cluster_links(&self) -> Result<redis::Value, CacheError> {
+        self.repository.cluster_links().await
+    }
+
+    /// List replicas for a master node
+    pub async fn cluster_replicas(&self, node_id: &str) -> Result<Vec<ClusterNode>, CacheError> {
+        if node_id.trim().is_empty() {
+            return Err(CacheError::InvalidInput(
+                "node_id cannot be empty".to_string(),
+            ));
+        }
+        self.repository.cluster_replicas(node_id).await
+    }
+
     /// Get hash slot for a key
     pub async fn cluster_keyslot(&self, key: &str) -> Result<u16, CacheError> {
         self.repository.cluster_keyslot(key).await
+    }
+
+    /// Count keys in a hash slot
+    pub async fn cluster_countkeysinslot(&self, slot: u16) -> Result<u64, CacheError> {
+        validate_cluster_slot(slot)?;
+        self.repository.cluster_countkeysinslot(slot).await
+    }
+
+    /// Get key names from a hash slot
+    pub async fn cluster_getkeysinslot(
+        &self,
+        slot: u16,
+        count: u64,
+    ) -> Result<Vec<String>, CacheError> {
+        validate_cluster_slot(slot)?;
+        if count == 0 {
+            return Err(CacheError::InvalidInput(
+                "count must be a positive integer".to_string(),
+            ));
+        }
+        self.repository.cluster_getkeysinslot(slot, count).await
     }
 
     /// Per-slot usage statistics for slots assigned to the connected node
@@ -59,7 +107,7 @@ impl ClusterService {
                     "slot_start must be <= slot_end".to_string(),
                 ));
             }
-            if *end > 16383 {
+            if *end > MAX_CLUSTER_SLOT {
                 return Err(CacheError::InvalidInput(
                     "slot range exceeds the maximum slot index 16383".to_string(),
                 ));
@@ -75,6 +123,15 @@ impl ClusterService {
         }
         self.repository.cluster_slot_stats(filter).await
     }
+}
+
+fn validate_cluster_slot(slot: u16) -> Result<(), CacheError> {
+    if slot > MAX_CLUSTER_SLOT {
+        return Err(CacheError::InvalidInput(
+            "slot exceeds the maximum slot index 16383".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -122,8 +179,46 @@ mod tests {
             Ok(redis::Value::Array(vec![]))
         }
 
+        async fn cluster_myid(&self) -> Result<String, CacheError> {
+            Ok("node-1".to_string())
+        }
+
+        async fn cluster_myshardid(&self) -> Result<String, CacheError> {
+            Ok("shard-1".to_string())
+        }
+
+        async fn cluster_links(&self) -> Result<redis::Value, CacheError> {
+            Ok(redis::Value::Array(vec![]))
+        }
+
+        async fn cluster_replicas(&self, _node_id: &str) -> Result<Vec<ClusterNode>, CacheError> {
+            Ok(vec![ClusterNode {
+                id: "replica-1".to_string(),
+                address: "127.0.0.1:7002".to_string(),
+                flags: "slave".to_string(),
+                master_id: Some("node-1".to_string()),
+                ping_sent: 0,
+                pong_recv: 1000,
+                config_epoch: 1,
+                link_state: "connected".to_string(),
+                slots: vec![],
+            }])
+        }
+
         async fn cluster_keyslot(&self, _key: &str) -> Result<u16, CacheError> {
             Ok(12539)
+        }
+
+        async fn cluster_countkeysinslot(&self, _slot: u16) -> Result<u64, CacheError> {
+            Ok(2)
+        }
+
+        async fn cluster_getkeysinslot(
+            &self,
+            _slot: u16,
+            _count: u64,
+        ) -> Result<Vec<String>, CacheError> {
+            Ok(vec!["key:1".to_string(), "key:2".to_string()])
         }
 
         async fn cluster_slot_stats(
@@ -176,6 +271,43 @@ mod tests {
         let service = ClusterService::new(Arc::new(MockClusterRepo));
         let shards = service.cluster_shards().await.unwrap();
         assert!(matches!(shards, redis::Value::Array(v) if v.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn test_cluster_identity_and_slot_introspection() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        assert_eq!(service.cluster_myid().await.unwrap(), "node-1");
+        assert_eq!(service.cluster_myshardid().await.unwrap(), "shard-1");
+        assert!(matches!(
+            service.cluster_links().await.unwrap(),
+            redis::Value::Array(v) if v.is_empty()
+        ));
+        assert_eq!(service.cluster_replicas("node-1").await.unwrap().len(), 1);
+        assert_eq!(service.cluster_countkeysinslot(42).await.unwrap(), 2);
+        assert_eq!(
+            service.cluster_getkeysinslot(42, 2).await.unwrap(),
+            vec!["key:1".to_string(), "key:2".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cluster_replicas_rejects_empty_node_id() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let err = service.cluster_replicas("  ").await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_cluster_slot_introspection_rejects_invalid_inputs() {
+        let service = ClusterService::new(Arc::new(MockClusterRepo));
+        let err = service.cluster_countkeysinslot(16_384).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.cluster_getkeysinslot(16_384, 1).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.cluster_getkeysinslot(42, 0).await.unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 
     #[tokio::test]

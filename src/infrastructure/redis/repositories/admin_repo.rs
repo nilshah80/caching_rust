@@ -9,8 +9,8 @@ use std::sync::Arc;
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
     ClientPauseOptions, CopyKeyOptions, FlushOptions, FlushResult, HotkeysReport,
-    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, MoveKeyOptions,
-    ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
+    HotkeysStartOptions, KeyAndFlags, LatencyEvent, MemoryStats, MemoryUsage, ModuleInfo,
+    MoveKeyOptions, ServerInfo, ServerTime, SlowlogEntry, WaitAofResult,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
@@ -96,6 +96,17 @@ impl AdminRepository for RedisAdminRepository {
             Err(redis_err) if redis_err.is_connection_dropped() => Ok(()),
             Err(redis_err) => Err(CacheError::RedisError(redis_err)),
         }
+    }
+
+    async fn module_list(&self) -> Result<Vec<ModuleInfo>, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+
+        let result: redis::Value = redis::cmd("MODULE")
+            .arg("LIST")
+            .query_async(&mut conn)
+            .await?;
+
+        parse_module_list(result)
     }
 
     // ========================================================================
@@ -1026,6 +1037,101 @@ fn redis_value_to_json(value: redis::Value) -> serde_json::Value {
 // Parsing Helper Functions
 // ============================================================================
 
+fn value_to_string(value: &redis::Value) -> Option<String> {
+    match value {
+        redis::Value::BulkString(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+        redis::Value::SimpleString(s) => Some(s.clone()),
+        redis::Value::Int(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn value_to_i64(value: &redis::Value) -> Option<i64> {
+    match value {
+        redis::Value::Int(n) => Some(*n),
+        redis::Value::BulkString(bytes) => std::str::from_utf8(bytes).ok()?.parse().ok(),
+        redis::Value::SimpleString(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+fn array_fields_to_pairs(
+    fields: Vec<redis::Value>,
+) -> Result<Vec<(redis::Value, redis::Value)>, CacheError> {
+    let mut iter = fields.into_iter();
+    let mut pairs = Vec::new();
+    while let Some(key) = iter.next() {
+        let Some(value) = iter.next() else {
+            return Err(CacheError::Internal(
+                "Malformed MODULE LIST entry".to_string(),
+            ));
+        };
+        pairs.push((key, value));
+    }
+    Ok(pairs)
+}
+
+fn parse_module_info(value: redis::Value) -> Result<ModuleInfo, CacheError> {
+    let pairs = match value {
+        redis::Value::Map(pairs) => pairs,
+        redis::Value::Array(fields) => array_fields_to_pairs(fields)?,
+        _ => {
+            return Err(CacheError::Internal(
+                "Unexpected module entry in MODULE LIST reply".to_string(),
+            ));
+        }
+    };
+
+    let mut info = ModuleInfo::default();
+    for (key, value) in pairs {
+        let Some(key) = value_to_string(&key).map(|s| s.to_ascii_lowercase()) else {
+            continue;
+        };
+        match key.as_str() {
+            "name" => {
+                if let Some(name) = value_to_string(&value) {
+                    info.name = name;
+                }
+            }
+            "ver" | "version" => {
+                if let Some(version) = value_to_i64(&value) {
+                    info.version = version;
+                }
+            }
+            "path" => {
+                if let Some(path) = value_to_string(&value) {
+                    info.path = path;
+                }
+            }
+            "args" => {
+                info.args = match value {
+                    redis::Value::Array(values) => {
+                        values.iter().filter_map(value_to_string).collect()
+                    }
+                    other => value_to_string(&other).into_iter().collect(),
+                };
+            }
+            _ => {}
+        }
+    }
+
+    Ok(info)
+}
+
+fn parse_module_list(value: redis::Value) -> Result<Vec<ModuleInfo>, CacheError> {
+    let modules = match value {
+        redis::Value::Array(modules) => modules,
+        redis::Value::Nil => return Ok(Vec::new()),
+        _ => {
+            return Err(CacheError::Internal(
+                "Unexpected reply shape from MODULE LIST".to_string(),
+            ));
+        }
+    };
+
+    modules.into_iter().map(parse_module_info).collect()
+}
+
 /// Parse INFO output into ServerInfo
 fn parse_server_info(info: &str) -> ServerInfo {
     let mut response = ServerInfo::default();
@@ -1541,6 +1647,66 @@ db0:keys=5,expires=0,avg_ttl=0\n";
             redis::Value::Array(vec![redis::Value::Int(1), redis::Value::Int(2)]),
         )])]));
         assert_eq!(result, serde_json::json!([{"key": [1, 2]}]));
+    }
+
+    #[test]
+    fn test_parse_module_list_from_array_reply() {
+        let parsed = parse_module_list(redis::Value::Array(vec![redis::Value::Array(vec![
+            redis::Value::BulkString(b"name".to_vec()),
+            redis::Value::BulkString(b"search".to_vec()),
+            redis::Value::BulkString(b"ver".to_vec()),
+            redis::Value::Int(20814),
+            redis::Value::BulkString(b"path".to_vec()),
+            redis::Value::BulkString(b"/redisearch.so".to_vec()),
+            redis::Value::BulkString(b"args".to_vec()),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"MAXSEARCHRESULTS".to_vec()),
+                redis::Value::BulkString(b"10000".to_vec()),
+            ]),
+        ])]))
+        .expect("parse");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "search");
+        assert_eq!(parsed[0].version, 20814);
+        assert_eq!(parsed[0].path, "/redisearch.so");
+        assert_eq!(parsed[0].args, vec!["MAXSEARCHRESULTS", "10000"]);
+    }
+
+    #[test]
+    fn test_parse_module_list_from_map_reply() {
+        let parsed = parse_module_list(redis::Value::Array(vec![redis::Value::Map(vec![
+            (
+                redis::Value::SimpleString("name".to_string()),
+                redis::Value::SimpleString("timeseries".to_string()),
+            ),
+            (
+                redis::Value::SimpleString("version".to_string()),
+                redis::Value::BulkString(b"11200".to_vec()),
+            ),
+        ])]))
+        .expect("parse");
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "timeseries");
+        assert_eq!(parsed[0].version, 11200);
+        assert!(parsed[0].path.is_empty());
+        assert!(parsed[0].args.is_empty());
+    }
+
+    #[test]
+    fn test_parse_module_list_rejects_malformed_reply() {
+        assert!(parse_module_list(redis::Value::Nil).unwrap().is_empty());
+        assert!(matches!(
+            parse_module_list(redis::Value::Int(1)),
+            Err(CacheError::Internal(_))
+        ));
+        assert!(matches!(
+            parse_module_list(redis::Value::Array(vec![redis::Value::Array(vec![
+                redis::Value::BulkString(b"name".to_vec())
+            ])])),
+            Err(CacheError::Internal(_))
+        ));
     }
 
     #[test]

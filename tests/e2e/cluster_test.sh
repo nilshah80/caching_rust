@@ -86,9 +86,47 @@ status=$(curl -so /dev/null -w "%{http_code}" \
 assert_status "CLUSTER SHARDS (200)" "200" "$status"
 
 echo ""
+echo "--- Cluster Identity / Links ---"
+body=$(curl -sf -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/myid" || echo "{}")
+assert_contains "CLUSTER MYID has id" "$body" '"id":'
+
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/myshardid")
+assert_status "CLUSTER MYSHARDID (200)" "200" "$status"
+
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/links")
+assert_status "CLUSTER LINKS (200)" "200" "$status"
+
+echo ""
 echo "--- Cluster Keyslot ---"
 body=$(curl -sf -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/keyslot/test" || echo "{}")
 assert_contains "keyslot has slot field" "$body" '"slot":'
+
+echo ""
+echo "--- Cluster Slot Introspection ---"
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/countkeysinslot/0")
+assert_status "CLUSTER COUNTKEYSINSLOT (200)" "200" "$status"
+
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/getkeysinslot/0?count=10")
+assert_status "CLUSTER GETKEYSINSLOT (200)" "200" "$status"
+
+status=$(curl -so /dev/null -w "%{http_code}" \
+  -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/getkeysinslot/0?count=0")
+assert_status "CLUSTER GETKEYSINSLOT rejects count=0" "400" "$status"
+
+MASTER_ID=$(curl -sf -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/myid" \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+if [ -n "$MASTER_ID" ]; then
+  status=$(curl -so /dev/null -w "%{http_code}" \
+    -H "X-Admin-Api-Key: $API_KEY" "$BASE_URL/api/v1/cluster/replicas/$MASTER_ID")
+  assert_status "CLUSTER REPLICAS (200)" "200" "$status"
+else
+  echo "  FAIL  CLUSTER REPLICAS (could not parse node id)"
+  FAILED=$((FAILED + 1))
+fi
 
 echo ""
 echo "--- Data Operations Through Cluster ---"

@@ -68,6 +68,51 @@ impl ClusterRepository for RedisClusterRepository {
         Ok(shards)
     }
 
+    async fn cluster_myid(&self) -> Result<String, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let id: String = redis::cmd("CLUSTER")
+            .arg("MYID")
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::RedisError)?;
+
+        Ok(id)
+    }
+
+    async fn cluster_myshardid(&self) -> Result<String, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let shard_id: String = redis::cmd("CLUSTER")
+            .arg("MYSHARDID")
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::RedisError)?;
+
+        Ok(shard_id)
+    }
+
+    async fn cluster_links(&self) -> Result<redis::Value, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let links: redis::Value = redis::cmd("CLUSTER")
+            .arg("LINKS")
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::RedisError)?;
+
+        Ok(links)
+    }
+
+    async fn cluster_replicas(&self, node_id: &str) -> Result<Vec<ClusterNode>, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let replicas: redis::Value = redis::cmd("CLUSTER")
+            .arg("REPLICAS")
+            .arg(node_id)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::RedisError)?;
+
+        Ok(parse_cluster_replica_nodes(replicas))
+    }
+
     async fn cluster_keyslot(&self, key: &str) -> Result<u16, CacheError> {
         let mut conn = self.pool.get_standalone().await?;
         let slot: u16 = redis::cmd("CLUSTER")
@@ -78,6 +123,35 @@ impl ClusterRepository for RedisClusterRepository {
             .map_err(CacheError::RedisError)?;
 
         Ok(slot)
+    }
+
+    async fn cluster_countkeysinslot(&self, slot: u16) -> Result<u64, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let count: u64 = redis::cmd("CLUSTER")
+            .arg("COUNTKEYSINSLOT")
+            .arg(slot)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::RedisError)?;
+
+        Ok(count)
+    }
+
+    async fn cluster_getkeysinslot(
+        &self,
+        slot: u16,
+        count: u64,
+    ) -> Result<Vec<String>, CacheError> {
+        let mut conn = self.pool.get_standalone().await?;
+        let keys: Vec<String> = redis::cmd("CLUSTER")
+            .arg("GETKEYSINSLOT")
+            .arg(slot)
+            .arg(count)
+            .query_async(&mut conn)
+            .await
+            .map_err(CacheError::RedisError)?;
+
+        Ok(keys)
     }
 
     async fn cluster_slot_stats(
@@ -241,6 +315,33 @@ fn parse_cluster_nodes(nodes_str: &str) -> Vec<ClusterNode> {
         .collect()
 }
 
+fn redis_value_to_string(value: &redis::Value) -> Option<String> {
+    match value {
+        redis::Value::BulkString(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+        redis::Value::SimpleString(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn parse_cluster_replica_nodes(value: redis::Value) -> Vec<ClusterNode> {
+    match value {
+        redis::Value::Array(items) => {
+            let lines = items
+                .iter()
+                .filter_map(redis_value_to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            parse_cluster_nodes(&lines)
+        }
+        other @ (redis::Value::BulkString(_) | redis::Value::SimpleString(_)) => {
+            redis_value_to_string(&other)
+                .map(|line| parse_cluster_nodes(&line))
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn parse_cluster_slots(value: &redis::Value) -> Vec<ClusterSlotRange> {
     let mut ranges = Vec::new();
 
@@ -349,6 +450,34 @@ cluster_my_epoch:1\r
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].master_id, Some("parent123".to_string()));
         assert!(result[0].slots.is_empty());
+    }
+
+    #[test]
+    fn test_parse_cluster_replica_nodes_from_array_reply() {
+        let result = parse_cluster_replica_nodes(redis::Value::Array(vec![
+            redis::Value::BulkString(
+                b"replica1 127.0.0.1:7002@17002 slave master1 0 1000 1 connected".to_vec(),
+            ),
+            redis::Value::SimpleString(
+                "replica2 127.0.0.1:7003@17003 slave master1 0 1000 1 connected".to_string(),
+            ),
+        ]));
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].id, "replica1");
+        assert_eq!(result[0].master_id.as_deref(), Some("master1"));
+        assert_eq!(result[1].address, "127.0.0.1:7003@17003");
+    }
+
+    #[test]
+    fn test_parse_cluster_replica_nodes_from_single_string_reply() {
+        let result = parse_cluster_replica_nodes(redis::Value::BulkString(
+            b"replica1 127.0.0.1:7002@17002 slave master1 0 1000 1 connected".to_vec(),
+        ));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "replica1");
+        assert!(parse_cluster_replica_nodes(redis::Value::Nil).is_empty());
     }
 
     #[test]

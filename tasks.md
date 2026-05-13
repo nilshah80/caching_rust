@@ -372,10 +372,10 @@
 - [x] **11.5.1**: Add conditional SET predicates: `IFEQ`, `IFNE`, `IFDEQ`, `IFDNE`
 - [x] **11.5.2**: Add schema/service validation so SET predicates remain mutually exclusive with `NX`/`XX` where Redis requires it
 
-### 11.6 Optional Literal Command Parity 🟢 LOW PRIORITY
+### 11.6 Optional Literal Command Parity 🟢 COMPLETED
 
-- [ ] **11.6.1**: Expose MODULE LIST as a read-only admin endpoint (MODULE LOAD/LOADEX/UNLOAD remain out of scope)
-- [ ] **11.6.2**: Expose read-only cluster identity/introspection commands if desired: CLUSTER MYID, MYSHARDID, LINKS, REPLICAS, COUNTKEYSINSLOT, GETKEYSINSLOT
+- [x] **11.6.1**: Expose MODULE LIST as a read-only admin endpoint (MODULE LOAD/LOADEX/UNLOAD remain out of scope)
+- [x] **11.6.2**: Expose read-only cluster identity/introspection commands: CLUSTER MYID, MYSHARDID, LINKS, REPLICAS, COUNTKEYSINSLOT, GETKEYSINSLOT
 
 ### Phase 11 Summary
 
@@ -386,7 +386,7 @@
 | 11.3 | Durability/key restore | 2 commands + RESTORE options | 🟢 Low | Completed |
 | 11.4 | Client admin cleanup | 3 commands | 🟢 Low | Completed |
 | 11.5 | SET predicate parity | 4 options | 🟢 Low | Completed |
-| 11.6 | Optional read-only parity | MODULE LIST + cluster introspection | 🟢 Low | Planned |
+| 11.6 | Optional read-only parity | MODULE LIST + cluster introspection | 🟢 Low | Completed |
 
 ### Not Planned (Intentionally Out of Scope)
 
@@ -396,7 +396,7 @@
 | Client reply mode (CLIENT REPLY) | Mutates protocol replies for the pooled connection; unsafe for shared REST handlers |
 | Replica management (FAILOVER, REPLICAOF/SLAVEOF, ROLE) | Not relevant for a caching service API |
 | Cluster mutation (CLUSTER ADDSLOTS/DELSLOTS/MEET/FORGET/REPLICATE/RESET/SETSLOT/etc.) | Topology-changing operations should remain outside this REST API |
-| Module management (MODULE LOAD/LOADEX/UNLOAD) | Admin-level server extension management; MODULE LIST may be exposed read-only in Phase 11 |
+| Module management (MODULE LOAD/LOADEX/UNLOAD) | Admin-level server extension management; read-only MODULE LIST is exposed under admin routes |
 | Connection-level (ECHO, HELLO, RESET, QUIT, AUTH, PING, READONLY, READWRITE, ASKING) | Handled by Redis driver or cluster client behavior |
 | Key migration (MIGRATE, RESTORE-ASKING) | Migration workflows are operationally risky; RESTORE-ASKING is tracked only as a Phase 11 decision item |
 | Internal replication (PSYNC, SYNC, REPLCONF) | Never exposed via API |

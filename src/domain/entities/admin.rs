@@ -32,6 +32,21 @@ pub struct ServerTime {
     pub microseconds: i64,
 }
 
+/// One loaded Redis module from `MODULE LIST`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct ModuleInfo {
+    /// Module name as reported by Redis.
+    pub name: String,
+    /// Module version (`ver` in the Redis reply).
+    pub version: i64,
+    /// Module shared-object path, when Redis includes it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    /// Module load arguments, when Redis includes them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+}
+
 // ============================================================================
 // Memory Information
 // ============================================================================

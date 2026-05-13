@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
-    ClusterSlotStatsFilter, SlotStats, SlotStatsMetric, SlotStatsOrder,
+    ClusterNode, ClusterSlotStatsFilter, SlotStats, SlotStatsMetric, SlotStatsOrder,
 };
 
 /// Response for CLUSTER KEYSLOT
@@ -15,6 +15,52 @@ use crate::domain::repositories::{
 pub struct KeySlotResponse {
     pub key: String,
     pub slot: u16,
+}
+
+/// Response for CLUSTER MYID
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ClusterIdResponse {
+    pub id: String,
+}
+
+/// Response for CLUSTER MYSHARDID
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ClusterShardIdResponse {
+    pub shard_id: String,
+}
+
+/// Response for CLUSTER LINKS
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ClusterLinksResponse {
+    pub links: serde_json::Value,
+}
+
+/// Response for CLUSTER REPLICAS
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ClusterReplicasResponse {
+    pub replicas: Vec<ClusterNode>,
+}
+
+/// Response for CLUSTER COUNTKEYSINSLOT
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ClusterCountKeysInSlotResponse {
+    pub slot: u16,
+    pub count: u64,
+}
+
+/// Query string for CLUSTER GETKEYSINSLOT
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ClusterGetKeysInSlotQuery {
+    /// Maximum number of key names Redis should return.
+    pub count: u64,
+}
+
+/// Response for CLUSTER GETKEYSINSLOT
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ClusterGetKeysInSlotResponse {
+    pub slot: u16,
+    pub count: u64,
+    pub keys: Vec<String>,
 }
 
 /// Query string for `GET /api/v1/cluster/slot-stats`.
@@ -143,6 +189,33 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("12539"));
         assert!(json.contains("test"));
+    }
+
+    #[test]
+    fn test_cluster_identity_and_slot_schemas_serialize() {
+        let id = ClusterIdResponse {
+            id: "node-1".to_string(),
+        };
+        assert!(serde_json::to_string(&id).unwrap().contains("node-1"));
+
+        let shard = ClusterShardIdResponse {
+            shard_id: "shard-1".to_string(),
+        };
+        assert!(serde_json::to_string(&shard).unwrap().contains("shard-1"));
+
+        let count = ClusterCountKeysInSlotResponse { slot: 42, count: 3 };
+        assert!(
+            serde_json::to_string(&count)
+                .unwrap()
+                .contains("\"count\":3")
+        );
+
+        let keys = ClusterGetKeysInSlotResponse {
+            slot: 42,
+            count: 2,
+            keys: vec!["a".to_string(), "b".to_string()],
+        };
+        assert!(serde_json::to_string(&keys).unwrap().contains("\"keys\""));
     }
 
     #[test]
