@@ -129,6 +129,7 @@ use crate::domain::entities::{
     SearchResult,
     ServerInfo,
     ServerTime,
+    SetCondition,
     SetOptions,
     SetRangeResult,
     SetResult,
@@ -344,6 +345,32 @@ impl StringRepository for MockStringRepository {
                 key: key.to_string(),
                 success: false,
                 previous_value: None,
+            });
+        }
+
+        let condition_matches = match &options.condition {
+            Some(SetCondition::IfEq(expected)) => {
+                store.get(key).is_some_and(|current| current == expected)
+            }
+            Some(SetCondition::IfNe(rejected)) => store.get(key) != Some(rejected),
+            Some(SetCondition::IfDeq(expected)) => store
+                .get(key)
+                .is_some_and(|current| Self::mock_digest(current) == *expected),
+            Some(SetCondition::IfDne(rejected)) => store
+                .get(key)
+                .is_none_or(|current| Self::mock_digest(current) != *rejected),
+            None => true,
+        };
+        if !condition_matches {
+            let previous = if options.get {
+                store.get(key).cloned()
+            } else {
+                None
+            };
+            return Ok(SetResult {
+                key: key.to_string(),
+                success: false,
+                previous_value: previous,
             });
         }
 

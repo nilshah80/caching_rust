@@ -699,6 +699,21 @@ if [[ "$status" == "200" ]]; then
         "{\"pairs\":{\"${P}_84_d\":\"x\"},\"ttl_seconds\":10,\"nx\":true,\"xx\":true}")
     check "MSETEX rejects nx + xx" "400" "$status" "$body"
 
+    # SET predicates: IFEQ match applies the update; mismatch returns success:false.
+    do_request PUT "/api/v1/strings/${P}_84_set_pred" '{"value":"old"}' > /dev/null
+    IFS='|' read -r status body < <(do_request PUT "/api/v1/strings/${P}_84_set_pred" \
+        '{"value":"new","if_eq":"old"}')
+    check "SET IFEQ (match updates)" "200" "$status" "$body"
+
+    IFS='|' read -r status body < <(do_request PUT "/api/v1/strings/${P}_84_set_pred" \
+        '{"value":"blocked","if_eq":"old"}')
+    check "SET IFEQ (mismatch skips)" "200" "$status" "$body"
+
+    # SET predicates share the same Redis one-of condition slot as NX/XX.
+    IFS='|' read -r status body < <(do_request PUT "/api/v1/strings/${P}_84_set_pred" \
+        '{"value":"bad","nx":true,"if_eq":"new"}')
+    check "SET rejects nx + predicate" "400" "$status" "$body"
+
     # DIGEST: GET /api/v1/strings/{key}/digest — present key
     IFS='|' read -r status body < <(do_request GET "/api/v1/strings/${P}_84_a/digest")
     check "DIGEST (existing key)" "200" "$status" "$body"
@@ -738,8 +753,8 @@ if [[ "$status" == "200" ]]; then
         '{"if_eq":"a","if_ne":"b"}')
     check "DELEX rejects multiple conditions" "400" "$status" "$body"
 else
-    SKIP=$((SKIP + 9))
-    echo "  SKIP  MSETEX/DELEX/DIGEST follow-ups (Redis 8.4+ required)"
+    SKIP=$((SKIP + 12))
+    echo "  SKIP  MSETEX/SET predicates/DELEX/DIGEST follow-ups (Redis 8.4+ required)"
 fi
 
 echo ""

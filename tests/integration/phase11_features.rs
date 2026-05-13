@@ -6,7 +6,7 @@
 
 use redis_caching_service::application::services::{AdminService, KeyService, StringService};
 use redis_caching_service::domain::entities::{
-    HotkeysSlotRange, HotkeysStartOptions, RestoreOptions,
+    HotkeysSlotRange, HotkeysStartOptions, RestoreOptions, SetCondition,
 };
 use redis_caching_service::domain::errors::CacheError;
 
@@ -15,6 +15,7 @@ use crate::docker_helper::{create_pool, create_pool_with_tag};
 /// HOTKEYS landed in Redis 8.6 — pin the tag so the happy-path coverage on
 /// `RedisAdminRepository::hotkeys_*` actually runs.
 const HOTKEYS_REDIS_TAG: &str = "8.6";
+const STRING_PREDICATES_REDIS_TAG: &str = "8.4";
 
 /// Returns true when the error indicates the running Redis does not understand
 /// the HOTKEYS family (typically Redis < 8.6). Mirrors the pattern used by the
@@ -203,6 +204,80 @@ async fn test_client_setinfo_appears_in_client_list() {
 }
 
 #[tokio::test]
+async fn test_set_predicates_against_real_redis() {
+    let Some((_container, pool)) = create_pool_with_tag(STRING_PREDICATES_REDIS_TAG).await else {
+        return;
+    };
+    let service = StringService::new(pool);
+
+    service
+        .set(
+            "phase11_set_predicate",
+            "alpha",
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+            None,
+        )
+        .await
+        .expect("seed SET");
+
+    let applied = service
+        .set(
+            "phase11_set_predicate",
+            "bravo",
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+            Some(SetCondition::IfEq("alpha".to_string())),
+        )
+        .await;
+    match applied {
+        Err(err) if is_unsupported_redis(&err) => return,
+        Err(err) => panic!("unexpected SET IFEQ error: {err}"),
+        Ok(result) => assert!(result.success),
+    }
+
+    let skipped = service
+        .set(
+            "phase11_set_predicate",
+            "charlie",
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+            Some(SetCondition::IfEq("alpha".to_string())),
+        )
+        .await
+        .expect("SET IFEQ mismatch");
+    assert!(!skipped.success);
+
+    let created = service
+        .set(
+            "phase11_set_predicate_missing",
+            "created",
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+            Some(SetCondition::IfNe("blocked".to_string())),
+        )
+        .await
+        .expect("SET IFNE missing key");
+    assert!(created.success);
+}
+
+#[tokio::test]
 async fn test_restore_with_all_options_against_real_redis() {
     let Some((_container, pool)) = create_pool().await else {
         return;
@@ -221,6 +296,7 @@ async fn test_restore_with_all_options_against_real_redis() {
             false,
             false,
             false,
+            None,
         )
         .await
         .expect("seed");

@@ -77,6 +77,22 @@ pub struct SetOptions {
 
     /// Keep existing TTL (KEEPTTL)
     pub keep_ttl: bool,
+
+    /// Conditional predicate (IFEQ, IFNE, IFDEQ, IFDNE; Redis 8.4+)
+    pub condition: Option<SetCondition>,
+}
+
+/// Conditional predicate for the SET command (Redis 8.4+).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetCondition {
+    /// IFEQ — set only when the current value equals the supplied string
+    IfEq(String),
+    /// IFNE — set only when the current value is not equal to the supplied string
+    IfNe(String),
+    /// IFDEQ — set only when the current value's XXH3 digest matches
+    IfDeq(String),
+    /// IFDNE — set only when the current value's XXH3 digest does not match
+    IfDne(String),
 }
 
 /// Expiry mode for SET command

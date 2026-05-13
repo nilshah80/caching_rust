@@ -367,10 +367,10 @@
 - [x] **11.4.2**: CLIENT SETINFO (`LIB-NAME`, `LIB-VER`) — applied automatically at pool creation so every pooled Redis connection advertises `redis-caching-service` and the crate version in `CLIENT LIST`. Capability-gated to Redis 7.2+ (silently skipped on older servers).
 - [x] **11.4.3**: CLIENT UNBLOCK (`TIMEOUT | ERROR`) — exposed as `POST /api/v1/admin/client/unblock` (admin auth) and forwarded verbatim to Redis. Capability-gated to Redis 5.0+.
 
-### 11.5 String Command Option Parity (Redis 8.4) 🟢 LOW PRIORITY
+### 11.5 String Command Option Parity (Redis 8.4) 🟢 COMPLETED
 
-- [ ] **11.5.1**: Add conditional SET predicates: `IFEQ`, `IFNE`, `IFDEQ`, `IFDNE`
-- [ ] **11.5.2**: Add schema/service validation so SET predicates remain mutually exclusive with `NX`/`XX` where Redis requires it
+- [x] **11.5.1**: Add conditional SET predicates: `IFEQ`, `IFNE`, `IFDEQ`, `IFDNE`
+- [x] **11.5.2**: Add schema/service validation so SET predicates remain mutually exclusive with `NX`/`XX` where Redis requires it
 
 ### 11.6 Optional Literal Command Parity 🟢 LOW PRIORITY
 
@@ -385,7 +385,7 @@
 | 11.2 | HOTKEYS | 4 commands | 🟡 Medium | Completed |
 | 11.3 | Durability/key restore | 2 commands + RESTORE options | 🟢 Low | Completed |
 | 11.4 | Client admin cleanup | 3 commands | 🟢 Low | Completed |
-| 11.5 | SET predicate parity | 4 options | 🟢 Low | Planned |
+| 11.5 | SET predicate parity | 4 options | 🟢 Low | Completed |
 | 11.6 | Optional read-only parity | MODULE LIST + cluster introspection | 🟢 Low | Planned |
 
 ### Not Planned (Intentionally Out of Scope)

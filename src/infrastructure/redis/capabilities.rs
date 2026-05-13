@@ -65,7 +65,7 @@ pub struct FeatureCapabilities {
     /// Redis 8.0 hash commands (HGETEX, HSETEX, HGETDEL)
     pub hash_8_commands: bool,
 
-    /// Redis 8.4 string commands (MSETEX, DELEX, DIGEST)
+    /// Redis 8.4 string commands/options (MSETEX, DELEX, DIGEST, SET predicates)
     pub string_8_4_commands: bool,
 
     /// LATENCY HISTOGRAM support (Redis 7.0+)

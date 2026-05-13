@@ -15,7 +15,7 @@ use crate::api::http::schemas::strings::{
     MSetResponse, SetRangeRequest, SetRangeResponse, SetStringRequest, SetStringResponse,
     StrLenResponse,
 };
-use crate::domain::entities::ExpiryMode;
+use crate::domain::entities::{ExpiryMode, SetCondition};
 use crate::domain::repositories::{DelExCondition, LcsOptions, MSetExExistence, MSetExOptions};
 use validator::Validate;
 
@@ -91,7 +91,8 @@ async fn get_string(
     request_body = SetStringRequest,
     responses(
         (status = 200, description = "Key set successfully", body = SetStringResponse),
-        (status = 400, description = "Invalid request - value size exceeds limit")
+        (status = 400, description = "Invalid request - value size exceeds limit or conflicting SET conditions"),
+        (status = 501, description = "SET predicates require Redis 8.4+")
     ),
     tag = "Strings"
 )]
@@ -100,6 +101,47 @@ async fn set_string(
     Path(key): Path<String>,
     Json(request): Json<SetStringRequest>,
 ) -> Result<Json<ApiResponse<SetStringResponse>>, CacheError> {
+    if request.nx && request.xx {
+        return Err(CacheError::InvalidInput(
+            "nx and xx are mutually exclusive".to_string(),
+        ));
+    }
+
+    let predicate_count = [
+        request.if_eq.is_some(),
+        request.if_ne.is_some(),
+        request.if_deq.is_some(),
+        request.if_dne.is_some(),
+    ]
+    .iter()
+    .filter(|set| **set)
+    .count();
+    if predicate_count > 1 {
+        return Err(CacheError::InvalidInput(
+            "At most one of if_eq, if_ne, if_deq, if_dne may be supplied".to_string(),
+        ));
+    }
+    if predicate_count > 0 && (request.nx || request.xx) {
+        return Err(CacheError::InvalidInput(
+            "SET predicates are mutually exclusive with nx and xx".to_string(),
+        ));
+    }
+    if predicate_count > 0 && !state.capabilities.features.string_8_4_commands {
+        return Err(CacheError::ModuleNotAvailable(
+            "SET predicates require Redis 8.4+".to_string(),
+        ));
+    }
+
+    let condition = if let Some(v) = request.if_eq {
+        Some(SetCondition::IfEq(v))
+    } else if let Some(v) = request.if_ne {
+        Some(SetCondition::IfNe(v))
+    } else if let Some(v) = request.if_deq {
+        Some(SetCondition::IfDeq(v))
+    } else {
+        request.if_dne.map(SetCondition::IfDne)
+    };
+
     // Validate value size to prevent OOM
     let max_value_size = state.config.server.max_value_size_bytes;
     if request.value.len() > max_value_size {
@@ -121,6 +163,7 @@ async fn set_string(
             request.xx,
             request.get,
             request.keep_ttl,
+            condition,
         )
         .await?;
 
@@ -794,6 +837,10 @@ mod tests {
             xx: false,
             get: false,
             keep_ttl: false,
+            if_eq: None,
+            if_ne: None,
+            if_deq: None,
+            if_dne: None,
         };
         let set_resp = set_string(state.clone(), Path("key".to_string()), Json(set_req))
             .await
@@ -915,6 +962,10 @@ mod tests {
             xx: false,
             get: false,
             keep_ttl: false,
+            if_eq: None,
+            if_ne: None,
+            if_deq: None,
+            if_dne: None,
         };
         let result = set_string(state.clone(), Path("key".to_string()), Json(small_req)).await;
         assert!(result.is_ok());
@@ -928,9 +979,122 @@ mod tests {
             xx: false,
             get: false,
             keep_ttl: false,
+            if_eq: None,
+            if_ne: None,
+            if_deq: None,
+            if_dne: None,
         };
         let result = set_string(state.clone(), Path("key2".to_string()), Json(large_req)).await;
         assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_set_string_if_eq_match_and_mismatch() {
+        let (mut app_state, string_repo, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        string_repo.insert("k", "current");
+        let state = State(app_state);
+
+        let match_req = SetStringRequest {
+            value: "next".to_string(),
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: false,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+            if_eq: Some("current".to_string()),
+            if_ne: None,
+            if_deq: None,
+            if_dne: None,
+        };
+        let resp = set_string(state.clone(), Path("k".to_string()), Json(match_req))
+            .await
+            .unwrap();
+        assert!(resp.0.data.unwrap().success);
+
+        let mismatch_req = SetStringRequest {
+            value: "blocked".to_string(),
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: false,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+            if_eq: Some("current".to_string()),
+            if_ne: None,
+            if_deq: None,
+            if_dne: None,
+        };
+        let resp = set_string(state, Path("k".to_string()), Json(mismatch_req))
+            .await
+            .unwrap();
+        assert!(!resp.0.data.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn test_set_string_rejects_predicate_conflicts() {
+        let (mut app_state, _, _, _) = test_state();
+        enable_string_8_4(&mut app_state);
+        let state = State(app_state);
+
+        let multiple_predicates = SetStringRequest {
+            value: "v".to_string(),
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: false,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+            if_eq: Some("a".to_string()),
+            if_ne: Some("b".to_string()),
+            if_deq: None,
+            if_dne: None,
+        };
+        let result = set_string(
+            state.clone(),
+            Path("k".to_string()),
+            Json(multiple_predicates),
+        )
+        .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let nx_with_predicate = SetStringRequest {
+            value: "v".to_string(),
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: true,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+            if_eq: Some("a".to_string()),
+            if_ne: None,
+            if_deq: None,
+            if_dne: None,
+        };
+        let result = set_string(state, Path("k".to_string()), Json(nx_with_predicate)).await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_set_string_predicate_requires_redis_8_4() {
+        let (state, _, _, _) = test_state();
+        let state = State(state);
+        let req = SetStringRequest {
+            value: "v".to_string(),
+            ttl_seconds: None,
+            ttl_ms: None,
+            nx: false,
+            xx: false,
+            get: false,
+            keep_ttl: false,
+            if_eq: Some("a".to_string()),
+            if_ne: None,
+            if_deq: None,
+            if_dne: None,
+        };
+        let result = set_string(state, Path("k".to_string()), Json(req)).await;
+        assert!(matches!(result, Err(CacheError::ModuleNotAvailable(_))));
     }
 
     #[tokio::test]

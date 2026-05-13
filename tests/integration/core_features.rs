@@ -17,7 +17,9 @@ async fn test_string_set_get_cycle() {
 
     // SET key
     service
-        .set("hello", "world", None, None, false, false, false, false)
+        .set(
+            "hello", "world", None, None, false, false, false, false, None,
+        )
         .await
         .unwrap();
 
@@ -118,7 +120,9 @@ async fn test_key_exists_delete() {
 
     // SET a key
     string_svc
-        .set("tempkey", "tempval", None, None, false, false, false, false)
+        .set(
+            "tempkey", "tempval", None, None, false, false, false, false, None,
+        )
         .await
         .unwrap();
 

@@ -38,6 +38,29 @@ pub struct SetStringRequest {
     /// Keep the existing TTL (KEEPTTL)
     #[serde(default)]
     pub keep_ttl: bool,
+
+    /// IFEQ — set only when the current value equals this string (Redis 8.4+).
+    /// Mutually exclusive with `nx`, `xx`, and the other `if_*` predicates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_eq: Option<String>,
+
+    /// IFNE — set only when the current value is not equal to this string
+    /// (Redis 8.4+). If the key does not exist, Redis creates it.
+    /// Mutually exclusive with `nx`, `xx`, and the other `if_*` predicates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_ne: Option<String>,
+
+    /// IFDEQ — set only when the current value's XXH3 digest matches this hex
+    /// string (Redis 8.4+). Mutually exclusive with `nx`, `xx`, and the other
+    /// `if_*` predicates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_deq: Option<String>,
+
+    /// IFDNE — set only when the current value's XXH3 digest does not match
+    /// this hex string (Redis 8.4+). If the key does not exist, Redis creates it.
+    /// Mutually exclusive with `nx`, `xx`, and the other `if_*` predicates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_dne: Option<String>,
 }
 
 /// Response after setting a string
@@ -326,6 +349,16 @@ mod tests {
             LcsResponse::Length { length } => assert_eq!(length, 42),
             _ => panic!("Expected Length variant"),
         }
+    }
+
+    #[test]
+    fn test_set_string_request_deserializes_predicates() {
+        let req: SetStringRequest =
+            serde_json::from_str(r#"{"value":"new","if_eq":"old"}"#).unwrap();
+        assert_eq!(req.value, "new");
+        assert_eq!(req.if_eq.as_deref(), Some("old"));
+        assert!(!req.nx);
+        assert!(!req.xx);
     }
 
     #[test]

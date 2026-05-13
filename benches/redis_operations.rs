@@ -129,6 +129,7 @@ fn string_benchmarks(c: &mut Criterion) {
                         false,
                         false,
                         false,
+                        None,
                     )
                     .await
                     .unwrap();
@@ -149,6 +150,7 @@ fn string_benchmarks(c: &mut Criterion) {
                 false,
                 false,
                 false,
+                None,
             )
             .await
             .unwrap();

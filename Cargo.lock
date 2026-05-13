@@ -2641,6 +2641,7 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "validator",
+ "xxhash-rust",
 ]
 
 [[package]]

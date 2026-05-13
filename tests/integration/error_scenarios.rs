@@ -69,6 +69,7 @@ async fn test_invalid_command_on_wrong_type() {
             false,
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -107,6 +108,7 @@ async fn test_expired_key_returns_none() {
             false,
             false,
             false,
+            None,
         )
         .await
         .unwrap();

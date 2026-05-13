@@ -25,11 +25,23 @@ async fn test_lcs_operations() {
     let service = StringService::new(pool);
 
     service
-        .set("lcs1", "ohmytext", None, None, false, false, false, false)
+        .set(
+            "lcs1", "ohmytext", None, None, false, false, false, false, None,
+        )
         .await
         .unwrap();
     service
-        .set("lcs2", "mynewtext", None, None, false, false, false, false)
+        .set(
+            "lcs2",
+            "mynewtext",
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+            None,
+        )
         .await
         .unwrap();
 

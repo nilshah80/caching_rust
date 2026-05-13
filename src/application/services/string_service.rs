@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::domain::entities::{
-    AppendResult, ExpiryMode, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult,
-    SetResult, StringValue,
+    AppendResult, ExpiryMode, GetExOptions, MGetResult, RangeResult, SetCondition, SetOptions,
+    SetRangeResult, SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
@@ -49,7 +49,19 @@ impl StringService {
         xx: bool,
         get: bool,
         keep_ttl: bool,
+        condition: Option<SetCondition>,
     ) -> Result<SetResult, CacheError> {
+        if nx && xx {
+            return Err(CacheError::InvalidInput(
+                "nx and xx are mutually exclusive".to_string(),
+            ));
+        }
+        if condition.is_some() && (nx || xx) {
+            return Err(CacheError::InvalidInput(
+                "SET predicates are mutually exclusive with nx and xx".to_string(),
+            ));
+        }
+
         // Determine expiry mode and value
         let (expiry_mode, expiry_value) = if let Some(ms) = ttl_ms {
             (Some(ExpiryMode::Px), Some(ms))
@@ -66,6 +78,7 @@ impl StringService {
             expiry_mode,
             expiry_value,
             keep_ttl,
+            condition,
         };
 
         self.repository.set(key, value, options).await
@@ -490,7 +503,17 @@ mod tests {
         let service = StringService::new_with_repository(repo.clone());
 
         service
-            .set("k", "v", Some(10), Some(5), false, false, false, false)
+            .set(
+                "k",
+                "v",
+                Some(10),
+                Some(5),
+                false,
+                false,
+                false,
+                false,
+                Some(SetCondition::IfNe("old".to_string())),
+            )
             .await
             .expect("set");
         let options = repo
@@ -501,6 +524,10 @@ mod tests {
             .expect("set options");
         assert!(matches!(options.expiry_mode, Some(ExpiryMode::Px)));
         assert_eq!(options.expiry_value, Some(5));
+        assert_eq!(
+            options.condition,
+            Some(SetCondition::IfNe("old".to_string()))
+        );
 
         service
             .get_ex("k", Some(10), None, true)
@@ -514,6 +541,34 @@ mod tests {
             .expect("getex options");
         assert!(options.persist);
         assert!(options.expiry_mode.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_string_service_rejects_set_condition_conflicts() {
+        let repo = Arc::new(CaptureRepo::default());
+        let service = StringService::new_with_repository(repo);
+
+        let err = service
+            .set("k", "v", None, None, true, true, false, false, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service
+            .set(
+                "k",
+                "v",
+                None,
+                None,
+                true,
+                false,
+                false,
+                false,
+                Some(SetCondition::IfEq("old".to_string())),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
     }
 
     #[tokio::test]

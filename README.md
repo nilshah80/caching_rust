@@ -5,7 +5,7 @@ A high-performance Redis caching service built in Rust, providing a comprehensiv
 ## Features
 
 ### Core Data Types
-- **Strings**: GET, SET, MGET, MSET, INCR, DECR, APPEND, STRLEN, GETRANGE, SETRANGE, GETEX, GETDEL
+- **Strings**: GET, SET, MGET, MSET, INCR, DECR, APPEND, STRLEN, GETRANGE, SETRANGE, GETEX, GETDEL, Redis 8.4 SET predicates
 - **Hashes**: HGET, HSET, HSETNX, HGETALL, HMGET, HDEL, HEXISTS, HKEYS, HVALS, HLEN, HINCRBY, HINCRBYFLOAT, HSTRLEN, HRANDFIELD, HSCAN
 - **Lists**: LPUSH, RPUSH, LPOP, RPOP, LRANGE, LLEN, LINDEX, LSET, LINSERT, LREM, LTRIM, LPOS, LMOVE, LMPOP + blocking variants (BLPOP, BRPOP, BLMOVE, BLMPOP) with SSE streaming
 - **Sets**: SADD, SREM, SMEMBERS, SISMEMBER, SCARD, SDIFF, SINTER, SUNION, SPOP, SRANDMEMBER
@@ -114,7 +114,7 @@ cargo run --release
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/v1/strings/{key}` | Get string value |
-| PUT | `/api/v1/strings/{key}` | Set string value |
+| PUT | `/api/v1/strings/{key}` | Set string value with Redis SET options, including Redis 8.4 `if_eq`/`if_ne`/`if_deq`/`if_dne` predicates when available |
 | DELETE | `/api/v1/strings/{key}` | Get and delete (GETDEL) |
 | POST | `/api/v1/strings/mget` | Get multiple keys |
 | POST | `/api/v1/strings/mset` | Set multiple keys |

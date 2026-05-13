@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::domain::entities::{
-    AppendResult, GetExOptions, MGetResult, RangeResult, SetOptions, SetRangeResult, SetResult,
-    StringValue,
+    AppendResult, GetExOptions, MGetResult, RangeResult, SetCondition, SetOptions, SetRangeResult,
+    SetResult, StringValue,
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
@@ -84,6 +84,21 @@ impl StringRepository for RedisStringRepository {
         if options.xx {
             cmd.arg("XX");
         }
+        match &options.condition {
+            Some(SetCondition::IfEq(v)) => {
+                cmd.arg("IFEQ").arg(v);
+            }
+            Some(SetCondition::IfNe(v)) => {
+                cmd.arg("IFNE").arg(v);
+            }
+            Some(SetCondition::IfDeq(d)) => {
+                cmd.arg("IFDEQ").arg(d);
+            }
+            Some(SetCondition::IfDne(d)) => {
+                cmd.arg("IFDNE").arg(d);
+            }
+            None => {}
+        }
         if options.get {
             cmd.arg("GET");
         }
@@ -99,16 +114,20 @@ impl StringRepository for RedisStringRepository {
         // Parse result
         let (success, previous_value) = match result {
             redis::Value::Okay => (true, None),
-            redis::Value::Nil => (false, None),
+            redis::Value::Nil => (set_succeeded_with_missing_previous(&options), None),
             redis::Value::BulkString(bytes) => {
                 let prev = String::from_utf8_lossy(&bytes).to_string();
-                (true, Some(prev))
+                (
+                    set_succeeded_with_previous(bytes.as_slice(), &prev, &options),
+                    Some(prev),
+                )
             }
             redis::Value::SimpleString(s) => {
                 if s == "OK" {
                     (true, None)
                 } else {
-                    (true, Some(s))
+                    let success = set_succeeded_with_previous(s.as_bytes(), &s, &options);
+                    (success, Some(s))
                 }
             }
             _ => (true, None),
@@ -416,6 +435,50 @@ impl StringRepository for RedisStringRepository {
     }
 }
 
+fn set_succeeded_with_missing_previous(options: &SetOptions) -> bool {
+    if !options.get {
+        return false;
+    }
+    if options.xx {
+        return false;
+    }
+    match &options.condition {
+        Some(SetCondition::IfEq(_) | SetCondition::IfDeq(_)) => false,
+        Some(SetCondition::IfNe(_) | SetCondition::IfDne(_)) | None => true,
+    }
+}
+
+fn set_succeeded_with_previous(
+    previous_bytes: &[u8],
+    previous: &str,
+    options: &SetOptions,
+) -> bool {
+    if !options.get {
+        return true;
+    }
+    if options.nx {
+        return false;
+    }
+    if options.xx {
+        return true;
+    }
+    match &options.condition {
+        Some(SetCondition::IfEq(expected)) => previous == expected,
+        Some(SetCondition::IfNe(rejected)) => previous != rejected,
+        Some(SetCondition::IfDeq(expected_digest)) => {
+            digest_matches(previous_bytes, expected_digest)
+        }
+        Some(SetCondition::IfDne(rejected_digest)) => {
+            !digest_matches(previous_bytes, rejected_digest)
+        }
+        None => true,
+    }
+}
+
+fn digest_matches(value: &[u8], expected_digest: &str) -> bool {
+    format!("{:016x}", xxhash_rust::xxh3::xxh3_64(value)).eq_ignore_ascii_case(expected_digest)
+}
+
 /// Parse the complex nested Redis value returned by LCS ... IDX
 fn parse_lcs_idx_result(value: redis::Value) -> Result<LcsResult, CacheError> {
     // Redis returns: ["matches", [match1, match2, ...], "len", total_len]
@@ -494,5 +557,106 @@ fn parse_integer(value: &redis::Value) -> Result<i64, CacheError> {
         _ => Err(CacheError::Internal(
             "Expected integer in LCS response".to_string(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_success_with_missing_previous_when_get_was_used() {
+        let base = SetOptions {
+            get: true,
+            ..Default::default()
+        };
+        assert!(set_succeeded_with_missing_previous(&base));
+
+        assert!(set_succeeded_with_missing_previous(&SetOptions {
+            get: true,
+            nx: true,
+            ..Default::default()
+        }));
+        assert!(!set_succeeded_with_missing_previous(&SetOptions {
+            get: true,
+            xx: true,
+            ..Default::default()
+        }));
+        assert!(!set_succeeded_with_missing_previous(&SetOptions {
+            get: true,
+            condition: Some(SetCondition::IfEq("old".to_string())),
+            ..Default::default()
+        }));
+        assert!(set_succeeded_with_missing_previous(&SetOptions {
+            get: true,
+            condition: Some(SetCondition::IfNe("old".to_string())),
+            ..Default::default()
+        }));
+    }
+
+    #[test]
+    fn test_set_success_with_previous_when_get_was_used() {
+        let previous = "old";
+        assert!(set_succeeded_with_previous(
+            previous.as_bytes(),
+            previous,
+            &SetOptions {
+                get: true,
+                xx: true,
+                ..Default::default()
+            },
+        ));
+        assert!(!set_succeeded_with_previous(
+            previous.as_bytes(),
+            previous,
+            &SetOptions {
+                get: true,
+                nx: true,
+                ..Default::default()
+            },
+        ));
+        assert!(set_succeeded_with_previous(
+            previous.as_bytes(),
+            previous,
+            &SetOptions {
+                get: true,
+                condition: Some(SetCondition::IfEq("old".to_string())),
+                ..Default::default()
+            },
+        ));
+        assert!(!set_succeeded_with_previous(
+            previous.as_bytes(),
+            previous,
+            &SetOptions {
+                get: true,
+                condition: Some(SetCondition::IfNe("old".to_string())),
+                ..Default::default()
+            },
+        ));
+    }
+
+    #[test]
+    fn test_set_success_with_digest_predicates_when_get_was_used() {
+        let previous = b"old";
+        let digest = format!("{:016x}", xxhash_rust::xxh3::xxh3_64(previous));
+
+        assert!(set_succeeded_with_previous(
+            previous,
+            "old",
+            &SetOptions {
+                get: true,
+                condition: Some(SetCondition::IfDeq(digest.clone())),
+                ..Default::default()
+            },
+        ));
+        assert!(!set_succeeded_with_previous(
+            previous,
+            "old",
+            &SetOptions {
+                get: true,
+                condition: Some(SetCondition::IfDne(digest)),
+                ..Default::default()
+            },
+        ));
     }
 }
