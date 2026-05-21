@@ -1999,4 +1999,47 @@ mod tests {
             "/api/v1/admin/client/unblock should be present when client_unblock is on"
         );
     }
+
+    #[test]
+    fn test_stream_block_ms_openapi_has_minimum_without_maximum() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI spec");
+
+        for schema_name in ["StreamReadRequest", "StreamReadGroupRequest"] {
+            let pointer = format!("/components/schemas/{schema_name}/properties/block_ms");
+            let block_ms_schema = spec.pointer(&pointer).expect("block_ms schema");
+
+            assert_eq!(
+                find_numeric_keyword(block_ms_schema, "minimum"),
+                Some(1.0),
+                "{schema_name}.block_ms should document minimum: 1"
+            );
+            assert!(
+                !contains_keyword(block_ms_schema, "maximum"),
+                "{schema_name}.block_ms should not document an upper bound"
+            );
+        }
+    }
+
+    fn find_numeric_keyword(value: &serde_json::Value, key: &str) -> Option<f64> {
+        match value {
+            serde_json::Value::Object(map) => map
+                .get(key)
+                .and_then(serde_json::Value::as_f64)
+                .or_else(|| map.values().find_map(|v| find_numeric_keyword(v, key))),
+            serde_json::Value::Array(values) => {
+                values.iter().find_map(|v| find_numeric_keyword(v, key))
+            }
+            _ => None,
+        }
+    }
+
+    fn contains_keyword(value: &serde_json::Value, key: &str) -> bool {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.contains_key(key) || map.values().any(|v| contains_keyword(v, key))
+            }
+            serde_json::Value::Array(values) => values.iter().any(|v| contains_keyword(v, key)),
+            _ => false,
+        }
+    }
 }

@@ -10,6 +10,7 @@ use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     BlockingPopResult, InsertPosition, LMPopResult, LPosOptions, ListDirection, ListRepository,
 };
+use crate::infrastructure::redis::blocking::query_with_blocking_timeout;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
 /// Redis implementation of ListRepository
@@ -255,7 +256,9 @@ impl ListRepository for RedisListRepository {
         }
         cmd.arg(timeout.as_secs());
 
-        let result: Option<(String, String)> = cmd.query_async(&mut conn).await?;
+        let result: Option<(String, String)> =
+            query_with_blocking_timeout(&mut conn, &mut cmd, timeout, self.pool.response_timeout())
+                .await?;
         Ok(result.map(|(key, value)| BlockingPopResult { key, value }))
     }
 
@@ -271,7 +274,9 @@ impl ListRepository for RedisListRepository {
         }
         cmd.arg(timeout.as_secs());
 
-        let result: Option<(String, String)> = cmd.query_async(&mut conn).await?;
+        let result: Option<(String, String)> =
+            query_with_blocking_timeout(&mut conn, &mut cmd, timeout, self.pool.response_timeout())
+                .await?;
         Ok(result.map(|(key, value)| BlockingPopResult { key, value }))
     }
 
@@ -284,14 +289,15 @@ impl ListRepository for RedisListRepository {
         timeout: Duration,
     ) -> Result<Option<String>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: Option<String> = redis::cmd("BLMOVE")
-            .arg(source)
+        let mut cmd = redis::cmd("BLMOVE");
+        cmd.arg(source)
             .arg(destination)
             .arg(src_dir.as_str())
             .arg(dst_dir.as_str())
-            .arg(timeout.as_secs())
-            .query_async(&mut conn)
-            .await?;
+            .arg(timeout.as_secs());
+        let result: Option<String> =
+            query_with_blocking_timeout(&mut conn, &mut cmd, timeout, self.pool.response_timeout())
+                .await?;
         Ok(result)
     }
 
@@ -302,12 +308,11 @@ impl ListRepository for RedisListRepository {
         timeout: Duration,
     ) -> Result<Option<String>, CacheError> {
         let mut conn = self.pool.get().await?;
-        let result: Option<String> = redis::cmd("BRPOPLPUSH")
-            .arg(source)
-            .arg(destination)
-            .arg(timeout.as_secs())
-            .query_async(&mut conn)
-            .await?;
+        let mut cmd = redis::cmd("BRPOPLPUSH");
+        cmd.arg(source).arg(destination).arg(timeout.as_secs());
+        let result: Option<String> =
+            query_with_blocking_timeout(&mut conn, &mut cmd, timeout, self.pool.response_timeout())
+                .await?;
         Ok(result)
     }
 
@@ -351,7 +356,9 @@ impl ListRepository for RedisListRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let result: Option<(String, Vec<String>)> = cmd.query_async(&mut conn).await?;
+        let result: Option<(String, Vec<String>)> =
+            query_with_blocking_timeout(&mut conn, &mut cmd, timeout, self.pool.response_timeout())
+                .await?;
         Ok(result.map(|(key, elements)| LMPopResult { key, elements }))
     }
 }

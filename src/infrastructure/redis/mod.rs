@@ -2,6 +2,7 @@
 //!
 //! Redis connection pool, client, and repository implementations.
 
+pub mod blocking;
 pub mod capabilities;
 pub mod cluster_connection;
 pub mod connection;

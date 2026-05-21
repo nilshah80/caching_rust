@@ -8,11 +8,29 @@ use deadpool_redis::Connection as StandaloneConnection;
 use redis::aio::ConnectionLike;
 use redis::cluster_async::ClusterConnection;
 use redis::{Cmd, Pipeline, RedisFuture, Value};
+use std::time::Duration;
 
 /// A connection that can be either standalone (from deadpool) or cluster-routed.
 pub enum PoolConnection {
     Standalone(StandaloneConnection),
     Cluster(ClusterConnection),
+}
+
+impl PoolConnection {
+    /// Set the response timeout when the underlying connection supports
+    /// per-borrow timeout mutation.
+    ///
+    /// Cluster async connections expose response timeouts through
+    /// `ClusterClient::builder`, so cluster mode is configured at pool
+    /// construction time in `cluster_connection.rs`.
+    pub fn set_response_timeout(&mut self, timeout: Duration) -> bool {
+        if let Self::Standalone(conn) = self {
+            conn.set_response_timeout(timeout);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl ConnectionLike for PoolConnection {

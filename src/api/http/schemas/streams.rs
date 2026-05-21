@@ -310,9 +310,10 @@ pub struct StreamReadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
 
-    /// Block for this many milliseconds (max 30000)
+    /// Block for this many milliseconds (must be greater than 0; service clamps the upper bound)
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(max = 30000))]
+    #[validate(range(min = 1))]
+    #[schema(minimum = 1)]
     pub block_ms: Option<i64>,
 }
 
@@ -431,16 +432,18 @@ pub struct StreamReadGroupRequest {
     #[validate(length(min = 1, message = "Consumer name is required"))]
     pub consumer: String,
 
-    /// Streams and their IDs (use ">" for never-delivered entries)
-    #[validate(length(min = 1, message = "At least one stream is required"), nested)]
+    /// Streams and their IDs (path key is authoritative; empty list defaults to ">")
+    #[validate(nested)]
     pub streams: Vec<StreamIdPair>,
 
     /// Maximum number of entries to return per stream
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<i64>,
 
-    /// Block for this many milliseconds (server-enforced max from configuration)
+    /// Block for this many milliseconds (must be greater than 0; server-enforced max from configuration)
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1))]
+    #[schema(minimum = 1)]
     pub block_ms: Option<i64>,
 
     /// Don't add entries to pending list
@@ -1093,6 +1096,45 @@ mod validation_tests {
     }
 
     #[test]
+    fn stream_read_block_ms_zero_fails() {
+        let req = StreamReadRequest {
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: "0".into(),
+            }],
+            count: None,
+            block_ms: Some(0),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_block_ms_negative_fails() {
+        let req = StreamReadRequest {
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: "0".into(),
+            }],
+            count: None,
+            block_ms: Some(-1),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_block_ms_above_default_max_passes_schema_validation() {
+        let req = StreamReadRequest {
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: "0".into(),
+            }],
+            count: None,
+            block_ms: Some(60_000),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
     fn stream_read_group_blocking_empty_streams_fails() {
         let req = StreamReadGroupBlockingRequest {
             consumer: "c1".into(),
@@ -1144,6 +1186,48 @@ mod validation_tests {
             }],
             count: None,
             timeout_seconds: 5,
+            no_ack: false,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn stream_read_group_block_ms_zero_fails() {
+        let req = StreamReadGroupRequest {
+            consumer: "c1".into(),
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: ">".into(),
+            }],
+            count: None,
+            block_ms: Some(0),
+            no_ack: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_group_block_ms_negative_fails() {
+        let req = StreamReadGroupRequest {
+            consumer: "c1".into(),
+            streams: vec![StreamIdPair {
+                key: "s1".into(),
+                id: ">".into(),
+            }],
+            count: None,
+            block_ms: Some(-1),
+            no_ack: false,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn stream_read_group_empty_streams_passes_schema_validation() {
+        let req = StreamReadGroupRequest {
+            consumer: "c1".into(),
+            streams: vec![],
+            count: None,
+            block_ms: None,
             no_ack: false,
         };
         assert!(req.validate().is_ok());

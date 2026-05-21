@@ -155,7 +155,7 @@ tests/fixtures/sentinel.conf                       -- sentinel config fixture
 ### E2E and CI
 
 ```
-tests/e2e/cluster_test.sh                          -- cluster E2E test script (20 assertions)
+tests/e2e/cluster_test.sh                          -- cluster E2E test script (34 assertions)
 tests/e2e/sentinel_test.sh                         -- sentinel E2E test script (11 assertions)
 docker-compose.cluster-test.yml                    -- all-in-Docker cluster test (service + 3 nodes + test runner)
 docker-compose.sentinel-test.yml                   -- all-in-Docker sentinel test (service + master + replica + 3 sentinels + test runner)
@@ -495,6 +495,7 @@ sentinel-test:
 - **Lua scripts**: EVAL requires all keys to be in the same slot. The existing scripting endpoint already accepts a `keys` array, so the cluster client can route correctly.
 - **Transactions**: MULTI/EXEC only works on a single node. The existing transaction endpoint needs a note that all keys must be in the same hash slot when in cluster mode.
 - **Pub/Sub**: Regular pub/sub broadcasts to all nodes. Sharded pub/sub (SPUBLISH/SSUBSCRIBE) routes by channel hash slot -- already stubbed in the codebase.
+- **Blocking command timeout**: The cluster client does not support per-command response timeout changes. Cluster mode configures the client response timeout to at least `blocking.max_timeout_seconds + 1s` so BLPOP/BZPOPMIN/XREAD-style calls can reach Redis' own timeout instead of the normal command timeout.
 
 ### Sentinel limitations
 

@@ -28,6 +28,9 @@ logs/
 coverage/
 *.profraw
 *.profdata
+/cobertura.xml
+/lcov.info
+/tarpaulin-report.html
 
 # Benchmark results
 criterion/
@@ -48,3 +51,6 @@ docker-compose.override.yml
 .claude/settings.local.json
 AGENTS.md
 CLAUDE.md
+
+# Local scratch files
+/scratch.rs

@@ -17,6 +17,7 @@ use crate::domain::entities::{
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::StreamRepository;
+use crate::infrastructure::redis::blocking::query_with_blocking_timeout;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 use crate::shared::blocking::MAX_BLOCKING_TIMEOUT_SECS;
 
@@ -287,11 +288,18 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("COUNT").arg(count);
         }
 
+        let mut blocking_timeout = None;
         if let Some(block_ms) = options.block_ms {
+            if block_ms <= 0 {
+                return Err(CacheError::InvalidInput(
+                    "block_ms must be greater than 0".to_string(),
+                ));
+            }
             // Enforce max timeout (Architecture Decision 3)
             let max_ms = (MAX_BLOCKING_TIMEOUT_SECS * 1000) as i64;
             let actual_ms = block_ms.min(max_ms);
             cmd.arg("BLOCK").arg(actual_ms);
+            blocking_timeout = Some(Duration::from_millis(actual_ms as u64));
         }
 
         cmd.arg("STREAMS");
@@ -303,7 +311,17 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut conn).await?;
+            if let Some(timeout) = blocking_timeout {
+                query_with_blocking_timeout(
+                    &mut conn,
+                    &mut cmd,
+                    timeout,
+                    self.pool.response_timeout(),
+                )
+                .await?
+            } else {
+                cmd.query_async(&mut conn).await?
+            };
 
         Ok(result.map(Self::parse_read_results))
     }
@@ -335,7 +353,8 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut conn).await?;
+            query_with_blocking_timeout(&mut conn, &mut cmd, timeout, self.pool.response_timeout())
+                .await?;
 
         Ok(result.map(Self::parse_read_results))
     }
@@ -473,11 +492,18 @@ impl StreamRepository for RedisStreamRepository {
             cmd.arg("COUNT").arg(count);
         }
 
+        let mut blocking_timeout = None;
         if let Some(block_ms) = options.block_ms {
+            if block_ms <= 0 {
+                return Err(CacheError::InvalidInput(
+                    "block_ms must be greater than 0".to_string(),
+                ));
+            }
             // Enforce max timeout (Architecture Decision 3)
             let max_ms = (MAX_BLOCKING_TIMEOUT_SECS * 1000) as i64;
             let actual_ms = block_ms.min(max_ms);
             cmd.arg("BLOCK").arg(actual_ms);
+            blocking_timeout = Some(Duration::from_millis(actual_ms as u64));
         }
 
         if options.no_ack {
@@ -493,7 +519,17 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut conn).await?;
+            if let Some(timeout) = blocking_timeout {
+                query_with_blocking_timeout(
+                    &mut conn,
+                    &mut cmd,
+                    timeout,
+                    self.pool.response_timeout(),
+                )
+                .await?
+            } else {
+                cmd.query_async(&mut conn).await?
+            };
 
         Ok(result.map(Self::parse_read_results))
     }
@@ -533,7 +569,8 @@ impl StreamRepository for RedisStreamRepository {
         }
 
         let result: Option<Vec<(String, Vec<(String, Vec<(String, String)>)>)>> =
-            cmd.query_async(&mut conn).await?;
+            query_with_blocking_timeout(&mut conn, &mut cmd, timeout, self.pool.response_timeout())
+                .await?;
 
         Ok(result.map(Self::parse_read_results))
     }

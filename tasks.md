@@ -202,9 +202,9 @@
 
 ## Testing & Deployment ✅
 
-- [x] Unit tests: 1078 tests across all services, repositories, routes, schemas, middleware
-- [x] Integration tests: Docker-based Redis tests via testcontainers
-- [x] E2E tests: Standalone (167 tests), Sentinel (11), Cluster (20) — all passing
+- [x] Unit tests: 1376 tests across all services, repositories, routes, schemas, middleware
+- [x] Integration tests: 27 Docker-based Redis tests via testcontainers
+- [x] E2E tests: Standalone full API (185 passed, 2 skipped), Sentinel (11), Cluster (34) — all passing
 - [x] CI: GitHub Actions (fmt, clippy, test, build)
 - [x] Docker: Multi-stage build, distroless debian13 runtime (64MB image)
 - [x] Production: Release build with LTO, graceful shutdown, Prometheus metrics, rate limiting
@@ -215,11 +215,11 @@
 
 ---
 
-## Phase 10: Redis 8.0+ Feature Support (Planned)
+## Phase 10: Redis 8.0+ Feature Support ✅
 
-> Future enhancements identified from gap analysis against Redis 8.0/8.2/8.4 official documentation.
+> Completed enhancements identified from gap analysis against Redis 8.0/8.2/8.4 official documentation.
 
-### 10.1 Vector Sets (Redis 8.0) 🔴 HIGH PRIORITY
+### 10.1 Vector Sets (Redis 8.0) 🟢 COMPLETED
 
 > Headline Redis 8.0 feature — native vector similarity search for AI/ML workloads. 13 commands.
 
@@ -260,7 +260,7 @@
 - [x] **10.3.2**: Implement FT.HYBRID (hybrid text + vector search with RRF)
 - [x] **10.3.3**: Implement FT.CURSOR READ/DEL (aggregation result pagination)
 
-### 10.4 T-Digest (Probabilistic Module) 🟡 COMPLETED
+### 10.4 T-Digest (Probabilistic Module) 🟢 COMPLETED
 
 > Completes probabilistic coverage (Bloom, Cuckoo, CMS, Top-K done). Quantile estimation for latency monitoring. 14 commands. Gated by the RedisBloom module alongside CMS/TopK.
 
@@ -332,10 +332,10 @@
 
 ---
 
-## Phase 11: Remaining Redis 8.6+ Gap Closure (Planned)
+## Phase 11: Remaining Redis 8.6+ Gap Closure ✅
 
-> Remaining implementation gaps confirmed by code audit against the Redis 8.6 command reference.
-> These are not currently present in repository traits, Redis implementations, HTTP schemas/routes, or E2E tests.
+> Gaps originally confirmed by code audit against the Redis 8.6 command reference.
+> These are now implemented or explicitly documented as out of scope.
 
 ### 11.1 Stream Deletion, Reference Policy, and IDMP (Redis 8.2/8.6) 🟢 COMPLETED
 

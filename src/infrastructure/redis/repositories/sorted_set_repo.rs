@@ -4,12 +4,14 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::{
     LexRange, ScoreRange, ScoredMember, SortedSetRepository, ZAddOptions, ZAddResult,
     ZPopDirection, ZPopResult, ZRangeOptions, ZScanResult, ZSetAlgebraOptions,
 };
+use crate::infrastructure::redis::blocking::query_with_blocking_timeout;
 use crate::infrastructure::redis::connection::InstrumentedPool;
 
 /// Redis implementation of SortedSetRepository
@@ -436,7 +438,13 @@ impl SortedSetRepository for RedisSortedSetRepository {
         }
         cmd.arg(timeout);
 
-        let result: Option<(String, String, f64)> = cmd.query_async(&mut conn).await?;
+        let result: Option<(String, String, f64)> = query_with_blocking_timeout(
+            &mut conn,
+            &mut cmd,
+            Duration::from_secs_f64(timeout),
+            self.pool.response_timeout(),
+        )
+        .await?;
 
         Ok(result.map(|(key, member, score)| ZPopResult {
             key,
@@ -456,7 +464,13 @@ impl SortedSetRepository for RedisSortedSetRepository {
         }
         cmd.arg(timeout);
 
-        let result: Option<(String, String, f64)> = cmd.query_async(&mut conn).await?;
+        let result: Option<(String, String, f64)> = query_with_blocking_timeout(
+            &mut conn,
+            &mut cmd,
+            Duration::from_secs_f64(timeout),
+            self.pool.response_timeout(),
+        )
+        .await?;
 
         Ok(result.map(|(key, member, score)| ZPopResult {
             key,
@@ -513,7 +527,13 @@ impl SortedSetRepository for RedisSortedSetRepository {
             cmd.arg("COUNT").arg(c);
         }
 
-        let result: Option<(String, Vec<(String, f64)>)> = cmd.query_async(&mut conn).await?;
+        let result: Option<(String, Vec<(String, f64)>)> = query_with_blocking_timeout(
+            &mut conn,
+            &mut cmd,
+            Duration::from_secs_f64(timeout),
+            self.pool.response_timeout(),
+        )
+        .await?;
 
         Ok(result.map(|(key, items)| ZPopResult {
             key,

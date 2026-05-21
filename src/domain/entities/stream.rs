@@ -255,7 +255,7 @@ pub struct XReadOptions {
     /// Maximum number of entries to return per stream
     pub count: Option<i64>,
 
-    /// Block for this many milliseconds (0 = block forever)
+    /// Block for this many milliseconds. Service/API callers must use a positive value.
     pub block_ms: Option<i64>,
 }
 
@@ -265,7 +265,7 @@ pub struct XReadGroupOptions {
     /// Maximum number of entries to return per stream
     pub count: Option<i64>,
 
-    /// Block for this many milliseconds (0 = block forever)
+    /// Block for this many milliseconds. Service/API callers must use a positive value.
     pub block_ms: Option<i64>,
 
     /// Don't update last-delivered-id when acknowledging

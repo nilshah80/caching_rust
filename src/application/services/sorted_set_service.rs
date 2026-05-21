@@ -808,9 +808,11 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use crate::test_support::start_redis_container;
+    use crate::test_support::{start_generic_redis_image, start_redis_container};
     use std::sync::Arc;
     use testcontainers::ContainerAsync;
+    use testcontainers::GenericImage;
+    use testcontainers::core::IntoContainerPort;
     use testcontainers_modules::redis::Redis;
 
     async fn start_redis() -> Option<(ContainerAsync<Redis>, String)> {
@@ -820,6 +822,22 @@ mod integration_tests {
     async fn pool_with_redis() -> Option<(ContainerAsync<Redis>, Arc<InstrumentedPool>)> {
         let (container, redis_url) = start_redis().await?;
         let pool = Arc::new(InstrumentedPool::new_for_tests_with_url(&redis_url).unwrap());
+        Some((container, pool))
+    }
+
+    async fn pool_with_redis_7_response_timeout(
+        response_timeout: Duration,
+    ) -> Option<(ContainerAsync<GenericImage>, Arc<InstrumentedPool>)> {
+        let image = GenericImage::new("redis", "7.4").with_exposed_port(6379.tcp());
+        let (container, redis_url) =
+            start_generic_redis_image(image, 6379, Duration::from_secs(2), "redis 7.4").await?;
+        let pool = Arc::new(
+            InstrumentedPool::new_for_tests_with_url_and_response_timeout(
+                &redis_url,
+                Some(response_timeout),
+            )
+            .unwrap(),
+        );
         Some((container, pool))
     }
 
@@ -859,6 +877,32 @@ mod integration_tests {
             Err(ref e) if e.to_string().contains("timed out") => {}
             Err(e) => panic!("Unexpected error: {e:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_bzpopmin_server_timeout_can_exceed_pool_response_timeout() {
+        let Some((_container, pool)) =
+            pool_with_redis_7_response_timeout(Duration::from_secs(5)).await
+        else {
+            return;
+        };
+        let service = SortedSetService::new(pool);
+
+        let start = std::time::Instant::now();
+        let result = service
+            .bzpopmin(vec!["nonexistent_key".to_string()], 6)
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            matches!(result, Ok(None)),
+            "expected Redis-side timeout, got {result:?}"
+        );
+        assert!(
+            elapsed.as_millis() >= 5_500,
+            "expected BZPOPMIN to survive past the 5s pool response timeout, got {}ms",
+            elapsed.as_millis()
+        );
     }
 
     /// Test BZPOPMIN returns data immediately when the sorted set has members.

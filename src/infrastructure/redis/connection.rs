@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-#[cfg(not(test))]
 use std::time::Duration;
 use std::time::Instant;
 
@@ -171,6 +170,7 @@ pub struct InstrumentedPool {
     metrics: Arc<PoolMetrics>,
     max_size: usize,
     allow_get: bool,
+    response_timeout: Option<Duration>,
     /// Optional cluster pool. When set, `get()` returns cluster connections
     /// that route commands based on key hash slot (MOVED/ASK handling).
     cluster_pool: Option<crate::infrastructure::redis::cluster_connection::ClusterPool>,
@@ -248,6 +248,7 @@ impl InstrumentedPool {
             metrics,
             max_size: pool_config.max_size as usize,
             allow_get: true,
+            response_timeout: Some(Duration::from_millis(pool_config.command_timeout_ms)),
             cluster_pool: None,
             capability_drift: std::sync::atomic::AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::default(),
@@ -450,6 +451,7 @@ impl InstrumentedPool {
             metrics: Arc::new(PoolMetrics::default()),
             max_size: 1,
             allow_get: false,
+            response_timeout: None,
             cluster_pool: None,
             capability_drift: std::sync::atomic::AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::default(),
@@ -457,7 +459,15 @@ impl InstrumentedPool {
     }
 
     pub fn new_for_tests_with_url(redis_url: &str) -> Result<Self, CacheError> {
+        Self::new_for_tests_with_url_and_response_timeout(redis_url, None)
+    }
+
+    pub fn new_for_tests_with_url_and_response_timeout(
+        redis_url: &str,
+        response_timeout: Option<Duration>,
+    ) -> Result<Self, CacheError> {
         let cfg = Config::from_url(redis_url);
+        let hook_response_timeout = response_timeout;
         let pool = cfg
             .builder()
             .map_err(|e| CacheError::ConnectionFailed(e.to_string()))?
@@ -465,8 +475,11 @@ impl InstrumentedPool {
             .runtime(Runtime::Tokio1)
             // Mirror the production `build_pool` hook so integration tests
             // exercise the same `CLIENT SETINFO` advertisement.
-            .post_create(Hook::async_fn(|conn, _metrics| {
+            .post_create(Hook::async_fn(move |conn, _metrics| {
                 Box::pin(async move {
+                    if let Some(timeout) = hook_response_timeout {
+                        conn.set_response_timeout(timeout);
+                    }
                     advertise_client_info(conn)
                         .await
                         .map_err(deadpool_redis::HookError::Backend)?;
@@ -485,6 +498,7 @@ impl InstrumentedPool {
             metrics: Arc::new(PoolMetrics::default()),
             max_size: 4,
             allow_get: true,
+            response_timeout,
             cluster_pool: None,
             capability_drift: std::sync::atomic::AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::default(),
@@ -754,6 +768,11 @@ impl InstrumentedPool {
     /// In sentinel mode this is the master address, not the sentinel address.
     pub fn resolved_url(&self) -> String {
         self.state.read().map(|s| s.url.clone()).unwrap_or_default()
+    }
+
+    /// Get the default Redis response timeout configured for pooled connections.
+    pub fn response_timeout(&self) -> Option<Duration> {
+        self.response_timeout
     }
 
     /// Swap the inner pool and resolved URL atomically under a single write lock.

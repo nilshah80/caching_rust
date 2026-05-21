@@ -79,6 +79,8 @@ services:
       - REDIS__URL=redis://redis-node-1:7001
       - REDIS__CLUSTER_ENABLED=true
       - REDIS__CLUSTER_NODES=redis://redis-node-1:7001,redis://redis-node-2:7002,redis://redis-node-3:7003
+      - POOL__COMMAND_TIMEOUT_MS=1000
+      - BLOCKING__MAX_TIMEOUT_SECONDS=6
       - ADMIN__API_KEY=dev-admin-key
       - LOG__LEVEL=debug
       - LOG__FORMAT=pretty

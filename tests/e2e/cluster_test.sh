@@ -41,6 +41,17 @@ assert_status_in() {
   FAILED=$((FAILED + 1))
 }
 
+assert_elapsed_at_least() {
+  name=$1; elapsed=$2; minimum=$3
+  if [ "$elapsed" -ge "$minimum" ]; then
+    echo "  PASS  $name (${elapsed}s >= ${minimum}s)"
+    PASSED=$((PASSED + 1))
+  else
+    echo "  FAIL  $name (expected >= ${minimum}s, got ${elapsed}s)"
+    FAILED=$((FAILED + 1))
+  fi
+}
+
 echo "============================================================"
 echo " E2E Cluster Tests"
 echo " Target: $BASE_URL"
@@ -158,6 +169,15 @@ assert_status "LPUSH through cluster (200)" "200" "$status"
 body=$(curl -sf "$BASE_URL/api/v1/lists/cluster-e2e-list/length" || echo "{}")
 assert_contains "LLEN returns 3" "$body" '"length":3'
 
+start_seconds=$(date +%s)
+status=$(curl -so /dev/null -w "%{http_code}" -X POST \
+  "$BASE_URL/api/v1/lists/blpop" \
+  -H "Content-Type: application/json" \
+  -d '{"keys":["cluster-e2e-empty-list"],"timeout_seconds":5}')
+elapsed_seconds=$(( $(date +%s) - start_seconds ))
+assert_status "BLPOP cluster timeout exceeds command timeout (204)" "204" "$status"
+assert_elapsed_at_least "BLPOP cluster waits for Redis timeout" "$elapsed_seconds" 4
+
 echo ""
 echo "--- Scripting through cluster ---"
 status=$(curl -so /dev/null -w "%{http_code}" -X POST \
@@ -206,6 +226,7 @@ echo "--- Cleanup ---"
 curl -sf -X DELETE "$BASE_URL/api/v1/keys/cluster-e2e-test" > /dev/null 2>&1 || true
 curl -sf -X DELETE "$BASE_URL/api/v1/keys/cluster-e2e-hash" > /dev/null 2>&1 || true
 curl -sf -X DELETE "$BASE_URL/api/v1/keys/cluster-e2e-list" > /dev/null 2>&1 || true
+curl -sf -X DELETE "$BASE_URL/api/v1/keys/cluster-e2e-empty-list" > /dev/null 2>&1 || true
 echo "  Cleanup done"
 
 echo ""

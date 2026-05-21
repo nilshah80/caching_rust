@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::domain::entities::{
     AclDryrunResult, AclLogEntry, BgRewriteAofResult, BgSaveResult, ClientInfo, ClientKillOptions,
@@ -14,7 +15,9 @@ use crate::domain::entities::{
 };
 use crate::domain::errors::CacheError;
 use crate::domain::repositories::AdminRepository;
+use crate::infrastructure::redis::blocking::query_with_blocking_timeout;
 use crate::infrastructure::redis::connection::InstrumentedPool;
+use crate::infrastructure::redis::pool_connection::PoolConnection;
 
 /// Redis implementation of AdminRepository
 pub struct RedisAdminRepository {
@@ -894,13 +897,16 @@ impl AdminRepository for RedisAdminRepository {
         numreplicas: u64,
         timeout_ms: u64,
     ) -> Result<WaitAofResult, CacheError> {
-        let mut conn = self.pool.get_standalone().await?;
-        let reply: (i64, i64) = redis::cmd("WAITAOF")
-            .arg(numlocal)
-            .arg(numreplicas)
-            .arg(timeout_ms)
-            .query_async(&mut conn)
-            .await?;
+        let mut conn = PoolConnection::Standalone(self.pool.get_standalone().await?);
+        let mut cmd = redis::cmd("WAITAOF");
+        cmd.arg(numlocal).arg(numreplicas).arg(timeout_ms);
+        let reply: (i64, i64) = query_with_blocking_timeout(
+            &mut conn,
+            &mut cmd,
+            Duration::from_millis(timeout_ms),
+            self.pool.response_timeout(),
+        )
+        .await?;
         Ok(WaitAofResult {
             local: reply.0,
             replicas: reply.1,

@@ -40,8 +40,9 @@ async fn main() -> anyhow::Result<()> {
     // This makes pool.get() return cluster-routed connections for data commands,
     // while get_standalone() still returns direct connections for admin/health.
     let cluster_pool = if settings.redis.cluster_enabled {
-        let cp = ClusterPool::new(&settings.redis)
-            .map_err(|e| anyhow::anyhow!("Failed to create cluster pool: {e}"))?;
+        let cp =
+            ClusterPool::with_timeout_config(&settings.redis, &settings.pool, &settings.blocking)
+                .map_err(|e| anyhow::anyhow!("Failed to create cluster pool: {e}"))?;
         info!("Testing cluster connection...");
         cp.get()
             .await

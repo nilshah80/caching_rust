@@ -479,6 +479,21 @@ mod integration_tests {
         Some((container, service))
     }
 
+    async fn create_service_with_response_timeout(
+        response_timeout: Duration,
+    ) -> Option<(ContainerAsync<Redis>, ListService)> {
+        let (container, redis_url) = start_redis().await?;
+        let pool = Arc::new(
+            InstrumentedPool::new_for_tests_with_url_and_response_timeout(
+                &redis_url,
+                Some(response_timeout),
+            )
+            .unwrap(),
+        );
+        let service = ListService::new(pool);
+        Some((container, service))
+    }
+
     #[tokio::test]
     async fn test_blpop_returns_none_on_timeout() {
         let Some((_container, service)) = create_service().await else {
@@ -503,6 +518,29 @@ mod integration_tests {
             Err(CacheError::RedisError(_)) => {} // Connection-level timeout is acceptable
             Err(e) => panic!("Unexpected error: {e:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_blpop_server_timeout_can_exceed_pool_response_timeout() {
+        let Some((_container, service)) =
+            create_service_with_response_timeout(Duration::from_secs(5)).await
+        else {
+            return;
+        };
+
+        let start = std::time::Instant::now();
+        let result = service.blpop(vec!["nonexistent_key".to_string()], 6).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            matches!(result, Ok(None)),
+            "expected Redis-side timeout, got {result:?}"
+        );
+        assert!(
+            elapsed.as_millis() >= 5_500,
+            "expected BLPOP to survive past the 5s pool response timeout, got {}ms",
+            elapsed.as_millis()
+        );
     }
 
     #[tokio::test]

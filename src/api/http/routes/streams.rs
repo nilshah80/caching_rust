@@ -350,6 +350,8 @@ pub async fn xread(
     State(state): State<AppState>,
     Json(req): Json<StreamReadRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     let streams: Vec<(String, String)> = (&req).into();
     // Apply default count if not specified to prevent unbounded reads
     let mut options = req.to_options();
@@ -560,6 +562,8 @@ pub async fn xreadgroup(
     Path((key, group)): Path<(String, String)>,
     Json(req): Json<StreamReadGroupRequest>,
 ) -> Result<impl IntoResponse, CacheError> {
+    req.validate()
+        .map_err(|e| CacheError::InvalidInput(e.to_string()))?;
     // Use path key with the ID from request (defaults to ">" for new entries)
     // The path key is authoritative - we ignore any key in the request body
     let id = req

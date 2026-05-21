@@ -54,14 +54,18 @@ impl StreamService {
         self.timeout_enforcer.enforce(requested)
     }
 
-    /// Enforce maximum block_ms for XREAD/XREADGROUP options
-    /// Clamps negative values to 0 and applies max_blocking_timeout
-    fn enforce_block_ms(&self, block_ms: Option<i64>) -> Option<i64> {
-        block_ms.map(|ms| {
-            let max_ms = self.timeout_enforcer.max_timeout().as_millis() as i64;
-            // Clamp negative values to 0, then apply max
-            ms.max(0).min(max_ms)
-        })
+    /// Validate and enforce maximum block_ms for XREAD/XREADGROUP options.
+    fn enforce_block_ms(&self, block_ms: Option<i64>) -> Result<Option<i64>, CacheError> {
+        match block_ms {
+            Some(ms) if ms <= 0 => Err(CacheError::InvalidInput(
+                "block_ms must be greater than 0".to_string(),
+            )),
+            Some(ms) => {
+                let max_ms = self.timeout_enforcer.max_timeout().as_millis() as i64;
+                Ok(Some(ms.min(max_ms)))
+            }
+            None => Ok(None),
+        }
     }
 
     // ========== Basic Stream Operations ==========
@@ -168,7 +172,7 @@ impl StreamService {
 
         // Enforce max blocking timeout
         let mut enforced_options = options;
-        enforced_options.block_ms = self.enforce_block_ms(enforced_options.block_ms);
+        enforced_options.block_ms = self.enforce_block_ms(enforced_options.block_ms)?;
 
         self.repository.xread(&streams, enforced_options).await
     }
@@ -304,7 +308,7 @@ impl StreamService {
 
         // Enforce max blocking timeout
         let mut enforced_options = options;
-        enforced_options.block_ms = self.enforce_block_ms(enforced_options.block_ms);
+        enforced_options.block_ms = self.enforce_block_ms(enforced_options.block_ms)?;
 
         self.repository
             .xreadgroup(group, consumer, &streams, enforced_options)
@@ -861,15 +865,83 @@ mod tests {
 
         // Test that block_ms is enforced
         let enforced = service.enforce_block_ms(Some(60000));
-        assert_eq!(enforced, Some(30000));
+        assert_eq!(enforced.unwrap(), Some(30000));
 
         // Test that smaller block_ms is not modified
         let enforced = service.enforce_block_ms(Some(5000));
-        assert_eq!(enforced, Some(5000));
+        assert_eq!(enforced.unwrap(), Some(5000));
 
         // Test that None remains None
         let enforced = service.enforce_block_ms(None);
-        assert!(enforced.is_none());
+        assert!(enforced.unwrap().is_none());
+
+        let err = service.enforce_block_ms(Some(0)).unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+
+        let err = service.enforce_block_ms(Some(-1)).unwrap_err();
+        assert!(matches!(err, CacheError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_xread_rejects_non_positive_block_ms() {
+        let service = create_test_service();
+        let streams = vec![("stream".to_string(), "0-0".to_string())];
+
+        let result = service
+            .xread(
+                streams.clone(),
+                XReadOptions {
+                    count: None,
+                    block_ms: Some(0),
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = service
+            .xread(
+                streams,
+                XReadOptions {
+                    count: None,
+                    block_ms: Some(-1),
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn test_xreadgroup_rejects_non_positive_block_ms() {
+        let service = create_test_service();
+        let streams = vec![("stream".to_string(), ">".to_string())];
+
+        let result = service
+            .xreadgroup(
+                "group",
+                "consumer",
+                streams.clone(),
+                XReadGroupOptions {
+                    count: None,
+                    block_ms: Some(0),
+                    no_ack: false,
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
+
+        let result = service
+            .xreadgroup(
+                "group",
+                "consumer",
+                streams,
+                XReadGroupOptions {
+                    count: None,
+                    block_ms: Some(-1),
+                    no_ack: false,
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(CacheError::InvalidInput(_))));
     }
 
     #[tokio::test]
@@ -1327,6 +1399,21 @@ mod integration_tests {
         Some((container, service))
     }
 
+    async fn create_service_with_response_timeout(
+        response_timeout: Duration,
+    ) -> Option<(ContainerAsync<Redis>, StreamService)> {
+        let (container, redis_url) = start_redis().await?;
+        let pool = Arc::new(
+            InstrumentedPool::new_for_tests_with_url_and_response_timeout(
+                &redis_url,
+                Some(response_timeout),
+            )
+            .unwrap(),
+        );
+        let service = StreamService::new(pool);
+        Some((container, service))
+    }
+
     #[tokio::test]
     async fn test_xread_blocking_returns_none_on_timeout() {
         let Some((_container, service)) = create_service().await else {
@@ -1357,6 +1444,35 @@ mod integration_tests {
             Err(CacheError::RedisError(_)) => {}
             Err(e) => panic!("Unexpected error: {e:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_xread_blocking_server_timeout_can_exceed_pool_response_timeout() {
+        let Some((_container, service)) =
+            create_service_with_response_timeout(Duration::from_secs(5)).await
+        else {
+            return;
+        };
+
+        let start = std::time::Instant::now();
+        let result = service
+            .xread_blocking(
+                vec![("nonexistent_stream".to_string(), "0-0".to_string())],
+                None,
+                6,
+            )
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            matches!(result, Ok(None)),
+            "expected Redis-side timeout, got {result:?}"
+        );
+        assert!(
+            elapsed.as_millis() >= 5_500,
+            "expected XREAD BLOCK to survive past the 5s pool response timeout, got {}ms",
+            elapsed.as_millis()
+        );
     }
 
     #[tokio::test]

@@ -1179,7 +1179,7 @@ echo "--- Keys (RESTORE options) ---"
 RESTORE_SRC="${P}_restore_src"
 RESTORE_DST="${P}_restore_dst"
 
-IFS='|' read -r status body < <(do_request POST "/api/v1/strings/${RESTORE_SRC}" \
+IFS='|' read -r status body < <(do_request PUT "/api/v1/strings/${RESTORE_SRC}" \
     '{"value":"hello"}')
 check_any "SET (seed for RESTORE)" "$status" "$body" 200 400
 
